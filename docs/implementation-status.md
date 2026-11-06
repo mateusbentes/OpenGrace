@@ -22,7 +22,6 @@ regenerate: `pandoc docs/implementation-status.md -o docs/implementation-status.
 | 4c | Cascaded sun shadow mapping with per-slice corner fitting and bilateral filtering. The trapezoidal projective transform of architecture §3.4 (decision 8) is evaluated in 4e. Dual paraboloid point-light shadows are 4d | Done |
 | 4d | Dual paraboloid point-light shadow maps with bilateral filtering | Done |
 | 4e | Trapezoidal projective transform for the sun cascades — implemented behind `CascadeProjection::Trapezoidal` and measured against the fitted default (decision 8 resolved below) | Done |
-| 4d | Dual paraboloid point-light shadow maps with bilateral filtering (this increment). The trapezoidal projective transform of §3.4 (decision 8) remains out of scope | Done |
 | 5 | Deferred lighting: G-buffer, unlimited lights, light volumes | Planned |
 | 6 | Post-processing: HDR, bloom, filmic tonemap, DOF, AA, SSAO-STF | Planned |
 | 7 | Global illumination by light volume propagation | Planned |
