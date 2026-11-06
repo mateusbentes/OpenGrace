@@ -11,7 +11,10 @@ behaviour and published technical descriptions of the original engine.
 
 GRACE 2 was the in-house engine of Reality Pump Studios, a division of TopWare
 Interactive, based in Kraków, Poland. It succeeded the original GRACE engine,
-the one used by *Two Worlds* (2007) and *Two Worlds II* (2010). The official
+the one *Two Worlds II* (2010) ran on; the official site for that game credits
+"the all-new GRACE game engine". The engine behind the first *Two Worlds*
+(2007) is not publicly documented, and this project does not claim it was a
+GRACE version. The official
 site displayed screenshots from games created on GRACE 2, among them the
 unreleased *Sacrilegium*, and the architectural reference records what that
 evidence does and does not support. The studio ceased development in 2015 and
