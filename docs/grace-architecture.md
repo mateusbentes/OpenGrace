@@ -262,10 +262,11 @@ holder never licensed for redistribution.
 translation may be committed. Architectural knowledge from the SDK stays out of
 the public tree. Public documentation is cited; private material is not.
 
-**Unrelated to the Two Worlds II work.** The `.lnd`, `.prt`, `.eco` and `.wd`
-format work targets the shipped game, which used the earlier GRACE engine and a
-different middleware set. Those formats are game data formats, not GRACE 2
-engine internals, and the two bodies of work should not be conflated.
+**Unrelated game-format work.** This project reimplements the GRACE 2 engine
+architecture. Work on shipped game data formats belongs to a separate,
+independent effort with its own repository, scope and licence boundary, and
+the two should not be conflated: nothing in this repository reads, writes or
+documents those formats.
 
 ---
 
