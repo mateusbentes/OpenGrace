@@ -1,0 +1,80 @@
+# OpenGrace
+
+# CMake and build outputs
+/build/
+/build-*/
+/cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+Makefile.*
+build.ninja
+.ninja_deps
+.ninja_log
+Testing/
+compile_commands.json
+
+# Compiled artifacts
+*.o
+*.obj
+*.lo
+*.slo
+*.a
+*.la
+*.lai
+*.so
+*.dylib
+*.dll
+*.lib
+*.exe
+*.out
+*.app/
+*.bundle/
+*.gch
+*.pch
+*.dSYM/
+
+# Dependency and generated module files
+*.d
+
+# Third-party SDKs, cloned locally and never committed
+/physx-3.4/
+/bullet3/
+/angelscript/
+/sdl2/
+/steamworks-sdk/
+
+# Local research and proprietary data
+/original-data/
+/game-data/
+/private-data/
+/research/
+/analysis/
+/ghidra/
+/ida/
+/dumps/
+/traces/
+/saves/
+*.dmp
+*.dump
+*.trace
+*.sav
+*.save
+
+# Assistant tooling
+.aider*
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.user
+*.user.*
+*.suo
+
+# Operating-system files
+.DS_Store
+Thumbs.db

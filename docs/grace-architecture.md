@@ -1,0 +1,308 @@
+# OpenGrace — Architectural Reference
+
+Working specification for an independent, source-only reimplementation of the
+GRACE 2 engine architecture, targeting native Linux x86_64 with OpenGL.
+Apache-2.0 licensed.
+
+This document is compiled **exclusively from publicly available sources**. It
+contains no proprietary material, no extracted data, and no content derived from
+non-public software. See "Sources" at the end for the full provenance list.
+
+---
+
+## 1. What GRACE 2 was
+
+GRACE 2 was the in-house game engine of Reality Pump Studios, a division of
+TopWare Interactive, based in Kraków, Poland. It succeeded the original GRACE
+engine used by *Two Worlds* (2007) and *Two Worlds II* (2010), and powered
+*Raven's Cry* (2015) and the unreleased *Sacrilegium*.
+
+The studio ceased development in 2015. No source release ever occurred, and the
+engine is not available in any form today. The GRACE 2 SDK was distributed as a
+public beta between 2012 and roughly 2014 under a free non-commercial licence;
+that distribution channel is gone.
+
+This project reimplements the architecture described in public documentation. It
+is not affiliated with Reality Pump or TopWare Interactive.
+
+---
+
+## 2. Engine modules
+
+The public feature documentation organises the engine into these functional
+areas. The distributed SDK's module layout corroborates the same decomposition:
+
+| Module | Responsibility |
+| --- | --- |
+| Core | Object model, resource manager, threading, math, curves, profiler |
+| Std | Standard-library layer, containers, strings, localisation |
+| Graphics | Renderer, scene graph, materials, shadows, post-processing |
+| GraphicsShaders | Shader sources and variants |
+| Physics | Plugin-based physics abstraction and backends |
+| Script | AngelScript host and the visual scripting system |
+| Audio | 2D/3D playback, streaming, backend abstraction |
+| Video | Playback service |
+| Motion | Animation, state machines, blending |
+| AI | Agent behaviour |
+| GUI | Retained UI system, fonts, unicode input |
+| Game | Gameplay-level services |
+| App | Application lifecycle, platform entry points |
+
+---
+
+## 3. Documented subsystem capabilities
+
+The following is the published capability set of GRACE 2. It is the fidelity
+baseline for OpenGrace.
+
+### 3.1 Core and general
+
+- Portable, highly optimised C++ with an object-oriented, responsibility-driven
+  design.
+- Task-based multithreading.
+- Resource manager.
+- SSE math library.
+- Spline, B-spline and TCB curve support.
+- Built-in profiler and runtime data validator.
+- Localisation with UTF-8 and UTF-16.
+- Compressed texture support: PVR, ETC, ATC, DXT.
+- Stereoscopic 3D output.
+
+### 3.2 Graphics
+
+- Advanced rendering system with flexible shaders.
+- Target APIs: Direct3D 9, Direct3D 10/11, and **OpenGL 3.0+**.
+- HDR rendering.
+- Bloom.
+- Filmic curve tonemapping.
+- Depth of field with bokeh.
+- Morphological anti-aliasing.
+- SSAO with selective temporal filtering (SSAO-STF).
+- Global illumination by **light volume propagation**.
+
+### 3.3 Lighting
+
+- Supported light types: point, spot, directional, **volumetric**.
+- Forward rendering with dynamic lights, up to four lights per object plus
+  sunlight.
+- Deferred rendering supporting an unlimited number of lights.
+
+### 3.4 Shadows
+
+- Dual paraboloid shadow maps with bilateral filtering.
+- Dynamic sunlight shadows using trapezoidal cascaded shadow mapping with
+  bilateral filtering.
+
+### 3.5 Scripting
+
+- **AngelScript** for text-based scripting.
+- **Tetragramaton** for visual scripting, referred to in the engine code as VAS
+  (Visual AngelScript). Visual blocks are types registered into the AngelScript
+  engine; each graph has a single entry point treated as a normal AngelScript
+  function and callable from script by name.
+- Both scripting modes ship with an editor and a debugger.
+- Scripting operates at three levels: network, application, and scene.
+
+### 3.6 Physics
+
+- **Plugin-based physics architecture**, supporting PhysX, Bullet, and Box2D as
+  interchangeable backends.
+- Rigid body simulation.
+- Buoyancy forces.
+- Joints.
+- Customisable force fields.
+
+### 3.7 Animation
+
+- Hardware-skinned, compressed skeletal keyframe animation.
+- Bone budgets by platform: 32 bones per object on mobile, 8192 on high-end.
+- State-machine driven animation with blending across up to eight layers.
+- Custom node controllers, including look-at and foot placement.
+- Animation events: hotspots and actions.
+- Blendshapes for morphing.
+
+### 3.8 Scene management
+
+- Data-driven entities.
+- Spatial partitioning selectable among flat, grid, octree, and quadtree.
+- Scene queries.
+- Level of detail.
+
+### 3.9 User interface
+
+- Built-in UI system with standard controls.
+- Font rendering via FreeType.
+- Unicode text rendering and user input.
+- Support for 3D GUI systems.
+
+### 3.10 Sound
+
+- 2D and 3D audio playback and streaming.
+- Supported formats: Ogg Vorbis and WAV.
+- Per-sound reverb.
+- Backends: OpenAL on PC, Android, macOS and iOS; OpenSL on Android; XAudio2 on
+  PC and Xbox; MultiStream on PlayStation 3.
+
+### 3.11 Tools
+
+- More than a dozen editors covering the full content pipeline.
+- Network-based tools optimised for LAN and internet workflows.
+
+---
+
+## 4. Target mapping for OpenGrace
+
+OpenGrace targets Linux x86_64 with OpenGL only. This is a strict subset of the
+original platform matrix, and the choice is well supported: OpenGL 3.0+ was a
+documented GRACE 2 target.
+
+| GRACE 2 area | OpenGrace approach |
+| --- | --- |
+| Direct3D 9/10/11 | Out of scope. OpenGL only. |
+| OpenGL 3.0+ | Primary target. Core profile, GLSL 3.30 or newer. |
+| Console platforms | Out of scope. |
+| Mobile platforms | Out of scope. |
+| PhysX / Bullet / Box2D | Plugin contract preserved; backends chosen by licence fit. |
+| OpenAL / OpenSL / XAudio2 / MultiStream | Plugin contract preserved; OpenAL Soft on Linux. |
+| AngelScript + Tetragramaton | Both reimplemented as engine services. |
+| Editors and network tools | Deferred; out of scope for the first milestones. |
+| Stereoscopic 3D | Deferred. |
+
+### 4.1 Physics decision
+
+GRACE 2's physics layer was explicitly plugin-based, supporting PhysX, Bullet,
+and Box2D behind one abstraction. OpenGrace reproduces that abstraction rather
+than choosing a single engine.
+
+Backend candidates, by licence fit:
+
+| Backend | Licence | Notes |
+| --- | --- | --- |
+| Bullet | zlib | Permissive, no royalty, CPU-first, small surface area |
+| PhysX 3.4 | BSD-3-Clause | Permissive; includes CPU cloth and soft body |
+| Box2D | MIT | 2D only |
+| PhysX 5 | BSD-3-Clause | Cloth, soft body and particles are GPU-exclusive |
+
+Given the Linux CPU-only target, Bullet is the natural first backend, with
+PhysX 3.4 as a second if cloth and soft body fidelity is required. PhysX 5 is
+not a candidate: its deformable features depend on GPU execution.
+
+The abstraction boundary matters more than the first backend. No `bt*`, `Px*`,
+or `b2*` type may appear outside its adapter.
+
+### 4.2 Scripting decision
+
+Both scripting systems are in scope, and the relationship between them is the
+important part: Tetragramaton is not a separate interpreter, it is a graph
+representation whose blocks are AngelScript types. A graph compiles to a
+callable AngelScript entry point.
+
+This means the AngelScript host must support type registration from the visual
+layer from the start. A host that only runs text scripts would have to be
+rebuilt to accommodate VAS later.
+
+Serialisation is an engine-owned concern. AngelScript exposes object member
+iteration and a module-global serialiser, but provides no automatic save format.
+Game state should live in engine-owned structures wherever practical, with the
+script layer holding behaviour rather than authoritative state.
+
+---
+
+## 5. Licensing boundary
+
+This section records what may and may not be done, so the boundary is explicit
+rather than assumed.
+
+**What is public and usable.** The feature documentation, the licence terms, the
+ModDB entry, the developer's forum posts, and the AngelScript project's list of
+applications are all public. Architectural facts drawn from them — module
+decomposition, subsystem responsibilities, backend choices, rendering
+techniques — may be described and implemented freely.
+
+**What is not.** The GRACE 2 SDK was distributed under a free **non-commercial**
+licence. Its headers, libraries, and any content derived from them may not be
+incorporated into this project, redistributed, or used as an implementation
+source. This project is Apache-2.0, which grants unrestricted commercial rights
+to recipients; that grant cannot be extended to material the original rights
+holder never licensed for redistribution.
+
+**Consequences for this repository.** No SDK file, header, excerpt, symbol, or
+translation may be committed. Architectural knowledge from the SDK stays out of
+the public tree. Public documentation is cited; private material is not.
+
+**Unrelated to the Two Worlds II work.** The `.lnd`, `.prt`, `.eco` and `.wd`
+format work targets the shipped game, which used the earlier GRACE engine and a
+different middleware set. Those formats are game data formats, not GRACE 2
+engine internals, and the two bodies of work should not be conflated.
+
+---
+
+## 6. Milestone plan
+
+Sequenced so that each milestone is independently testable and leaves the tree
+buildable.
+
+1. **Core skeleton.** Module layout, application lifecycle, fixed-step loop,
+   deterministic tests. Partially exists.
+2. **Render contract and OpenGL backend.** Platform-neutral renderer interface,
+   null and OpenGL implementations. Partially exists.
+3. **Forward lighting.** Point, spot and directional lights; four dynamic lights
+   per object plus sunlight; shadow mapping.
+4. **Deferred lighting.** G-buffer, unlimited lights, light volume rendering.
+5. **Post-processing chain.** HDR, bloom, filmic tonemapping, depth of field
+   with bokeh, morphological anti-aliasing, SSAO-STF.
+6. **Global illumination.** Light volume propagation.
+7. **Physics contract and Bullet backend.** Rigid bodies, joints, buoyancy,
+   force fields, raycasts, character controller.
+8. **Script host.** AngelScript integration, type registration, serialisation
+   strategy.
+9. **Visual scripting.** Tetragramaton block registry and graph evaluation.
+10. **Animation.** Skeletal keyframes, state machines, layer blending, node
+    controllers, events, blendshapes.
+11. **Scene management.** Data-driven entities, selectable spatial partitioning,
+    scene queries, LOD.
+12. **Audio.** 2D/3D playback, streaming, reverb, OpenAL Soft backend.
+13. **UI.** Retained controls, FreeType fonts, unicode input.
+14. **AI and gameplay.** Agent behaviour, gameplay services.
+
+---
+
+## 7. Open questions
+
+- Which rendering path is primary: forward, deferred, or both selectable at
+  runtime as in the original?
+- Does the Tetragramaton block set need to be reproduced faithfully, or is a
+  functionally equivalent block vocabulary acceptable?
+- What is the save format's relationship to script state, given that AngelScript
+  has no built-in object serialisation?
+- Is the original GRACE 2 codename scheme to be preserved for milestone naming,
+  or is that an unnecessary affectation?
+- Should the engine name remain OpenGrace, given the precedent set by OpenMW,
+  OpenRCT2, OpenTTD and OpenSAGE?
+
+---
+
+## Sources
+
+All publicly accessible as of this writing.
+
+- GRACE 2 official site, archived 2 November 2012:
+  `web.archive.org/web/20121102032243/http://grace2engine.com/`
+- GRACE 2 licence page, archived:
+  `web.archive.org/web/2012/http://grace2engine.com/license/`
+- GRACE 2 features page, archived:
+  `web.archive.org/web/2013/http://grace2engine.com/features/`
+- GRACE 2 download page, archived:
+  `web.archive.org/web/2013/http://grace2engine.com/download/`
+- GRACE 2 engine entry, ModDB:
+  `moddb.com/engines/grace-2`
+- "GRACE2 engine — Our game engine using AngelScript", GameDev.net, May 2012:
+  `gamedev.net/forums/topic/624869/`
+- Applications using AngelScript, AngelCode:
+  `angelcode.com/angelscript/users.html`
+- AngelScript licence:
+  `angelcode.com/angelscript/sdk/docs/manual/doc_license.html`
+- PhysX 3.4 open-source release, BSD-3-Clause, December 2018:
+  `github.com/NVIDIAGameWorks/PhysX-3.4`
+- AngelScript serialisation and reflection reference:
+  `angelcode.com/angelscript/sdk/docs/manual/doc_serialization.html`
