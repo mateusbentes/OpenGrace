@@ -42,6 +42,21 @@ struct ReadbackSample
     std::int32_t stencil;
 };
 
+/// Rendering path selection (milestone 5). Forward is the default and remains
+/// the primary path (decision 1). The enum is closed; setRenderPath rejects
+/// out-of-range values with std::invalid_argument.
+enum class RenderPath : std::uint8_t
+{
+    Forward = 0,   ///< default: submit() shades directly (per-object light limit applies)
+    Deferred = 1   ///< G-buffer pass + lighting pass (per-object limit does not apply)
+};
+
+/// Cap on dynamic lights in one deferred lighting pass (milestone 5). The
+/// original's deferred path was unlimited; here the cap is the shader's uniform
+/// array size, documented and enforced: a submission that would push a frame
+/// past the cap is rejected with std::invalid_argument, never truncated.
+inline constexpr std::uint32_t kMaxDeferredLights = 16;
+
 /// Platform-neutral rendering contract.
 ///
 /// This header must stay free of any platform, windowing or graphics-API
@@ -149,15 +164,34 @@ public:
     virtual void releaseRenderTarget(RenderTarget* target) = 0;
 
     /// Attachment texture of a target, for sampling. nullptr + violation on
-    /// unknown/released/feedback-bound targets.
+    /// unknown/released/feedback-bound targets. Returns colour attachment 0
+    /// when present, otherwise the depth attachment (backward compatible).
     virtual TextureView* renderTargetTexture(RenderTarget* target) = 0;
 
-    // -- Camera ---------------------------------------------------------------
+    /// Attachment texture by index: index < colorAttachmentCount selects that
+    /// colour attachment; index == kDepthAttachment selects the depth
+    /// attachment. nullptr + violation on unknown/released/feedback-bound
+    /// targets or an out-of-range index.
+    virtual TextureView* renderTargetTexture(RenderTarget* target,
+                                             std::uint32_t attachment) = 0;
+
+    // -- Camera and path selection --------------------------------------------
 
     /// Sets the camera used by submit()/draw() (view-projection). Throws
     /// std::invalid_argument on invalid parameters.
     virtual void setCamera(const CameraParams& camera) = 0;
     virtual CameraParams camera() const = 0;
+
+    /// Selects the rendering path. Forward is the default. Throws
+    /// std::invalid_argument on an out-of-range value.
+    virtual void setRenderPath(RenderPath path) = 0;
+    virtual RenderPath renderPath() const = 0;
+
+    /// Presents the current frame. In the forward path this is a no-op (drawing
+    /// already went to the bound target); in the deferred path it runs the
+    /// lighting pass from the G-buffer into the default framebuffer. Generic
+    /// frame presentation, not a technique-named method.
+    virtual void present() = 0;
 
     /// Queues a pixel to be captured by the next readback(). For backends with
     /// a buffer swap, readback captures before the swap (the back buffer is

@@ -75,6 +75,9 @@ using FnTexImage2D = void (*)(GLenum target, GLint level, GLint internalformat, 
 using FnTexParameteri = void (*)(GLenum target, GLenum pname, GLint param);
 using FnDeleteTextures = void (*)(GLsizei n, const GLuint* textures);
 using FnActiveTexture = void (*)(GLenum texture);
+using FnDrawBuffers = void (*)(GLsizei n, const GLenum* bufs);
+using FnDrawBuffer = void (*)(GLenum buf);
+using FnReadBuffer = void (*)(GLenum buf);
 
 /// Minimal runtime loader for the OpenGL entry points the engine uses.
 ///
@@ -149,6 +152,9 @@ public:
     FnTexParameteri glTexParameteri = nullptr;
     FnDeleteTextures glDeleteTextures = nullptr;
     FnActiveTexture glActiveTexture = nullptr;
+    FnDrawBuffers glDrawBuffers = nullptr;
+    FnDrawBuffer glDrawBuffer = nullptr;
+    FnReadBuffer glReadBuffer = nullptr;
 };
 
 }  // namespace grace::render::opengl

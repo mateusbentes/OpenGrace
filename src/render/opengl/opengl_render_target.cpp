@@ -23,38 +23,54 @@ GLenum toPixelType(PixelFormat format)
     return format == PixelFormat::Rgba8 ? GL_UNSIGNED_BYTE : GL_UNSIGNED_INT_24_8;
 }
 
-GLenum toAttachment(PixelFormat format)
+GLenum toColorAttachment(std::uint32_t index)
 {
-    return format == PixelFormat::Rgba8 ? GL_COLOR_ATTACHMENT0 : GL_DEPTH_STENCIL_ATTACHMENT;
+    return GL_COLOR_ATTACHMENT0 + static_cast<GLenum>(index);
 }
 
 }  // namespace
 
 GlRenderTarget::GlRenderTarget(GlLoader& gl, const RenderTargetDesc& desc)
-    : m_gl(gl),
-      m_desc(desc),
-      m_color_view(0, desc.width, desc.height, desc.colorFormat, false),
-      m_depth_view(0, desc.width, desc.height, desc.depthFormat, true)
+    : m_gl(gl), m_desc(desc)
 {
-    validateRenderTargetDesc(desc);
+    validateRenderTargetDesc(desc);  // throws, enforces the attachment cap
 
     m_gl.glGenFramebuffers(1, &m_fbo);
     m_gl.glBindFramebuffer(GL_FRAMEBUFFER, m_fbo);
 
-    if (desc.colorAttachment)
+    m_color_textures.resize(desc.colorAttachmentCount);
+    m_color_views.reserve(desc.colorAttachmentCount);
+    for (std::uint32_t i = 0; i < desc.colorAttachmentCount; ++i)
     {
-        m_gl.glGenTextures(1, &m_color_texture);
-        m_gl.glBindTexture(GL_TEXTURE_2D, m_color_texture);
-        m_gl.glTexImage2D(GL_TEXTURE_2D, 0, toInternalFormat(desc.colorFormat),
+        const PixelFormat format = desc.colorFormats[i];
+        GLuint tex = 0;
+        m_gl.glGenTextures(1, &tex);
+        m_gl.glBindTexture(GL_TEXTURE_2D, tex);
+        m_gl.glTexImage2D(GL_TEXTURE_2D, 0, toInternalFormat(format),
                           static_cast<GLsizei>(desc.width), static_cast<GLsizei>(desc.height), 0,
-                          toPixelFormat(desc.colorFormat), toPixelType(desc.colorFormat),
-                          nullptr);
+                          toPixelFormat(format), toPixelType(format), nullptr);
         m_gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
         m_gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
         m_gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         m_gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        m_gl.glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
-                                    m_color_texture, 0);
+        m_gl.glFramebufferTexture2D(GL_FRAMEBUFFER, toColorAttachment(i), GL_TEXTURE_2D, tex, 0);
+        m_color_textures[i] = tex;
+        m_color_views.emplace_back(tex, desc.width, desc.height, format, false);
+    }
+
+    if (desc.colorAttachmentCount > 0)
+    {
+        GLenum buffers[kMaxColorAttachments];
+        for (std::uint32_t i = 0; i < desc.colorAttachmentCount; ++i)
+            buffers[i] = toColorAttachment(i);
+        m_gl.glDrawBuffers(static_cast<GLsizei>(desc.colorAttachmentCount), buffers);
+        m_gl.glReadBuffer(toColorAttachment(0));
+    }
+    else
+    {
+        // Depth-only target: no colour buffer.
+        m_gl.glDrawBuffer(GL_NONE);
+        m_gl.glReadBuffer(GL_NONE);
     }
 
     if (desc.depthAttachment)
@@ -69,8 +85,10 @@ GlRenderTarget::GlRenderTarget(GlLoader& gl, const RenderTargetDesc& desc)
         m_gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
         m_gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         m_gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        m_gl.glFramebufferTexture2D(GL_FRAMEBUFFER, toAttachment(desc.depthFormat),
-                                    GL_TEXTURE_2D, m_depth_texture, 0);
+        m_gl.glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D,
+                                    m_depth_texture, 0);
+        m_depth_view = GlTextureView(m_depth_texture, desc.width, desc.height, desc.depthFormat,
+                                     true);
     }
 
     const GLenum status = m_gl.glCheckFramebufferStatus(GL_FRAMEBUFFER);
@@ -82,10 +100,6 @@ GlRenderTarget::GlRenderTarget(GlLoader& gl, const RenderTargetDesc& desc)
         destroyGlObjects();
         throw std::runtime_error(std::string("render target incomplete, status ") + buffer);
     }
-
-    // Point the views at the real texture ids now that they exist.
-    m_color_view = GlTextureView(m_color_texture, desc.width, desc.height, desc.colorFormat, false);
-    m_depth_view = GlTextureView(m_depth_texture, desc.width, desc.height, desc.depthFormat, true);
 }
 
 void GlRenderTarget::release()
@@ -96,11 +110,14 @@ void GlRenderTarget::release()
 
 void GlRenderTarget::destroyGlObjects()
 {
-    if (m_color_texture != 0)
-    {
-        m_gl.glDeleteTextures(1, &m_color_texture);
-        m_color_texture = 0;
-    }
+    for (GLuint tex : m_color_textures)
+        if (tex != 0)
+        {
+            GLuint t = tex;
+            m_gl.glDeleteTextures(1, &t);
+        }
+    m_color_textures.clear();
+    m_color_views.clear();
     if (m_depth_texture != 0)
     {
         m_gl.glDeleteTextures(1, &m_depth_texture);

@@ -88,6 +88,9 @@ bool GlLoader::load(ResolveFn resolve, std::string& missingSymbol)
     GRACE_GL_LOAD(glTexParameteri, "glTexParameteri");
     GRACE_GL_LOAD(glDeleteTextures, "glDeleteTextures");
     GRACE_GL_LOAD(glActiveTexture, "glActiveTexture");
+    GRACE_GL_LOAD(glDrawBuffers, "glDrawBuffers");
+    GRACE_GL_LOAD(glDrawBuffer, "glDrawBuffer");
+    GRACE_GL_LOAD(glReadBuffer, "glReadBuffer");
 
 #undef GRACE_GL_LOAD
 

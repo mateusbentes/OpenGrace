@@ -133,7 +133,7 @@ void runContractChecks(Backend& backend, grace::render::ClearColor color,
     grace::render::RenderTargetDesc target_desc;
     target_desc.width = 64;
     target_desc.height = 64;
-    target_desc.colorAttachment = false;
+    target_desc.colorAttachmentCount = 0;
     target_desc.depthAttachment = true;
     target_desc.depthFormat = grace::render::PixelFormat::Depth24Stencil8;
     grace::render::RenderTarget* target = backend.createRenderTarget(target_desc);
@@ -147,7 +147,7 @@ void runContractChecks(Backend& backend, grace::render::ClearColor color,
         grace::render::RenderTargetDesc bad;
         bad.width = 64;
         bad.height = 64;
-        bad.colorAttachment = false;
+        bad.colorAttachmentCount = 0;
         bad.depthAttachment = false;
         bool threw = false;
         try
@@ -181,13 +181,67 @@ void runContractChecks(Backend& backend, grace::render::ClearColor color,
         GRACE_CHECK(threw);
     }
 
+    // Path selection (milestone 5): default forward, switch works, invalid
+    // rejected.
+    {
+        GRACE_CHECK(backend.renderPath() == grace::render::RenderPath::Forward);
+        backend.setRenderPath(grace::render::RenderPath::Deferred);
+        GRACE_CHECK(backend.renderPath() == grace::render::RenderPath::Deferred);
+        backend.setRenderPath(grace::render::RenderPath::Forward);
+        bool threw = false;
+        try
+        {
+            backend.setRenderPath(static_cast<grace::render::RenderPath>(99));
+        }
+        catch (const std::invalid_argument&)
+        {
+            threw = true;
+        }
+        GRACE_CHECK(threw);
+        backend.present();
+    }
+
+    // MRT descriptor (milestone 5, decision 9): two colour attachments + depth,
+    // per-attachment views, cap enforced at creation.
+    {
+        grace::render::RenderTargetDesc mrt;
+        mrt.width = 64;
+        mrt.height = 64;
+        mrt.colorAttachmentCount = 2;
+        mrt.depthAttachment = true;
+        grace::render::RenderTarget* mrtTarget = backend.createRenderTarget(mrt);
+        GRACE_CHECK_EQ(mrtTarget->colorAttachmentCount(), 2u);
+        GRACE_CHECK(backend.renderTargetTexture(mrtTarget, 0) != nullptr);
+        GRACE_CHECK(!backend.renderTargetTexture(mrtTarget, 0)->isDepth());
+        GRACE_CHECK(backend.renderTargetTexture(mrtTarget, 1) != nullptr);
+        GRACE_CHECK(backend.renderTargetTexture(mrtTarget, grace::render::kDepthAttachment) != nullptr);
+        GRACE_CHECK(backend.renderTargetTexture(mrtTarget, grace::render::kDepthAttachment)->isDepth());
+        GRACE_CHECK(backend.renderTargetTexture(mrtTarget, 2) == nullptr);  // violation
+        grace::render::RenderTargetDesc over;
+        over.width = 8;
+        over.height = 8;
+        over.colorAttachmentCount = grace::render::kMaxColorAttachments + 1;
+        bool threw = false;
+        try
+        {
+            static_cast<void>(backend.createRenderTarget(over));
+        }
+        catch (const std::invalid_argument&)
+        {
+            threw = true;
+        }
+        GRACE_CHECK(threw);
+        backend.releaseRenderTarget(mrtTarget);
+    }
+
     // Render-pass composition: begin, clear, draw into the target, end.
+    const std::uint64_t baseViolations = backend.violationCount();
     backend.beginRenderPass(target);
     backend.clear();
     backend.draw(*mesh, *program);
     // Texture view inside a render pass is a feedback loop: violation.
     GRACE_CHECK(backend.renderTargetTexture(target) == nullptr);
-    GRACE_CHECK_EQ(backend.violationCount(), 1u);
+    GRACE_CHECK_EQ(backend.violationCount(), baseViolations + 1u);
     backend.endRenderPass();
     grace::render::TextureView* view = backend.renderTargetTexture(target);
     GRACE_CHECK(view != nullptr);
@@ -202,7 +256,7 @@ void runContractChecks(Backend& backend, grace::render::ClearColor color,
     grace::render::RenderTarget* bogus = reinterpret_cast<grace::render::RenderTarget*>(
         static_cast<std::uintptr_t>(0x1));
     backend.beginRenderPass(bogus);
-    GRACE_CHECK_EQ(backend.violationCount(), 4u);
+    GRACE_CHECK_EQ(backend.violationCount(), baseViolations + 4u);
 
     // Point-light (paraboloid) shadow maps, assembled from the same pass
     // primitives — one pair of depth targets for one point light.
@@ -216,7 +270,7 @@ void runContractChecks(Backend& backend, grace::render::ClearColor color,
         GRACE_CHECK_EQ(pointMaps.entries.size(), 1u);
         GRACE_CHECK(pointMaps.entries[0].front != nullptr);
         GRACE_CHECK(pointMaps.entries[0].back != nullptr);
-        GRACE_CHECK_EQ(backend.violationCount(), 4u);  // no new violations
+        GRACE_CHECK_EQ(backend.violationCount(), baseViolations + 4u);  // no new violations
 
         grace::render::DrawSubmission lit = submission;
         lit.lights.clear();
@@ -224,14 +278,14 @@ void runContractChecks(Backend& backend, grace::render::ClearColor color,
         lit.pointShadows = &pointMaps;
         lit.shadowLightRequests = 1;
         backend.submit(lit);
-        GRACE_CHECK_EQ(backend.violationCount(), 4u);
+        GRACE_CHECK_EQ(backend.violationCount(), baseViolations + 4u);
 
         // Over-budget request: handled as documented (excess lights unshadowed)
         // and counted as a violation, never silently truncated.
         grace::render::DrawSubmission overBudget = lit;
         overBudget.shadowLightRequests = grace::render::kMaxShadowCastingPointLights + 1u;
         backend.submit(overBudget);
-        GRACE_CHECK_EQ(backend.violationCount(), 5u);
+        GRACE_CHECK_EQ(backend.violationCount(), baseViolations + 5u);
 
         for (const grace::render::PointShadowMapEntry& entry : pointMaps.entries)
         {
@@ -248,7 +302,7 @@ void runContractChecks(Backend& backend, grace::render::ClearColor color,
     backend.readback();
     backend.clear();
     backend.submit(submission);
-    GRACE_CHECK_EQ(backend.violationCount(), 9u);  // 5 pre-shutdown + 4 post-shutdown
+    GRACE_CHECK_EQ(backend.violationCount(), baseViolations + 9u);
 
     GRACE_CHECK(!backend.describe().empty());
 }

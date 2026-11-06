@@ -37,6 +37,23 @@ inline mat4 lookAt(const vec3& eye, const vec3& target, const vec3& up)
     return m;
 }
 
+/// Analytic inverse of perspective() (same clip convention). Used by the
+/// deferred lighting pass to reconstruct view/world positions from the depth
+/// buffer. Throws std::invalid_argument on degenerate parameters.
+inline mat4 perspectiveInverse(float fovY, float aspect, float near, float far)
+{
+    if (!(fovY > 0.0f) || !(aspect > 0.0f) || !(near > 0.0f) || !(far > near))
+        throw std::invalid_argument("perspectiveInverse: degenerate parameters");
+    const float f = 1.0f / static_cast<float>(std::tan(fovY * 0.5f));
+    mat4 m{};
+    m(0, 0) = aspect / f;
+    m(1, 1) = 1.0f / f;
+    m(3, 2) = -1.0f;  // row 2, column 3: z' = -w
+    m(2, 3) = (near - far) / (2.0f * far * near);  // row 3, column 2
+    m(3, 3) = (far + near) / (2.0f * far * near);  // row 3, column 3
+    return m;
+}
+
 /// Orthographic projection matrix in the OpenGL clip convention: after the
 /// perspective divide (w = 1 here), x/y are in [-1, 1] and z (depth) is in
 /// [-1, 1], with -1 at the near plane and +1 at the far plane. Used for the

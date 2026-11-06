@@ -224,15 +224,12 @@ NullRenderTarget* NullRenderBackend::findTarget(RenderTarget* target) const
 
 RenderTarget* NullRenderBackend::createRenderTarget(const RenderTargetDesc& desc)
 {
-    if (desc.width == 0 || desc.height == 0)
-        throw std::invalid_argument("render target: width and height must be positive");
-    if (!desc.colorAttachment && !desc.depthAttachment)
-        throw std::invalid_argument(
-            "render target: incomplete (neither a colour nor a depth attachment)");
+    validateRenderTargetDesc(desc);  // throws, enforces the attachment cap
     char buffer[96];
-    std::snprintf(buffer, sizeof(buffer), "createRenderTarget(%ux%u,color=%d,depth=%d)",
+    std::snprintf(buffer, sizeof(buffer), "createRenderTarget(%ux%u,color=%u,depth=%d)",
                   static_cast<unsigned int>(desc.width), static_cast<unsigned int>(desc.height),
-                  desc.colorAttachment ? 1 : 0, desc.depthAttachment ? 1 : 0);
+                  static_cast<unsigned int>(desc.colorAttachmentCount),
+                  desc.depthAttachment ? 1 : 0);
     record(std::string(buffer));
     if (m_shutdown)
     {
@@ -240,8 +237,6 @@ RenderTarget* NullRenderBackend::createRenderTarget(const RenderTargetDesc& desc
         throw std::logic_error("NullRenderBackend::createRenderTarget: backend is shut down");
     }
     auto target = std::make_unique<NullRenderTarget>(desc);
-    target->colorView = NullTextureView(desc.width, desc.height, desc.colorFormat, false);
-    target->depthView = NullTextureView(desc.width, desc.height, desc.depthFormat, true);
     NullRenderTarget* raw = target.get();
     m_targets.push_back(std::move(target));
     return raw;
@@ -326,11 +321,56 @@ TextureView* NullRenderBackend::renderTargetTexture(RenderTarget* target)
         return nullptr;
     }
     if (known->hasColorAttachment())
-        return &known->colorView;
+        return &known->colorViews[0];
     if (known->hasDepthAttachment())
         return &known->depthView;
     ++m_violations;
     return nullptr;
+}
+
+TextureView* NullRenderBackend::renderTargetTexture(RenderTarget* target, std::uint32_t attachment)
+{
+    record("renderTargetTexture");
+    NullRenderTarget* known = findTarget(target);
+    if (known == nullptr || known->released || m_shutdown || m_bound_target == known)
+    {
+        ++m_violations;
+        return nullptr;
+    }
+    if (attachment == kDepthAttachment)
+    {
+        if (!known->hasDepthAttachment())
+        {
+            ++m_violations;
+            return nullptr;
+        }
+        return &known->depthView;
+    }
+    if (attachment < known->colorViews.size())
+        return &known->colorViews[attachment];
+    ++m_violations;
+    return nullptr;
+}
+
+void NullRenderBackend::setRenderPath(RenderPath path)
+{
+    if (path != RenderPath::Forward && path != RenderPath::Deferred)
+        throw std::invalid_argument("setRenderPath: out-of-range render path");
+    record(std::string("setRenderPath(") + (path == RenderPath::Deferred ? "deferred" : "forward") +
+           ")");
+    if (m_shutdown)
+    {
+        ++m_violations;
+        return;
+    }
+    m_render_path = path;
+}
+
+void NullRenderBackend::present()
+{
+    record("present");
+    if (m_shutdown)
+        ++m_violations;
 }
 
 void NullRenderBackend::queueReadback(std::uint32_t x, std::uint32_t y)

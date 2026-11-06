@@ -22,7 +22,7 @@ regenerate: `pandoc docs/implementation-status.md -o docs/implementation-status.
 | 4c | Cascaded sun shadow mapping with per-slice corner fitting and bilateral filtering. The trapezoidal projective transform of architecture §3.4 (decision 8) is evaluated in 4e. Dual paraboloid point-light shadows are 4d | Done |
 | 4d | Dual paraboloid point-light shadow maps with bilateral filtering | Done |
 | 4e | Trapezoidal projective transform for the sun cascades — implemented behind `CascadeProjection::Trapezoidal` and measured against the fitted default (decision 8 resolved below) | Done |
-| 5 | Deferred lighting: G-buffer, unlimited lights, light volumes | Planned |
+| 5 | Deferred lighting alongside forward: MRT G-buffer, lighting pass (this increment). Light-volume GI remains milestone 7 | Done |
 | 6 | Post-processing: HDR, bloom, filmic tonemap, DOF, AA, SSAO-STF | Planned |
 | 7 | Global illumination by light volume propagation | Planned |
 | 8 | Physics contract and the first backend | Planned |
@@ -79,6 +79,8 @@ All results below are real runs, on the tree at the stated commit.
 | 2026-11-06 | same, milestone 4d | Scope and findings: dual paraboloid point-light shadows, budget 2 shadow-casting point lights (two depth targets per light; ~16 MB at 1024), over-budget lights lit without a shadow map + counted violation, projective w=1±dir.z paraboloid projection with per-fragment radial gl_FragDepth, bilateral 3x3 filter. **Bias finding (D4): a constant bias IS sufficient for the paraboloid** because its stored depth is linear in world distance (world bias / (far-near)); the cascade path keeps its clip-depth bias because clip depth is non-linear |
 | 2026-11-06 | same, milestone 4e | OpenGL off: 11/11 Debug; OpenGL on: 19/19 Debug and Release; `-L opengl` 8/8; zero warnings under `-Werror`. Decision 8 resolved with measurements (see above): fitted cascade remains the default; trapezoidal warp is opt-in and fell back safely in the test scene |
 | 2026-11-06 | same, milestone 4e | Check counts: version 4, fixed_step_clock 42, application 26, math 35, lights 36, cascades 133, paraboloid 27, trapezoid 80, opengl_context 20, opengl_render 91, mesh 13, shader 16, lighting 10, shadows 8, point_shadows 7, tsm 11 — all zero failures. TSM readback (both modes): acne/lit `110,110,110,255`, near occluded `0,0,0,255`, far occluded `0,0,0,255`. Density: near 0.0284, far 0.2084 world/texel (ratio 7.34) in the default (fitted) mode; temporal delta 110 on a 7x7 grid for a +0.02 camera shift, both modes |
+| 2026-11-06 | same, milestone 5 | OpenGL off: 11/11 Debug; OpenGL on: 20/20 Debug and Release; `-L opengl` 9/9; zero warnings under `-Werror`. Forward stays the default path and passes unchanged; `application.cpp` untouched (still only setClearColor/clear/shutdown) |
+| 2026-11-06 | same, milestone 5 | Deferred measurements (tests/test_deferred.cpp): G-buffer attachment 0 centre readback `255,255,255,16` (albedo white, a = shininess/1024); parity forward `128,128,128,255` vs deferred `127,127,127,255` (diff 1); 6 dynamic lights (over the forward limit of 4, rejected there) lit the centre at `127,127,127,255` in deferred (expected ~124). Shadow maps are NOT consumed by the deferred path in this increment (documented); the deferred light cap is kMaxDeferredLights = 16 (shader uniform array), over-cap submissions rejected, not truncated. G-buffer: 2x RGBA8 + depth24, normals 8-bit mapped, scalar specular — ~11.1 MB at 1280×720, documented |
 | 2026-11-05 | same, contract extension | OpenGL off: 7/7 Debug; OpenGL on: 11/11 Debug and Release; `-L opengl` 4/4; zero warnings under `-Werror`; check counts: opengl_context 20, opengl_render 47 |
 
 | Published tree did not build with `GRACE_ENABLE_OPENGL=ON` | The lighting commit left the shader header unstaged and published half of a `const` change, so `drawIndexed() const` in the null backend had no matching override | Complete the change set and verify by building a fresh clone |
@@ -207,7 +209,6 @@ not exist before GL 3.2, so "3.0 core" is not a valid request.
    the trapezoidal path is kept as a selectable experiment, off by default, and
    explicitly unproven.
 
-
 9. **What happens when a light exceeds the shadow-casting budget?** The budget
    for shadow-casting point lights is separate from the four-dynamic-lights
    per-object limit. A light beyond it is still lit, without a shadow map, and
@@ -226,6 +227,38 @@ not exist before GL 3.2, so "3.0 core" is not a valid request.
     documented but not observable; making it countable would have surfaced the
     situation in the first measurement instead of the second.
 
+11. **Multiple render targets in the contract, or several single-attachment
+   passes?** **Resolved 2026-11-06 (milestone 5): the contract gains multiple
+   colour attachments** — `RenderTargetDesc` now carries
+   `colorAttachmentCount` + a fixed `colorFormats[kMaxColorAttachments]` array
+   with a **documented hard cap of 4, enforced by createRenderTarget throwing
+   std::invalid_argument** (the cap is never silently applied).
+   `renderTargetTexture(target, index)` selects a colour attachment by index,
+   `kDepthAttachment` selects the depth attachment. Reasoning: a G-buffer
+   written as N single-attachment passes costs N geometry passes and is not a
+   G-buffer; MRT keeps the contract honest (one pass, all attachments) and the
+   pass primitives remain the composition mechanism (decision 7). The deferred
+   path in milestone 5 uses a 2-colour + depth G-buffer; memory at the default
+   1280×720 is 12 bytes/pixel = ~11.1 MB, documented in render_target.hpp's
+   users (G-buffer layout notes in the deferred shader header).
+
+12. **Is a mode-dependent present() acceptable in the contract?** The deferred
+    path added `setRenderPath` and `present` to the render contract. `present`
+    is a no-op in the forward path and runs the lighting pass in the deferred
+    path, so the contract now carries a mode and a mode-dependent operation,
+    which is the shape decision 7 removed when it took the shadow pass out. The
+    concrete symptom is that no caller in this repository drives the deferred
+    path: the application frame loop never calls `present`, so the `grace`
+    binary cannot render in deferred mode even though the contract supports it
+    and both backends implement it. Two resolutions are open. Either the
+    application calls `present` at the end of a frame, which means consciously
+    relaxing the rule that `src/app/application.cpp` does not change, on the
+    grounds that completing a frame is generic rather than a technique; or the
+    technique leaves the contract and a renderer layer in `grace::render`
+    consumes submissions and drives the contract, with the application talking
+    to the renderer. The second is the shape decision 7 pointed at and costs
+    more; the first is cheap and honest only if `present` is understood as frame
+    completion rather than as presentation.
 
 ## Verification commands
 

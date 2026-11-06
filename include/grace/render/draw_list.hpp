@@ -43,6 +43,11 @@ struct DrawSubmission
     /// kMaxDynamicLightsPerObject dynamic lights (explicitly rejected, never
     /// silently truncated), or any invalid light/surface parameter.
     void validate() const;
+
+    /// Same, but with an explicit dynamic-light limit. The deferred path
+    /// (milestone 5) uses kMaxDeferredLights instead of the per-object limit;
+    /// the forward path keeps kMaxDynamicLightsPerObject (documented).
+    void validate(std::uint32_t maxDynamicLights) const;
 };
 
 }  // namespace grace::render

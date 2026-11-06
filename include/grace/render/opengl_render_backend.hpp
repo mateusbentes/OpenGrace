@@ -84,9 +84,13 @@ public:
     void endRenderPass() override;
     void releaseRenderTarget(RenderTarget* target) override;
     TextureView* renderTargetTexture(RenderTarget* target) override;
+    TextureView* renderTargetTexture(RenderTarget* target, std::uint32_t attachment) override;
 
     void setCamera(const CameraParams& camera) override;
     CameraParams camera() const override;
+    void setRenderPath(RenderPath path) override;
+    RenderPath renderPath() const override;
+    void present() override;
 
     /// Queues a pixel to be read back before the next buffer swap. The back
     /// buffer contents are undefined after a swap, so all readback happens
@@ -129,6 +133,9 @@ private:
     void ensureLightingProgram();
     void submitImpl(const DrawSubmission& submission);
     void applyViewport();
+    void ensureDeferredResources();
+    void submitDeferred(const DrawSubmission& submission);
+    void presentImpl();
     void readCenter();
     void captureQueuedReadbacks();
     ClearColor readPixel(std::uint32_t x, std::uint32_t y);

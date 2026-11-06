@@ -167,7 +167,7 @@ int main()
 
         DrawSubmission over = submission;
         over.lights.push_back(SpotLight{});
-        GRACE_CHECK(throwsWith([&] { over.validate(); }, "exceeds the per-object limit of 4"));
+        GRACE_CHECK(throwsWith([&] { over.validate(); }, "exceeds the limit of 4"));
 
         DrawSubmission no_mesh;
         GRACE_CHECK(throwsWith([&] { no_mesh.validate(); }, "null mesh"));

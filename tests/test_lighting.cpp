@@ -207,7 +207,7 @@ int main()
         }
         catch (const std::invalid_argument& error)
         {
-            threw = std::string(error.what()).find("exceeds the per-object limit of 4") !=
+            threw = std::string(error.what()).find("exceeds the limit of 4") !=
                     std::string::npos;
         }
         GRACE_CHECK(threw);

@@ -9,14 +9,18 @@ namespace grace::render {
 
 void DrawSubmission::validate() const
 {
+    validate(kMaxDynamicLightsPerObject);
+}
+
+void DrawSubmission::validate(std::uint32_t maxDynamicLights) const
+{
     if (mesh == nullptr)
         throw std::invalid_argument("draw submission: null mesh");
-    if (lights.size() > kMaxDynamicLightsPerObject)
+    if (lights.size() > maxDynamicLights)
         throw std::invalid_argument(
             "draw submission: " + std::to_string(lights.size()) +
-            " dynamic lights exceeds the per-object limit of " +
-            std::to_string(kMaxDynamicLightsPerObject) +
-            " (docs/grace-architecture.md section 3.3); rejected, not truncated");
+            " dynamic lights exceeds the limit of " + std::to_string(maxDynamicLights) +
+            "; rejected, not truncated");
     if (sun.has_value())
         sun->validate();
     for (const DynamicLight& light : lights)

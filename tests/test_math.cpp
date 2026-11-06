@@ -201,6 +201,24 @@ int main()
         GRACE_CHECK((near(wideClip.x / wideClip.w, 0.5f, 1e-5f)));  // f / aspect = 1 / 2
     }
 
+    // perspectiveInverse is the exact inverse of perspective.
+    {
+        const mat4 p = grace::core::perspective(kPi / 2.0f, 4.0f / 3.0f, 0.1f, 100.0f);
+        const mat4 inv = grace::core::perspectiveInverse(kPi / 2.0f, 4.0f / 3.0f, 0.1f, 100.0f);
+        GRACE_CHECK(near(inv * p, mat4::identity(), 1e-4f));
+        GRACE_CHECK(near(p * inv, mat4::identity(), 1e-4f));
+        bool threw = false;
+        try
+        {
+            static_cast<void>(grace::core::perspectiveInverse(0.0f, 1.0f, 0.1f, 10.0f));
+        }
+        catch (const std::invalid_argument&)
+        {
+            threw = true;
+        }
+        GRACE_CHECK(threw);
+    }
+
     // Orthographic projection (light-space): known points map to known clip
     // coordinates — near -> ndc z -1, far -> +1, corner -> ndc xy (1, 1).
     {

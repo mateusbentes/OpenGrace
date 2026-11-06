@@ -287,7 +287,7 @@ ShadowMap renderShadowCascades(RenderBackend& backend, const DirectionalLight& s
         RenderTargetDesc desc;
         desc.width = config.mapSize;
         desc.height = config.mapSize;
-        desc.colorAttachment = false;  // depth-only: what a shadow pass needs
+        desc.colorAttachmentCount = 0;  // depth-only: what a shadow pass needs
         desc.depthAttachment = true;
         desc.depthFormat = PixelFormat::Depth24Stencil8;
         RenderTarget* target = backend.createRenderTarget(desc);
@@ -383,7 +383,7 @@ PointShadowMaps renderPointShadowMaps(RenderBackend& backend,
             RenderTargetDesc desc;
             desc.width = config.mapSize;
             desc.height = config.mapSize;
-            desc.colorAttachment = false;  // depth-only
+            desc.colorAttachmentCount = 0;  // depth-only
             desc.depthAttachment = true;
             desc.depthFormat = PixelFormat::Depth24Stencil8;
             targets[hemi] = backend.createRenderTarget(desc);

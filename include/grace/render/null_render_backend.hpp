@@ -38,17 +38,27 @@ private:
 class NullRenderTarget final : public RenderTarget
 {
 public:
-    explicit NullRenderTarget(const RenderTargetDesc& desc) : m_desc(desc) {}
+    explicit NullRenderTarget(const RenderTargetDesc& desc) : m_desc(desc)
+    {
+        for (std::uint32_t i = 0; i < desc.colorAttachmentCount; ++i)
+            colorViews.emplace_back(desc.width, desc.height, desc.colorFormats[i], false);
+        if (desc.depthAttachment)
+            depthView = NullTextureView(desc.width, desc.height, desc.depthFormat, true);
+    }
 
     std::uint32_t width() const noexcept override { return m_desc.width; }
     std::uint32_t height() const noexcept override { return m_desc.height; }
-    bool hasColorAttachment() const noexcept override { return m_desc.colorAttachment; }
+    std::uint32_t colorAttachmentCount() const noexcept override
+    {
+        return m_desc.colorAttachmentCount;
+    }
+    bool hasColorAttachment() const noexcept override { return m_desc.colorAttachmentCount > 0; }
     bool hasDepthAttachment() const noexcept override { return m_desc.depthAttachment; }
 
     const RenderTargetDesc& desc() const noexcept { return m_desc; }
     bool released = false;
 
-    NullTextureView colorView;
+    std::vector<NullTextureView> colorViews;
     NullTextureView depthView;
 
 private:
@@ -129,9 +139,14 @@ public:
     void endRenderPass() override;
     void releaseRenderTarget(RenderTarget* target) override;
     TextureView* renderTargetTexture(RenderTarget* target) override;
+    TextureView* renderTargetTexture(RenderTarget* target, std::uint32_t attachment) override;
 
     void setCamera(const CameraParams& camera) override;
     CameraParams camera() const override { return m_camera; }
+
+    void setRenderPath(RenderPath path) override;
+    RenderPath renderPath() const override { return m_render_path; }
+    void present() override;
 
     void queueReadback(std::uint32_t x, std::uint32_t y) override;
     void readback() override;
@@ -159,6 +174,7 @@ private:
     std::vector<std::unique_ptr<NullRenderTarget>> m_targets;
     RenderTarget* m_bound_target = nullptr;
     CameraParams m_camera;
+    RenderPath m_render_path = RenderPath::Forward;
 
     std::uint32_t m_width;
     std::uint32_t m_height;
