@@ -11,6 +11,17 @@ WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
 git clone --quiet --branch "$BRANCH" . "$WORK/tree"
+
+# Report whether the local branch is ahead of the remote, because a clone
+# of the local repository would otherwise verify commits that were never
+# published.
+if git rev-parse --verify --quiet "origin/$BRANCH" >/dev/null; then
+    ahead="$(git rev-list --count "origin/$BRANCH..$BRANCH")"
+    if [ "$ahead" -gt 0 ]; then
+        printf '%s\n' "warning: $BRANCH is $ahead commit(s) ahead of origin/$BRANCH"
+        printf '%s\n' "the tree below is what is committed locally, not what is published"
+    fi
+fi
 cd "$WORK/tree"
 
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug >/dev/null

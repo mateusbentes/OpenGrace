@@ -94,6 +94,7 @@ src/               Implementations mirroring include/
 tests/             Deterministic tests (no external framework)
 docs/              Architectural reference and implementation status
 third_party/       Licence texts and attribution notices for dependencies
+tools/             Development and verification scripts
 ```
 
 ## Development principles
