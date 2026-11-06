@@ -242,13 +242,13 @@ API-neutral. The application lifecycle also differs, because the application
 does not own its window and the context can be lost and recreated.
 
 macOS is not a target. The published material lists it among supported
-platforms, and the engine shipped a Mac build in its earlier generation, so
-this is a scope decision and not a claim about the original. Apple deprecated
-OpenGL in macOS 10.14 rather than removing it, so a backend remains possible;
-it would be written against an API the platform vendor has abandoned, and that
-is the reason it is out of scope rather than a technical impossibility. The
-distinction matters: deprecated is not the same as absent, and this project
-does not get to call something impossible because it is unattractive.
+platforms, so this is a scope decision and not a claim about the original.
+Apple deprecated OpenGL in macOS 10.14 rather than removing it, so a backend
+remains possible; it would be written against an API the platform vendor has
+abandoned, and that is the reason it is out of scope rather than a technical
+impossibility. The distinction matters: deprecated is not the same as absent,
+and this project does not get to call something impossible because it is
+unattractive.
 
 Android carries one concrete requirement that belongs here rather than in a
 future porting note. The HDR target is a 16-bit float colour attachment, which
