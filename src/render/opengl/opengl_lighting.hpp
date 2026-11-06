@@ -100,8 +100,8 @@ float rangeAtten(float intensity, float range, float d)
 #define GRACE_DEFINE_CASCADE_SHADOW(N)                                        \
     float cascadeShadow##N(vec2 uv, float depth)                             \
     {                                                                        \
-        if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || depth > 1.0) \
-            return 1.0;  /* outside the cascade's map: lit (documented) */   \
+        if (depth > 1.0) return 1.0;  /* beyond the cascade: lit (documented) */ \
+        uv = clamp(uv, 0.0, 1.0);  /* trapezoidal overhang clamps to the edge */ \
         /* 3x3 bilateral kernel: spatial Gaussian (1 2 1 / 2 4 2 / 1 2 1)/16  \
            times a depth-range weight that suppresses samples across depth  \
            discontinuities. */                                             \

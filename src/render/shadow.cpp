@@ -293,7 +293,10 @@ ShadowMap renderShadowCascades(RenderBackend& backend, const DirectionalLight& s
         RenderTarget* target = backend.createRenderTarget(desc);
 
         const core::mat4 lightMatrix =
-            fitCascadeLightMatrix(sun, camera, splits[i], splits[i + 1]);
+            config.projection == CascadeProjection::Trapezoidal
+                ? fitTrapezoidalCascadeLightMatrix(sun, camera, splits[i], splits[i + 1],
+                                                   nullptr)
+                : fitCascadeLightMatrix(sun, camera, splits[i], splits[i + 1]);
 
         // Generic pass composition through the contract.
         backend.beginRenderPass(target);

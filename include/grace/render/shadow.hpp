@@ -10,6 +10,7 @@
 #include "grace/render/light.hpp"
 #include "grace/render/paraboloid.hpp"
 #include "grace/render/render_target.hpp"
+#include "grace/render/trapezoid.hpp"
 
 namespace grace::render {
 
@@ -45,6 +46,20 @@ core::mat4 sunLightSpaceMatrix(const DirectionalLight& sun, const SceneBounds& b
 
 // --- Cascaded shadow mapping (milestone 4c) --------------------------------
 
+/// Light-space projection mode for a cascade (milestone 4e, decision 8).
+/// Fitted is the default: the existing behaviour (axis-aligned ortho box fitted
+/// to the slice corners, uniform texel density in light space). Trapezoidal
+/// builds the trapezoid from the slice and warps it to the unit square with a
+/// projective transform, concentrating texel density near the viewer — at the
+/// cost of temporal instability (the trapezoid depends on the camera position).
+/// Both modes produce the same ShadowMap and feed the same shader; only the
+/// light-space matrix construction differs.
+enum class CascadeProjection : std::uint8_t
+{
+    Fitted = 0,       ///< default; unchanged behaviour
+    Trapezoidal = 1   ///< trapezoidal projective warp (4e)
+};
+
 /// Configuration of the cascaded sun shadow pass.
 struct CascadeConfig
 {
@@ -56,6 +71,7 @@ struct CascadeConfig
                                     ///< (see the depth bias note above)
     float filterTolerance = 0.01f;  ///< bilateral depth-comparison tolerance, [0,1] depth
     bool debug = false;             ///< visualise the cascade index (off by default)
+    CascadeProjection projection = CascadeProjection::Fitted;  ///< 4e, default Fitted
 };
 
 /// A rendered cascaded shadow map: per-cascade depth targets, light-space

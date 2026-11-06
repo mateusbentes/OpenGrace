@@ -51,6 +51,13 @@ target_include_directories(test_paraboloid PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
 add_test(NAME paraboloid COMMAND test_paraboloid)
 
+add_executable(test_trapezoid test_trapezoid.cpp)
+
+target_link_libraries(test_trapezoid PRIVATE grace_render grace_warnings)
+target_include_directories(test_trapezoid PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+add_test(NAME trapezoid COMMAND test_trapezoid)
+
 # CLI tests for the grace executable, checked for their exact exit code
 # through check_exit_code.cmake in script mode (no test framework):
 # 0 = success, 2 = usage error.
@@ -107,6 +114,10 @@ if(GRACE_ENABLE_OPENGL)
     target_link_libraries(test_point_shadows PRIVATE grace_render grace_render_opengl grace_warnings)
     target_include_directories(test_point_shadows PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
+    add_executable(test_tsm test_tsm.cpp)
+    target_link_libraries(test_tsm PRIVATE grace_render grace_render_opengl grace_warnings)
+    target_include_directories(test_tsm PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
     find_program(GRACE_XVFB_RUN NAMES xvfb-run)
     if(GRACE_XVFB_RUN)
         set(GRACE_OPENGL_LAUNCHER "${GRACE_XVFB_RUN};-a")
@@ -114,7 +125,7 @@ if(GRACE_ENABLE_OPENGL)
         set(GRACE_OPENGL_LAUNCHER "")
     endif()
 
-    foreach(test_name test_opengl_context test_opengl_render test_mesh test_shader test_lighting test_shadows test_point_shadows)
+    foreach(test_name test_opengl_context test_opengl_render test_mesh test_shader test_lighting test_shadows test_point_shadows test_tsm)
         add_test(NAME ${test_name}
             COMMAND ${GRACE_OPENGL_LAUNCHER} $<TARGET_FILE:${test_name}>)
         set_tests_properties(${test_name} PROPERTIES

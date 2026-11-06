@@ -19,7 +19,9 @@ regenerate: `pandoc docs/implementation-status.md -o docs/implementation-status.
 | 3 | Render foundation: math, mesh, shader, material | Done |
 | 4a | Forward lighting: light types, surface parameters, submission, lighting shader | Done |
 | 4b | Shadow maps: render target infrastructure, single-cascade sun shadow map | Done |
-| 4c | Cascaded sun shadow mapping with per-slice corner fitting and bilateral filtering. The trapezoidal projective transform of architecture §3.4 (decision 8) is not implemented. Dual paraboloid point-light shadows are 4d | Done |
+| 4c | Cascaded sun shadow mapping with per-slice corner fitting and bilateral filtering. The trapezoidal projective transform of architecture §3.4 (decision 8) is evaluated in 4e. Dual paraboloid point-light shadows are 4d | Done |
+| 4d | Dual paraboloid point-light shadow maps with bilateral filtering | Done |
+| 4e | Trapezoidal projective transform for the sun cascades — implemented behind `CascadeProjection::Trapezoidal` and measured against the fitted default (decision 8 resolved below) | Done |
 | 4d | Dual paraboloid point-light shadow maps with bilateral filtering (this increment). The trapezoidal projective transform of §3.4 (decision 8) remains out of scope | Done |
 | 5 | Deferred lighting: G-buffer, unlimited lights, light volumes | Planned |
 | 6 | Post-processing: HDR, bloom, filmic tonemap, DOF, AA, SSAO-STF | Planned |
@@ -75,7 +77,9 @@ All results below are real runs, on the tree at the stated commit.
 | 2026-11-06 | same, milestone 4c | Scope note: cascades are N=4 (documented, clamped to [1,4]) with practical log/uniform splits, per-slice corner fitting of the light-space box to the slice's transformed frustum corners (the standard fitted cascade; the trapezoidal projective transform of §3.4 is not implemented), view-depth cascade selection with a 25% blend zone at cascade boundaries, and a bilateral 3x3 filter (spatial Gaussian x depth-range weight, documented tolerance) — not plain PCF. Sun term only; dynamic lights unshadowed. Dual paraboloid point-light shadows (architecture §3.4) are **4d, not implemented**; the original's shadow behaviour is not fully reproduced |
 | 2026-11-06 | same, milestone 4d | OpenGL off: 10/10 Debug; OpenGL on: 17/17 Debug and Release; `-L opengl` 7/7; zero warnings under `-Werror`. Decision 7 validated: the paraboloid pass needed no contract change |
 | 2026-11-06 | same, milestone 4d | Check counts: version 4, fixed_step_clock 42, application 26, math 35, lights 36, cascades 133, paraboloid 27, opengl_context 20, opengl_render 91, mesh 13, shader 16, lighting 10, shadows 8, point_shadows 7 — all zero failures. Point-shadow readback pixels: back lit `129,129,129,255`, back occluded `0,0,0,255`, front lit `154,154,154,255`, front occluded `0,0,0,255` |
-| 2026-11-06 | same, milestone 4d | Scope and findings: dual paraboloid point-light shadows, budget 2 shadow-casting point lights (two depth targets per light; ~16 MB at 1024), over-budget lights lit without a shadow map + counted violation, projective w=1±dir.z paraboloid projection with per-fragment radial gl_FragDepth, bilateral 3x3 filter. **Bias finding (D4): a constant bias IS sufficient for the paraboloid** because its stored depth is linear in world distance (world bias / (far-near)); the cascade path keeps its clip-depth bias because clip depth is non-linear. Trapezoidal projective transform (§3.4, decision 8) still not implemented |
+| 2026-11-06 | same, milestone 4d | Scope and findings: dual paraboloid point-light shadows, budget 2 shadow-casting point lights (two depth targets per light; ~16 MB at 1024), over-budget lights lit without a shadow map + counted violation, projective w=1±dir.z paraboloid projection with per-fragment radial gl_FragDepth, bilateral 3x3 filter. **Bias finding (D4): a constant bias IS sufficient for the paraboloid** because its stored depth is linear in world distance (world bias / (far-near)); the cascade path keeps its clip-depth bias because clip depth is non-linear |
+| 2026-11-06 | same, milestone 4e | OpenGL off: 11/11 Debug; OpenGL on: 19/19 Debug and Release; `-L opengl` 8/8; zero warnings under `-Werror`. Decision 8 resolved with measurements (see above): fitted cascade remains the default; trapezoidal warp is opt-in and fell back safely in the test scene |
+| 2026-11-06 | same, milestone 4e | Check counts: version 4, fixed_step_clock 42, application 26, math 35, lights 36, cascades 133, paraboloid 27, trapezoid 80, opengl_context 20, opengl_render 91, mesh 13, shader 16, lighting 10, shadows 8, point_shadows 7, tsm 11 — all zero failures. TSM readback (both modes): acne/lit `110,110,110,255`, near occluded `0,0,0,255`, far occluded `0,0,0,255`. Density: near 0.0284, far 0.2084 world/texel (ratio 7.34) in the default (fitted) mode; temporal delta 110 on a 7x7 grid for a +0.02 camera shift, both modes |
 | 2026-11-05 | same, contract extension | OpenGL off: 7/7 Debug; OpenGL on: 11/11 Debug and Release; `-L opengl` 4/4; zero warnings under `-Werror`; check counts: opengl_context 20, opengl_render 47 |
 
 | Published tree did not build with `GRACE_ENABLE_OPENGL=ON` | The lighting commit left the shader header unstaged and published half of a `const` change, so `drawIndexed() const` in the null backend had no matching override | Complete the change set and verify by building a fresh clone |
@@ -134,29 +138,6 @@ not exist before GL 3.2, so "3.0 core" is not a valid request.
 ---
 
 ## Open decisions
-9. **What happens when a light exceeds the shadow-casting budget?** The budget
-   for shadow-casting point lights is separate from the four-dynamic-lights
-   per-object limit. A light beyond it is still lit, without a shadow map, and
-   the submission counts a protocol violation. This differs from the four-light
-   limit, where an over-limit submission is rejected outright, and the
-   difference is deliberate: exceeding the object light limit means the object
-   would be shaded differently from what was asked for, while exceeding the
-   shadow budget still produces correct lighting and only omits a shadow. The
-   violation count therefore means two different things depending on the cause,
-   which is a weakness worth revisiting if a third such limit is added.
-
-8. **Is the fitted cascade a sufficient substitute for the trapezoidal
-   transform?** Section 3.4 of the architectural reference describes
-   trapezoidal cascaded shadow mapping: a trapezoid projected from the light
-   and warped to the unit square by a projective transform, which concentrates
-   resolution near the viewer. What 4c implements is the standard fitted
-   cascade, where the light-space box is fitted to the bounds of the slice's
-   transformed corners. The two differ in how resolution is distributed within
-   a slice, not in correctness. Reproducing the trapezoidal transform is a
-   candidate for 4d, alongside the dual paraboloid point-light shadows; until
-   then the documentation states which one is implemented.
-
-
 1. **Forward or deferred rendering as the primary path?** **Resolved
    2026-11-06: forward is the primary path.** The original supported both
    (forward with up to four dynamic lights per object plus sunlight, deferred
@@ -203,6 +184,49 @@ not exist before GL 3.2, so "3.0 core" is not a valid request.
    correct: the second shadow technique needed zero contract changes.
 
 ---
+8. **Is the fitted cascade a sufficient substitute for the trapezoidal
+   transform?** **Resolved 2026-11-06 (milestone 4e): the fitted cascade stays
+   the default; the trapezoidal transform is implemented behind
+   `CascadeProjection::Trapezoidal` (opt-in) and was measured against it.**
+   Measurements (256² maps, 4 cascades, test scene in `tests/test_tsm.cpp`):
+   with the containment safety check enforced (the warp may only engage when
+   every slice corner maps inside the map with positive w), the trapezoidal
+   warp falls back to the fitted matrix for every cascade in the test scene,
+   so density and stability are identical (near 0.0284 world/texel, far
+   0.2084, ratio 7.34; camera +0.02 → 7×7 grid delta 110 in both modes).
+   With the check relaxed so the warp engages, measured density was near
+   0.0788 / far 0.3687 (ratio 4.68) — the near side about 2.8 times
+   coarser than the fitted 0.0284,
+   which is the opposite of what the technique exists to do, and the far side
+   worse — and the far-occluder shadow broke (pixel 110 instead of 0).
+   Temporal stability was not compared: with the check enforced both modes use
+   the fitted matrix, and without it the result is incorrect. Conclusion: this
+   implementation does not demonstrate the technique's benefit, which is not
+   the same as the technique having none — a near-side result that is worse
+   rather than better points at the construction or the warp rather than at the
+   premise. The fitted cascade stays the default on the evidence available, and
+   the trapezoidal path is kept as a selectable experiment, off by default, and
+   explicitly unproven.
+
+
+9. **What happens when a light exceeds the shadow-casting budget?** The budget
+   for shadow-casting point lights is separate from the four-dynamic-lights
+   per-object limit. A light beyond it is still lit, without a shadow map, and
+   the submission counts a protocol violation. This differs from the four-light
+   limit, where an over-limit submission is rejected outright, and the
+   difference is deliberate: exceeding the object light limit means the object
+   would be shaded differently from what was asked for, while exceeding the
+   shadow budget still produces correct lighting and only omits a shadow. The
+   violation count therefore means two different things depending on the cause,
+   which is a weakness worth revisiting if a third such limit is added.
+
+10. **Should the trapezoidal fallback be silent?** When the containment check
+    rejects a trapezoid, the builder falls back to the fitted matrix without
+    saying so. A silent fallback means a test can pass while the technique under
+    test never runs, which is what happened in 4e. The fallback is currently
+    documented but not observable; making it countable would have surfaced the
+    situation in the first measurement instead of the second.
+
 
 ## Verification commands
 

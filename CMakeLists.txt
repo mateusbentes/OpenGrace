@@ -93,7 +93,8 @@ add_library(grace_render STATIC
     src/render/render_target.cpp
     src/render/shadow.cpp
     src/render/camera.cpp
-    src/render/paraboloid.cpp)
+    src/render/paraboloid.cpp
+    src/render/trapezoid.cpp)
 
 target_include_directories(grace_render PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
