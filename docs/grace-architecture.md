@@ -14,8 +14,20 @@ non-public software. See "Sources" at the end for the full provenance list.
 
 GRACE 2 was the in-house game engine of Reality Pump Studios, a division of
 TopWare Interactive, based in Kraków, Poland. It succeeded the original GRACE
-engine, the one used by *Two Worlds* (2007) and *Two Worlds II* (2010). GRACE 2
-itself powered *Raven's Cry* (2015) and the unreleased *Sacrilegium*.
+engine, the one used by *Two Worlds* (2007) and *Two Worlds II* (2010). The
+official site makes the same distinction in its own words: "its previous
+versions have powered ... games from the Two Worlds franchise". GRACE 2 itself
+powered *Raven's Cry* (2015) and the unreleased *Sacrilegium*.
+
+Which titles ran on the engine is harder to establish than the architecture.
+The official site displayed "example screenshots from games that have been
+created on GRACE2", and that gallery showed *Cluster Frenzy*, *4Hunters
+Genesis*, *3switchD* and a port of *Chicken Shoot* for the iPad 2, alongside
+screenshots from *Sacrilegium*. That gallery is the strongest public evidence
+available, and it is thin: promotional screenshots rather than a credits list.
+*Raven's Cry* shipped in 2015 and is associated with the engine in reporting on
+it. Beyond those titles the public record is incomplete, and this document does
+not attempt an exhaustive list.
 
 The architecture recorded here is the engine as the public material describes
 it between 2012 and the studio's closure in 2015, which is its final stage. It
