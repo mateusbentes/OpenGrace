@@ -219,6 +219,25 @@ int main()
         GRACE_CHECK_EQ(backend->violationCount(), 0u);
     }
 
+    // 6b (A3): the ambient term contributes the expected value to an unlit
+    // surface. submission.ambient is the scene term (the renderer fills it
+    // from RendererConfig::ambient); here it is set directly.
+    {
+        DrawSubmission unlit;
+        unlit.mesh = gpu_mesh.get();
+        unlit.material.setSurfaceParams(surface);  // albedo white
+        unlit.ambient = 0.1f;
+        backend->clear();
+        backend->submit(unlit);
+        backend->readback();
+        const ClearColor p = backend->centerPixel();
+        // expected: ambient * albedo = 0.1 linear -> 0.1 * 255 = 25.5 -> 26
+        std::printf("ambient on unlit surface: pixel=%d,%d,%d,%d (expected ~26)\n",
+                    static_cast<int>(p.r), static_cast<int>(p.g), static_cast<int>(p.b),
+                    static_cast<int>(p.a));
+        GRACE_CHECK(withinTol(p, ClearColor{26, 26, 26, 255}, 2));
+    }
+
     GRACE_CHECK_EQ(backend->violationCount(), 0u);
     GRACE_CHECK_EQ(backend->glErrorCount(), 0u);
     backend->shutdown();

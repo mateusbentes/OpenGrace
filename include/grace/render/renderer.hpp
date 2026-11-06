@@ -55,6 +55,10 @@ struct RendererConfig
     PointShadowConfig pointShadows;         ///< paraboloid point shadows (forward)
     bool shadows = true;                    ///< run the shadow passes in forward
     std::uint32_t deferredLightCap = kMaxDeferredLights;
+    /// Scene-global ambient (indirect) term, linear, same units as light
+    /// intensity (milestone 6b, decision 17 — a documented deviation from the
+    /// documented light types, which list no ambient). Default 0.05.
+    float ambient = 0.05f;
     PostConfig post;                        ///< post-processing chain (6a, off by default)
 
     /// Throws std::invalid_argument on invalid values (out-of-range path,

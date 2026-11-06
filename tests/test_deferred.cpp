@@ -182,8 +182,8 @@ int main()
         fwdRenderer.setConfig(fwdCfg);
         fwdRenderer.beginFrame();
         fwdRenderer.submit(ground);
-        fwdRenderer.endFrame();
-        backend->readback();
+        backend->queueReadback(64, 48);
+        fwdRenderer.endFrame();  // captures pre-swap
         const ClearColor fwd = backend->centerPixel();
 
         Renderer defRenderer(*backend);
@@ -193,10 +193,13 @@ int main()
         defRenderer.setConfig(defCfg);
         defRenderer.beginFrame();
         defRenderer.submit(ground);
+        backend->queueReadback(64, 48);
         defRenderer.endFrame();
+        const ClearColor def = backend->lastReadback()[0].color;  // queued pre-swap at endFrame
         // D5: G-buffer attachment 0 contents via readback of the renderer's
         // G-buffer target (albedo rgb + shininess/1024 in a).
         backend->beginRenderPass(defRenderer.gbufferTarget());
+        backend->queueReadback(64, 48);
         backend->readback();
         const ClearColor gbuf0 = backend->centerPixel();
         backend->endRenderPass();
@@ -204,8 +207,6 @@ int main()
                     static_cast<int>(gbuf0.r), static_cast<int>(gbuf0.g),
                     static_cast<int>(gbuf0.b), static_cast<int>(gbuf0.a));
         GRACE_CHECK(withinTol(gbuf0, ClearColor{255, 255, 255, 16}, 2));
-        backend->readback();
-        const ClearColor def = backend->centerPixel();
         std::printf("parity: forward centre=%d,%d,%d,%d  deferred centre=%d,%d,%d,%d  diff=%d\n",
                     static_cast<int>(fwd.r), static_cast<int>(fwd.g), static_cast<int>(fwd.b),
                     static_cast<int>(fwd.a), static_cast<int>(def.r), static_cast<int>(def.g),
@@ -250,10 +251,10 @@ int main()
         defRenderer.setConfig(defCfg);
         defRenderer.beginFrame();
         defRenderer.submit(many);
+        backend->queueReadback(64, 48);
         defRenderer.endFrame();
-        backend->readback();
         const ClearColor p = backend->centerPixel();
-        float expected = 0.5f;  // the sun (ground has sun, ndl = 1 at the centre)
+        float expected = 0.5f + defCfg.ambient;  // sun + scene ambient (ndl = 1 at centre)
         for (int i = 0; i < 6; ++i)
         {
             const float dist = 1.0f + 0.2f * static_cast<float>(i);
@@ -287,8 +288,8 @@ int main()
         fwdRenderer.beginFrame();
         fwdRenderer.submit(ground);
         fwdRenderer.submit(occ);
+        backend->queueReadback(64, 48);
         fwdRenderer.endFrame();
-        backend->readback();
         const ClearColor fwdShadow = backend->centerPixel();
 
         Renderer defRenderer(*backend);
@@ -302,8 +303,8 @@ int main()
         defRenderer.beginFrame();
         defRenderer.submit(ground);
         defRenderer.submit(occ);
+        backend->queueReadback(64, 48);
         defRenderer.endFrame();
-        backend->readback();
         const ClearColor defShadow = backend->centerPixel();
         std::printf("shadow parity: forward centre=%d,%d,%d,%d  deferred centre=%d,%d,%d,%d  diff=%d\n",
                     static_cast<int>(fwdShadow.r), static_cast<int>(fwdShadow.g),
@@ -311,9 +312,12 @@ int main()
                     static_cast<int>(defShadow.r), static_cast<int>(defShadow.g),
                     static_cast<int>(defShadow.b), static_cast<int>(defShadow.a),
                     std::abs(static_cast<int>(fwdShadow.r) - static_cast<int>(defShadow.r)));
-        // The occluder shadows the centre in both paths (sun term zeroed).
-        GRACE_CHECK(withinTol(fwdShadow, ClearColor{0, 0, 0, 255}, 2));
-        GRACE_CHECK(withinTol(defShadow, ClearColor{0, 0, 0, 255}, 2));
+        // Defect fix (6b): occluded surfaces now read the ambient contribution
+        // (0.05 linear * albedo 1 -> 13 in legacy 8-bit), not black, in BOTH
+        // paths — before this change both read 0,0,0,255.
+        const ClearColor ambientPixel{13, 13, 13, 255};
+        GRACE_CHECK(withinTol(fwdShadow, ambientPixel, 2));
+        GRACE_CHECK(withinTol(defShadow, ambientPixel, 2));
     }
 
     GRACE_CHECK_EQ(backend->glErrorCount(), 0u);

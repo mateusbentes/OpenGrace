@@ -30,6 +30,8 @@ void RendererConfig::validate() const
     validatePointShadowConfig(pointShadows);
     if (deferredLightCap == 0)
         throw std::invalid_argument("renderer config: deferredLightCap must be > 0");
+    if (!(ambient >= 0.0f))
+        throw std::invalid_argument("renderer config: ambient must be >= 0 (linear)");
 }
 
 Renderer::Renderer(RenderBackend& backend) : m_backend(backend) {}
@@ -309,6 +311,7 @@ void Renderer::renderForwardFrame()
     {
         if (submission.castOnly)
             continue;  // caster only, not drawn
+        submission.ambient = m_config.ambient;  // scene term from renderer config
         if (m_shadow_map.cascadeCount > 0 && submission.sun.has_value())
             submission.shadow = &m_shadow_map;
         if (!m_point_shadow_maps.entries.empty())
@@ -424,6 +427,7 @@ void Renderer::renderDeferredFrame()
     }
     const int lightCount = static_cast<int>(m_frame_lights.size());
     m_deferred_program->setUniform("lightCount", lightCount);
+    m_deferred_program->setUniform("ambient", m_config.ambient);
     // Shadow uniforms (same layout as the forward path; units 3+ as bound above).
     if (m_shadow_map.cascadeCount > 0)
     {

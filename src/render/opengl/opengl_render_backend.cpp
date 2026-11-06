@@ -726,6 +726,7 @@ void OpenGLRenderBackend::submitImpl(const DrawSubmission& submission)
     program.setUniform("specular", surface.specular);
     program.setUniform("shininess", surface.shininess);
     program.setUniform("emissive", surface.emissive);
+    program.setUniform("ambient", submission.ambient);
 
     if (submission.sun.has_value())
     {

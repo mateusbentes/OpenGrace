@@ -33,6 +33,10 @@ struct DrawSubmission
     /// When true, the submission only casts shadows (it feeds the shadow
     /// passes) and is not drawn (documented; used for occluders).
     bool castOnly = false;
+    /// Scene-global ambient term in linear units, filled in by the renderer
+    /// from RendererConfig::ambient (default 0 here keeps direct-backend
+    /// behaviour unchanged). Documented deviation: not a documented light type.
+    float ambient = 0.0f;
     const ShadowMap* shadow = nullptr;           ///< optional cascaded sun shadow map (4c)
     const PointShadowMaps* pointShadows = nullptr;  ///< optional paraboloid maps (4d)
     /// How many leading point lights in `lights` request a shadow map. More

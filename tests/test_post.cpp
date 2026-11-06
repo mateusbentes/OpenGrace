@@ -80,9 +80,11 @@ ClearColor runScene(OpenGLRenderBackend& backend, Renderer& renderer, const Draw
 {
     renderer.beginFrame();
     renderer.submit(sub);
+    // Queue the readback BEFORE endFrame: swapBuffers (decision 16) captures
+    // queued readbacks pre-swap; the back buffer is undefined after it.
+    backend.queueReadback(backend.width() / 2u, backend.height() / 2u);
     renderer.endFrame();
-    backend.readback();
-    return backend.centerPixel();
+    return backend.centerPixel();  // cached pre-swap value
 }
 
 }  // namespace
@@ -202,12 +204,10 @@ int main()
             renderer.setConfig(cfg);
             renderer.beginFrame();
             renderer.submit(spotSub);
-            renderer.endFrame();
-            // centre, and 4 px / 8 px right of centre (y=48)
             backend->queueReadback(64, 48);
             backend->queueReadback(68, 48);
             backend->queueReadback(72, 48);
-            backend->readback();
+            renderer.endFrame();  // captures the queued readbacks pre-swap
             const ClearColor centre = backend->lastReadback()[0].color;
             const ClearColor halo4 = backend->lastReadback()[1].color;
             const ClearColor halo8 = backend->lastReadback()[2].color;
@@ -228,10 +228,9 @@ int main()
             renderer.setConfig(cfg);
             renderer.beginFrame();
             renderer.submit(spotSub);
-            renderer.endFrame();
             backend->queueReadback(64, 48);
             backend->queueReadback(68, 48);
-            backend->readback();
+            renderer.endFrame();
             const ClearColor centre = backend->lastReadback()[0].color;
             const ClearColor halo4 = backend->lastReadback()[1].color;
             std::printf("bloom off: centre=%d  halo@4px=%d (legacy linear->8bit)\n",
@@ -261,8 +260,9 @@ int main()
         sun.color = vec3{0.5f, 0.5f, 0.5f};
         sunSub.sun = sun;
         const ClearColor p = runScene(*backend, renderer, sunSub);
-        const std::uint8_t expected = expectedTonemap(0.5f);
-        std::printf("deferred + post: linear 0.5 (sun) -> pixel %d (expected %d)\n",
+        // deferred+post now includes the scene ambient (0.05) on top of the sun
+        const std::uint8_t expected = expectedTonemap(0.5f + cfg.ambient);
+        std::printf("deferred + post: linear 0.5 (sun) + ambient 0.05 -> pixel %d (expected %d)\n",
                     static_cast<int>(p.r), static_cast<int>(expected));
         GRACE_CHECK(withinTol(p, ClearColor{expected, expected, expected, 255}, 3));
     }

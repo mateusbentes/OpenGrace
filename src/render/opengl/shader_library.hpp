@@ -57,6 +57,7 @@ uniform vec3 albedo;
 uniform vec3 specular;
 uniform float shininess;
 uniform vec3 emissive;
+uniform float ambient;   // scene-global ambient term, linear (6b, decision 17)
 uniform int hasSun;
 uniform vec3 sunDirection;
 uniform vec3 sunColor;
@@ -220,7 +221,7 @@ void main()
         return;
     }
 
-    vec3 result = emissive;
+    vec3 result = emissive + albedo * vec3(ambient);
     if (hasSun == 1)
     {
         vec3 L = normalize(-sunDirection);
@@ -410,6 +411,7 @@ uniform mat4 invProj;
 uniform mat4 invView;
 uniform vec3 cameraPos;
 uniform vec4 clearColor;
+uniform float ambient;   // scene-global ambient term, linear (6b, decision 17)
 uniform int hasSun;
 uniform vec3 sunDirection;
 uniform vec3 sunColor;
@@ -562,7 +564,7 @@ void main()
         }
     }
 
-    vec3 result = vec3(0.0);
+    vec3 result = albedo * vec3(ambient);
     if (hasSun == 1)
     {
         vec3 L = normalize(-sunDirection);
