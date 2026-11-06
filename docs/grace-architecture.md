@@ -75,8 +75,23 @@ areas. The distributed SDK's module layout corroborates the same decomposition:
 
 ## 3. Documented subsystem capabilities
 
-The following is the published capability set of GRACE 2. It is the fidelity
-baseline for OpenGrace.
+The following is the published capability set of GRACE 2, and it is what this
+project reconstructs against.
+
+It is a specification, not a verified feature list. The product was withdrawn
+while still described as a beta: the official site titled itself "GRACE2
+beta", the SDK was published as version 0.4.1, and the titles the vendor
+exhibited were small games and ports. The project that would have anchored the
+engine, *Sacrilegium*, was cancelled, and the studio closed in 2015. No shipped
+game demonstrates most of what follows, and some entries may have been planned
+rather than present.
+
+The distinction changes how these entries are read. An entry here is a claim a
+vendor made about a product it was still building, and the honest response is
+to implement it and say that is what is happening. Treating an entry's presence
+as evidence that the original behaved that way is what this document tries not
+to do, and where this project departs from an entry, the departure is recorded
+as a decision rather than folded in as if it were fidelity.
 
 ### 3.1 Core and general
 
