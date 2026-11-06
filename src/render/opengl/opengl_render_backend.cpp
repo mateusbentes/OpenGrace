@@ -2,13 +2,21 @@
 
 #include <SDL2/SDL.h>
 
+#include <cmath>
 #include <cstdio>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "grace/core/math/camera.hpp"
+#include "grace/core/math/transform.hpp"
+#include "grace/render/material.hpp"
 #include "grace/render/opengl/gl_loader.hpp"
+
+#include "opengl_mesh.hpp"
+#include "opengl_shader.hpp"
 
 namespace grace::render {
 
@@ -17,15 +25,19 @@ namespace {
 constexpr int kRequestedMajor = 3;
 constexpr int kRequestedMinor = 3;
 
-constexpr const char* kVertexShaderSource = R"(#version 330 core
-layout(location = 0) in vec2 position;
+constexpr float kPi = 3.14159265358979323846f;
+
+// Diagnostic triangle shaders, built on the generic shader/material path.
+constexpr const char* kTriangleVertexShader = R"(#version 330 core
+layout(location = 0) in vec3 position;
+uniform mat4 mvp;
 void main()
 {
-    gl_Position = vec4(position, 0.0, 1.0);
+    gl_Position = mvp * vec4(position, 1.0);
 }
 )";
 
-constexpr const char* kFragmentShaderSource = R"(#version 330 core
+constexpr const char* kTriangleFragmentShader = R"(#version 330 core
 uniform vec4 color;
 out vec4 fragment;
 void main()
@@ -127,10 +139,11 @@ struct OpenGLRenderBackend::Impl
     std::uint64_t gl_errors = 0;
     std::string last_error;
 
-    // Diagnostic triangle resources.
-    GLuint vao = 0;
-    GLuint vbo = 0;
-    GLuint program = 0;
+    // Diagnostic triangle resources, built on the render foundation
+    // (math + mesh + shader + material).
+    std::unique_ptr<GpuMesh> tri_mesh;
+    std::shared_ptr<ShaderProgram> tri_shader;
+    std::shared_ptr<Material> tri_material;
     bool triangle_ready = false;
 
     bool ready() const { return state == State::Initialised; }
@@ -298,9 +311,8 @@ void OpenGLRenderBackend::clear()
 
     // Readback happens before the swap: the back buffer contents are
     // undefined after SDL_GL_SwapWindow.
-    if (impl.config.readback_center)
-        readCenter();
-    captureQueuedReadbacks();
+    if (impl.config.readback_center || !impl.readback_queue.empty())
+        readback();
 
     SDL_GL_SwapWindow(impl.window);
 }
@@ -338,17 +350,12 @@ void OpenGLRenderBackend::shutdownImpl(bool countViolation)
         return;
     }
 
-    if (impl.triangle_ready)
-    {
-        impl.gl.glDeleteProgram(impl.program);
-        impl.gl.glDeleteBuffers(1, &impl.vbo);
-        impl.gl.glDeleteVertexArrays(1, &impl.vao);
-        impl.drainGlErrors("shutdown");
-        impl.triangle_ready = false;
-        impl.program = 0;
-        impl.vbo = 0;
-        impl.vao = 0;
-    }
+    // Release the foundation objects while the context is still current.
+    impl.tri_mesh.reset();
+    impl.tri_shader.reset();
+    impl.tri_material.reset();
+    impl.triangle_ready = false;
+    impl.drainGlErrors("shutdown");
     if (impl.context != nullptr)
     {
         SDL_GL_DeleteContext(impl.context);
@@ -411,6 +418,18 @@ void OpenGLRenderBackend::queueReadback(std::uint32_t x, std::uint32_t y)
 const std::vector<ReadbackSample>& OpenGLRenderBackend::lastReadback() const noexcept
 {
     return m_impl->last_readback;
+}
+
+void OpenGLRenderBackend::readback()
+{
+    Impl& impl = *m_impl;
+    if (!impl.ready())
+    {
+        ++impl.violations;
+        return;
+    }
+    readCenter();
+    captureQueuedReadbacks();
 }
 
 ClearColor OpenGLRenderBackend::readPixel(std::uint32_t x, std::uint32_t y)
@@ -531,51 +550,40 @@ void OpenGLRenderBackend::readCenter()
     impl.has_center = true;
 }
 
-unsigned int OpenGLRenderBackend::compileShader(bool vertex, const char* source)
+std::unique_ptr<ShaderProgram> OpenGLRenderBackend::createShaderProgram(
+    const std::string& vertexSource, const std::string& fragmentSource)
 {
-    Impl& impl = *m_impl;
-    const GLuint shader =
-        impl.gl.glCreateShader(vertex ? GL_VERTEX_SHADER : GL_FRAGMENT_SHADER);
-    impl.gl.glShaderSource(shader, 1, &source, nullptr);
-    impl.gl.glCompileShader(shader);
-    GLint status = GL_FALSE;
-    impl.gl.glGetShaderiv(shader, GL_COMPILE_STATUS, &status);
-    if (status != GL_TRUE)
+    if (!m_impl->ready())
     {
-        GLint length = 0;
-        impl.gl.glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &length);
-        std::string log(static_cast<std::size_t>(length > 0 ? length : 1), '\0');
-        impl.gl.glGetShaderInfoLog(shader, length, nullptr, log.data());
-        impl.gl.glDeleteShader(shader);
-        throw std::runtime_error(std::string("OpenGL ") +
-                                 (vertex ? "vertex" : "fragment") +
-                                 " shader compile failed: " + log);
+        ++m_impl->violations;
+        throw std::logic_error("OpenGLRenderBackend::createShaderProgram: not initialised");
     }
-    return shader;
+    return std::make_unique<opengl::GlShaderProgram>(m_impl->gl, vertexSource, fragmentSource);
 }
 
-unsigned int OpenGLRenderBackend::linkProgram(unsigned int vertexShader,
-                                              unsigned int fragmentShader)
+std::unique_ptr<GpuMesh> OpenGLRenderBackend::createGpuMesh()
+{
+    if (!m_impl->ready())
+    {
+        ++m_impl->violations;
+        throw std::logic_error("OpenGLRenderBackend::createGpuMesh: not initialised");
+    }
+    return std::make_unique<opengl::GlMesh>(m_impl->gl);
+}
+
+void OpenGLRenderBackend::draw(GpuMesh& mesh, ShaderProgram& program)
 {
     Impl& impl = *m_impl;
-    const GLuint program = impl.gl.glCreateProgram();
-    impl.gl.glAttachShader(program, vertexShader);
-    impl.gl.glAttachShader(program, fragmentShader);
-    impl.gl.glLinkProgram(program);
-    impl.gl.glDeleteShader(vertexShader);
-    impl.gl.glDeleteShader(fragmentShader);
-    GLint status = GL_FALSE;
-    impl.gl.glGetProgramiv(program, GL_LINK_STATUS, &status);
-    if (status != GL_TRUE)
+    if (!impl.ready())
     {
-        GLint length = 0;
-        impl.gl.glGetProgramiv(program, GL_INFO_LOG_LENGTH, &length);
-        std::string log(static_cast<std::size_t>(length > 0 ? length : 1), '\0');
-        impl.gl.glGetProgramInfoLog(program, length, nullptr, log.data());
-        impl.gl.glDeleteProgram(program);
-        throw std::runtime_error("OpenGL program link failed: " + log);
+        ++impl.violations;
+        return;
     }
-    return program;
+    impl.gl.glViewport(0, 0, static_cast<GLsizei>(impl.config.width),
+                       static_cast<GLsizei>(impl.config.height));
+    program.use();
+    mesh.drawIndexed();
+    impl.drainGlErrors("draw");
 }
 
 void OpenGLRenderBackend::ensureTriangle()
@@ -584,21 +592,24 @@ void OpenGLRenderBackend::ensureTriangle()
     if (impl.triangle_ready)
         return;
 
-    // NDC triangle covering the centre of the framebuffer.
-    static const GLfloat kVertices[6] = {-0.5f, -0.5f, 0.5f, -0.5f, 0.0f, 0.5f};
+    // Triangle in local space; drawTriangle maps it to clip space through an
+    // mvp matrix composed with the core math module.
+    Mesh mesh;
+    VertexLayout layout;
+    layout.stride = 3 * sizeof(float);
+    layout.attributes.push_back(
+        VertexAttribute{VertexSemantic::Position, ComponentType::Float32, 3, 0, false});
+    mesh.setLayout(layout);
+    mesh.setVertexData(std::vector<float>{-0.5f, -0.5f, 0.0f,  //
+                                          0.5f, -0.5f, 0.0f,   //
+                                          0.0f, 0.5f, 0.0f});
+    mesh.setIndices(std::vector<std::uint32_t>{0, 1, 2});
 
-    impl.gl.glGenVertexArrays(1, &impl.vao);
-    impl.gl.glBindVertexArray(impl.vao);
-    impl.gl.glGenBuffers(1, &impl.vbo);
-    impl.gl.glBindBuffer(GL_ARRAY_BUFFER, impl.vbo);
-    impl.gl.glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(sizeof(kVertices)),
-                         kVertices, GL_STATIC_DRAW);
-    impl.gl.glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, nullptr);
-    impl.gl.glEnableVertexAttribArray(0);
-
-    const GLuint vertex_shader = compileShader(true, kVertexShaderSource);
-    const GLuint fragment_shader = compileShader(false, kFragmentShaderSource);
-    impl.program = linkProgram(vertex_shader, fragment_shader);
+    impl.tri_mesh = createGpuMesh();
+    impl.tri_mesh->upload(mesh);
+    impl.tri_shader = std::shared_ptr<ShaderProgram>(
+        createShaderProgram(kTriangleVertexShader, kTriangleFragmentShader));
+    impl.tri_material = std::make_shared<Material>(impl.tri_shader);
 
     impl.drainGlErrors("ensureTriangle");
     impl.triangle_ready = true;
@@ -613,18 +624,25 @@ void OpenGLRenderBackend::drawTriangle()
     // result is correct for non-square window sizes.
     impl.gl.glViewport(0, 0, static_cast<GLsizei>(impl.config.width),
                        static_cast<GLsizei>(impl.config.height));
-    impl.gl.glUseProgram(impl.program);
+
+    const float aspect = static_cast<float>(impl.config.width) /
+                         static_cast<float>(impl.config.height);
+    const core::mat4 model = core::Transform{}.compose();
+    const core::mat4 view =
+        core::lookAt(core::vec3{0.0f, 0.0f, 1.0f}, core::vec3{0.0f, 0.0f, 0.0f},
+                     core::vec3{0.0f, 1.0f, 0.0f});
+    const core::mat4 projection = core::perspective(kPi / 2.0f, aspect, 0.1f, 100.0f);
+    const core::mat4 mvp = projection * view * model;
+
     const ClearColor color = impl.config.triangle_color;
-    const GLint location = impl.gl.glGetUniformLocation(impl.program, "color");
-    if (location >= 0)
-    {
-        impl.gl.glUniform4f(location, static_cast<GLfloat>(color.r) / 255.0f,
-                            static_cast<GLfloat>(color.g) / 255.0f,
-                            static_cast<GLfloat>(color.b) / 255.0f,
-                            static_cast<GLfloat>(color.a) / 255.0f);
-    }
-    impl.gl.glBindVertexArray(impl.vao);
-    impl.gl.glDrawArrays(GL_TRIANGLES, 0, 3);
+    impl.tri_material->setParameter("mvp", mvp);
+    impl.tri_material->setParameter(
+        "color", core::vec4{static_cast<float>(color.r) / 255.0f,
+                            static_cast<float>(color.g) / 255.0f,
+                            static_cast<float>(color.b) / 255.0f,
+                            static_cast<float>(color.a) / 255.0f});
+    impl.tri_material->apply();
+    impl.tri_mesh->drawIndexed();
     impl.drainGlErrors("drawTriangle");
 }
 

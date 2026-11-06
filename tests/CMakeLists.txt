@@ -23,6 +23,13 @@ target_include_directories(test_application PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
 add_test(NAME application COMMAND test_application)
 
+add_executable(test_math test_math.cpp)
+
+target_link_libraries(test_math PRIVATE grace_core grace_warnings)
+target_include_directories(test_math PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+add_test(NAME math COMMAND test_math)
+
 # CLI tests for the grace executable, checked for their exact exit code
 # through check_exit_code.cmake in script mode (no test framework):
 # 0 = success, 2 = usage error.
@@ -59,6 +66,14 @@ if(GRACE_ENABLE_OPENGL)
         grace_null_render grace_render_opengl grace_warnings)
     target_include_directories(test_opengl_render PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
+    add_executable(test_mesh test_mesh.cpp)
+    target_link_libraries(test_mesh PRIVATE grace_render grace_render_opengl grace_warnings)
+    target_include_directories(test_mesh PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+    add_executable(test_shader test_shader.cpp)
+    target_link_libraries(test_shader PRIVATE grace_render grace_render_opengl grace_warnings)
+    target_include_directories(test_shader PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
     find_program(GRACE_XVFB_RUN NAMES xvfb-run)
     if(GRACE_XVFB_RUN)
         set(GRACE_OPENGL_LAUNCHER "${GRACE_XVFB_RUN};-a")
@@ -66,7 +81,7 @@ if(GRACE_ENABLE_OPENGL)
         set(GRACE_OPENGL_LAUNCHER "")
     endif()
 
-    foreach(test_name test_opengl_context test_opengl_render)
+    foreach(test_name test_opengl_context test_opengl_render test_mesh test_shader)
         add_test(NAME ${test_name}
             COMMAND ${GRACE_OPENGL_LAUNCHER} $<TARGET_FILE:${test_name}>)
         set_tests_properties(${test_name} PROPERTIES

@@ -46,12 +46,19 @@ using FnGetProgramInfoLog = void (*)(GLuint program, GLsizei bufSize, GLsizei* l
 using FnUseProgram = void (*)(GLuint program);
 using FnDeleteProgram = void (*)(GLuint program);
 using FnGetUniformLocation = GLint (*)(GLuint program, const GLchar* name);
+using FnUniform1f = void (*)(GLint location, GLfloat v0);
+using FnUniform1i = void (*)(GLint location, GLint v0);
+using FnUniform2f = void (*)(GLint location, GLfloat v0, GLfloat v1);
+using FnUniform3f = void (*)(GLint location, GLfloat v0, GLfloat v1, GLfloat v2);
 using FnUniform4f = void (*)(GLint location, GLfloat v0, GLfloat v1, GLfloat v2, GLfloat v3);
+using FnUniformMatrix4fv = void (*)(GLint location, GLsizei count, GLboolean transpose,
+                                    const GLfloat* value);
 using FnVertexAttribPointer = void (*)(GLuint index, GLint size, GLenum type,
                                        GLboolean normalized, GLsizei stride,
                                        const GLvoid* pointer);
 using FnEnableVertexAttribArray = void (*)(GLuint index);
 using FnDrawArrays = void (*)(GLenum mode, GLint first, GLsizei count);
+using FnDrawElements = void (*)(GLenum mode, GLsizei count, GLenum type, const GLvoid* indices);
 
 /// Minimal runtime loader for the OpenGL entry points the engine uses.
 ///
@@ -103,10 +110,16 @@ public:
     FnUseProgram glUseProgram = nullptr;
     FnDeleteProgram glDeleteProgram = nullptr;
     FnGetUniformLocation glGetUniformLocation = nullptr;
+    FnUniform1f glUniform1f = nullptr;
+    FnUniform1i glUniform1i = nullptr;
+    FnUniform2f glUniform2f = nullptr;
+    FnUniform3f glUniform3f = nullptr;
     FnUniform4f glUniform4f = nullptr;
+    FnUniformMatrix4fv glUniformMatrix4fv = nullptr;
     FnVertexAttribPointer glVertexAttribPointer = nullptr;
     FnEnableVertexAttribArray glEnableVertexAttribArray = nullptr;
     FnDrawArrays glDrawArrays = nullptr;
+    FnDrawElements glDrawElements = nullptr;
 };
 
 }  // namespace grace::render::opengl

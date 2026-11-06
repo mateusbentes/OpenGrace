@@ -65,10 +65,16 @@ bool GlLoader::load(ResolveFn resolve, std::string& missingSymbol)
     GRACE_GL_LOAD(glUseProgram, "glUseProgram");
     GRACE_GL_LOAD(glDeleteProgram, "glDeleteProgram");
     GRACE_GL_LOAD(glGetUniformLocation, "glGetUniformLocation");
+    GRACE_GL_LOAD(glUniform1f, "glUniform1f");
+    GRACE_GL_LOAD(glUniform1i, "glUniform1i");
+    GRACE_GL_LOAD(glUniform2f, "glUniform2f");
+    GRACE_GL_LOAD(glUniform3f, "glUniform3f");
     GRACE_GL_LOAD(glUniform4f, "glUniform4f");
+    GRACE_GL_LOAD(glUniformMatrix4fv, "glUniformMatrix4fv");
     GRACE_GL_LOAD(glVertexAttribPointer, "glVertexAttribPointer");
     GRACE_GL_LOAD(glEnableVertexAttribArray, "glEnableVertexAttribArray");
     GRACE_GL_LOAD(glDrawArrays, "glDrawArrays");
+    GRACE_GL_LOAD(glDrawElements, "glDrawElements");
 
 #undef GRACE_GL_LOAD
 

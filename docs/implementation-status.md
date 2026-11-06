@@ -12,7 +12,7 @@ The architectural baseline is [grace-architecture.md](grace-architecture.md).
 | 0 | Build system, module skeleton, version accessor | Done |
 | 1 | Fixed-step clock, application lifecycle, null render backend | Done |
 | 2 | OpenGL backend, function loader, diagnostic triangle | Done |
-| 3 | Render foundation: math, mesh, shader, material | Next |
+| 3 | Render foundation: math, mesh, shader, material | Done |
 | 4 | Forward lighting: point, spot, directional, shadow maps | Planned |
 | 5 | Deferred lighting: G-buffer, unlimited lights, light volumes | Planned |
 | 6 | Post-processing: HDR, bloom, filmic tonemap, DOF, AA, SSAO-STF | Planned |
@@ -32,9 +32,9 @@ The architectural baseline is [grace-architecture.md](grace-architecture.md).
 
 | Module | State | Notes |
 | --- | --- | --- |
-| core | Partial | Version and fixed-step clock. Dependency-free, enforced by grep in review. |
+| core | Partial | Version, fixed-step clock, header-only math (vec/mat4/transform/camera). Dependency-free, enforced by grep in review. |
 | app | Partial | Application lifecycle driver and the CLI entry point. |
-| render | Partial | Contract, null backend, OpenGL backend, loader, diagnostic triangle. |
+| render | Partial | Contract, null backend, OpenGL backend, loader, API-neutral mesh/shader/material plus their OpenGL implementations; diagnostic triangle rebuilt on the foundation. |
 | physics | Not started | Contract designed, no backend linked. |
 | script | Not started | AngelScript and the visual block system are in scope. |
 | audio, video, gui, motion, ai, game | Not started | |
@@ -54,6 +54,9 @@ All results below are real runs, on the tree at the stated commit.
 | 2026-11-05 | same, under `xvfb-run` | Hidden run: `llvmpipe 4.5 core`, same centre pixel, exit 0 |
 | 2026-11-05 | same, `SDL_VIDEODRIVER=dummy` | No context possible: exit 1 with an explicit message; OpenGL tests would report 77 and be shown as Skipped |
 | 2026-11-05 | same | Two identical headless runs: byte-identical output, both exit 0 |
+| 2026-11-05 | same, milestone 3 | OpenGL off: 7/7 Debug; OpenGL on: 11/11 Debug and Release; `-L opengl` 4/4; zero warnings under `-Werror` |
+| 2026-11-05 | same, milestone 3 | Check counts: version 4, fixed_step_clock 42, application 26, math 28, opengl_context 17, opengl_render 32, mesh 13, shader 16 — all zero failures |
+| 2026-11-05 | same, milestone 3 | Visible CLI run: `opengl 4.6 core` Iris Xe, centre pixel `30,30,30,255`, exit 0; hidden run under `xvfb-run`: llvmpipe `4.5 core`, same pixel, exit 0. Broken-shader failures surface the real info log, e.g. ``error: `broken_identifier_xyz' undeclared`` |
 
 ### Defects found by the tests, and fixed
 
@@ -62,6 +65,7 @@ All results below are real runs, on the tree at the stated commit.
 | `glClear` raised `GL_INVALID_VALUE` and cleared nothing | Contract clear-buffer flags are `1`, `2`, `4`; GL expects `0x4000`, `0x100`, `0x400` | Explicit mapping to the GL mask |
 | Off-centre readback returned undefined data | Readback happened after the buffer swap | Pre-swap `queueReadback()` and `lastReadback()` |
 | `describe()` reported "not running" after shutdown | Runtime state reported instead of historical fact | Version, vendor and renderer reported whenever a context was obtained |
+| Mesh/shader tests drew with a uniform set before the program was active (`GL_INVALID_OPERATION`) | `glUniform*` requires a current program | Documented precondition in `shader.hpp` (setUniform requires `use()`); tests activate the program first |
 
 The first defect is worth noting as a design signal: the contract uses its own
 enumeration rather than GL constants, which is what keeps the null backend

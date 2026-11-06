@@ -58,17 +58,40 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
 endif()
 
 # ---------------------------------------------------------------------------
-# grace_render
+# grace_core
 #
-# The platform-neutral rendering contract. Header-only: the interface carries
-# no platform, windowing or graphics-API types, and concrete backends live in
-# their own modules behind it.
+# The core module owns the object model, resource manager, threading, math,
+# curves and the profiler. It must stay free of any graphics, audio or
+# platform dependency so that every other module can build on it. The math
+# headers under include/grace/core/math/ are header-only and dependency-free.
 # ---------------------------------------------------------------------------
 
-add_library(grace_render INTERFACE)
+add_library(grace_core STATIC
+    src/core/version.cpp
+    src/core/fixed_step_clock.cpp)
 
-target_include_directories(grace_render INTERFACE
+target_include_directories(grace_core PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
+
+target_link_libraries(grace_core PRIVATE grace_warnings)
+
+# ---------------------------------------------------------------------------
+# grace_render
+#
+# The platform-neutral render module: the backend contract plus the
+# API-neutral mesh/shader front-end. The headers carry no platform, windowing
+# or graphics-API types; concrete backends live in their own modules behind
+# the contract.
+# ---------------------------------------------------------------------------
+
+add_library(grace_render STATIC
+    src/render/mesh.cpp
+    src/render/shader.cpp)
+
+target_include_directories(grace_render PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
+
+target_link_libraries(grace_render PUBLIC grace_core PRIVATE grace_warnings)
 
 # ---------------------------------------------------------------------------
 # grace_null_render
@@ -123,29 +146,14 @@ if(GRACE_ENABLE_OPENGL)
 
     add_library(grace_render_opengl STATIC
         src/render/opengl/gl_loader.cpp
+        src/render/opengl/opengl_mesh.cpp
+        src/render/opengl/opengl_shader.cpp
         src/render/opengl/opengl_render_backend.cpp)
 
     target_link_libraries(grace_render_opengl
         PUBLIC grace_render
         PRIVATE grace_warnings SDL2::SDL2 OpenGL::OpenGL)
 endif()
-
-# ---------------------------------------------------------------------------
-# grace_core
-#
-# The core module owns the object model, resource manager, threading, math,
-# curves and the profiler. It must stay free of any graphics, audio or
-# platform dependency so that every other module can build on it.
-# ---------------------------------------------------------------------------
-
-add_library(grace_core STATIC
-    src/core/version.cpp
-    src/core/fixed_step_clock.cpp)
-
-target_include_directories(grace_core PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
-
-target_link_libraries(grace_core PRIVATE grace_warnings)
 
 # ---------------------------------------------------------------------------
 # grace_app
