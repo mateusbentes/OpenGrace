@@ -9,87 +9,6 @@
 
 namespace grace::render {
 
-namespace {
-
-// Depth-only pass shader sources (plain strings: the contract's shader
-// interface takes source text, so no graphics-API type appears here).
-constexpr const char* kShadowDepthVertexShader = R"(#version 330 core
-layout(location = 0) in vec3 position;
-uniform mat4 lightMVP;
-void main()
-{
-    gl_Position = lightMVP * vec4(position, 1.0);
-}
-)";
-
-constexpr const char* kShadowDepthFragmentShader = R"(#version 330 core
-void main()
-{
-}
-)";
-
-// Dual paraboloid depth pass (milestone 4d): the vertex stage projects the
-// light-space position onto the selected hemisphere's paraboloid and stores
-// LINEAR depth (distance from the light, mapped to [0,1]) in the depth
-// buffer. Geometry on the wrong side of the seam is clipped in this pass
-// (documented singularity handling), so nothing is ever looked up in the
-// wrong hemisphere.
-// Projective form of the paraboloid projection: with w = 1 + dir.z (front) or
-// 1 - dir.z (back), ndc.x/y become exactly the paraboloid uv and ndc.z the
-// radial depth, both computed per fragment by the rasterizer — so the stored
-// depth is directly comparable with the lookup's linear distance depth.
-// (A plain w=1 projection would interpolate depth wrongly in uv space.)
-constexpr const char* kParaboloidDepthVertexShader = R"(#version 330 core
-layout(location = 0) in vec3 position;
-uniform mat4 lightView;    // world -> light space, light forward = +Z
-uniform mat4 model;
-uniform float nearRange;
-uniform float farRange;
-uniform int hemisphere;    // 0 = front, 1 = back
-out vec3 vL;               // light-space position, interpolated exactly (w != 1)
-void main()
-{
-    vec4 l = lightView * model * vec4(position, 1.0);
-    float dist = length(l.xyz);
-    vL = l.xyz;
-    vec3 dir = l.xyz / max(dist, 1e-6);
-    float u;
-    float v;
-    float w;
-    if (hemisphere == 0)
-    {
-        if (dir.z <= 0.0) { gl_Position = vec4(0.0, 0.0, -2.0, 1.0); return; }  // clipped
-        u = dir.x;
-        v = dir.y;
-        w = 1.0 + dir.z;
-    }
-    else
-    {
-        if (dir.z >= 0.0) { gl_Position = vec4(0.0, 0.0, -2.0, 1.0); return; }  // clipped
-        u = -dir.x;
-        v = -dir.y;
-        w = 1.0 - dir.z;
-    }
-    float depth = clamp((dist - nearRange) / (farRange - nearRange), 0.0, 1.0);
-    gl_Position = vec4(u * w, v * w, (2.0 * depth - 1.0) * w, w);
-}
-)";
-
-// Per-fragment radial depth: the light-space position varying interpolates
-// exactly under the projective w, so gl_FragDepth stores the true distance of
-// the rasterized surface point (per-vertex interpolation would not).
-constexpr const char* kParaboloidDepthFragmentShader = R"(#version 330 core
-in vec3 vL;
-uniform float nearRange;
-uniform float farRange;
-void main()
-{
-    float dist = length(vL);
-    gl_FragDepth = clamp((dist - nearRange) / (farRange - nearRange), 0.0, 1.0);
-}
-)";
-
-}  // namespace
 
 core::mat4 sunLightSpaceMatrix(const DirectionalLight& sun, const SceneBounds& bounds,
                                float near, float far)
@@ -252,13 +171,13 @@ core::mat4 fitCascadeLightMatrix(const DirectionalLight& sun, const CameraParams
 ShadowMap renderShadowCascades(RenderBackend& backend, const DirectionalLight& sun,
                                const CameraParams& camera,
                                const std::vector<DrawSubmission>& submissions,
-                               const CascadeConfig& config)
+                               const CascadeConfig& config, std::uint32_t maxDynamicLights)
 {
     validateCascadeConfig(config);
     camera.validate();
     sun.validate();
     for (const DrawSubmission& submission : submissions)
-        submission.validate();
+        submission.validate(maxDynamicLights);
 
     std::uint32_t count = config.count;
     if (count == 0)
@@ -269,8 +188,7 @@ ShadowMap renderShadowCascades(RenderBackend& backend, const DirectionalLight& s
     const std::vector<float> splits =
         computeCascadeSplits(camera.near, camera.far, count, config.splitLambda);
 
-    auto depthProgram = backend.createShaderProgram(kShadowDepthVertexShader,
-                                                    kShadowDepthFragmentShader);
+    auto depthProgram = backend.createShaderProgram(ShaderProgramId::ShadowDepth);
 
     ShadowMap shadow;
     shadow.cascadeCount = count;
@@ -333,11 +251,12 @@ void validatePointShadowConfig(const PointShadowConfig& config)
 PointShadowMaps renderPointShadowMaps(RenderBackend& backend,
                                        const std::vector<DynamicLight>& lights,
                                        const std::vector<DrawSubmission>& casters,
-                                       const PointShadowConfig& config)
+                                       const PointShadowConfig& config,
+                                       std::uint32_t maxDynamicLights)
 {
     validatePointShadowConfig(config);
     for (const DrawSubmission& caster : casters)
-        caster.validate();
+        caster.validate(maxDynamicLights);
 
     std::uint32_t maxLights = config.maxLights;
     if (maxLights == 0)
@@ -351,8 +270,7 @@ PointShadowMaps renderPointShadowMaps(RenderBackend& backend,
         if (std::holds_alternative<PointLight>(lights[i]))
             pointLightIndices.push_back(i);
 
-    auto depthProgram = backend.createShaderProgram(kParaboloidDepthVertexShader,
-                                                    kParaboloidDepthFragmentShader);
+    auto depthProgram = backend.createShaderProgram(ShaderProgramId::ParaboloidDepth);
 
     PointShadowMaps result;
     result.mapSize = config.mapSize;

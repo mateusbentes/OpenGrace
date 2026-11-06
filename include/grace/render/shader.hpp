@@ -12,15 +12,21 @@
 
 namespace grace::render {
 
-/// Vertex and fragment GLSL sources of a shader program.
-struct ShaderSources
+/// API-neutral shader program identity (decision 14). The backend resolves an
+/// id to its own shading-language source in its shader library; callers never
+/// hold source text. Adding a shader = one entry here + one library entry in
+/// the backend. Test fixtures included.
+enum class ShaderProgramId : std::uint8_t
 {
-    std::string vertex;
-    std::string fragment;
+    FlatUnlit,          ///< test fixture: position passthrough + uniform colour
+    TestBrokenVertex,   ///< test fixture: deliberately broken vertex stage
+    TestBrokenFragment, ///< test fixture: deliberately broken fragment stage
+    ForwardLighting,    ///< forward lighting pass (sun + dynamic lights + shadows)
+    ShadowDepth,        ///< cascade depth pass
+    ParaboloidDepth,    ///< paraboloid point-light depth pass
+    GBuffer,            ///< deferred G-buffer write pass (MRT)
+    DeferredLighting,   ///< deferred fullscreen lighting pass
 };
-
-/// Throws std::invalid_argument with a clear message when a source is empty.
-void validateShaderSources(const ShaderSources& sources);
 
 /// Caches uniform locations by name so repeated sets do not re-query the
 /// driver. API-neutral; concrete backends feed their query function in.

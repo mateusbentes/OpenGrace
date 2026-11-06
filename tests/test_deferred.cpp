@@ -269,6 +269,53 @@ int main()
         GRACE_CHECK(withinTol(p, expectedColor, 3));
     }
 
+    // G1: parity on a scene WITH shadow-casting geometry — forward and
+    // deferred both consume the cascade sun shadow map (since 5c).
+    {
+        DrawSubmission occ = ground;
+        occ.model = grace::core::translation(vec3{0.0f, 0.0f, 0.5f});  // between sun and ground
+        occ.castOnly = true;  // casts the shadow, is not drawn
+
+        Renderer fwdRenderer(*backend);
+        RendererConfig fwdCfg;
+        fwdCfg.path = RenderPath::Forward;
+        fwdCfg.shadows = true;
+        fwdCfg.clear_color = black;
+        fwdCfg.camera.far = 20.0f;
+        fwdCfg.cascades.mapSize = 256;
+        fwdRenderer.setConfig(fwdCfg);
+        fwdRenderer.beginFrame();
+        fwdRenderer.submit(ground);
+        fwdRenderer.submit(occ);
+        fwdRenderer.endFrame();
+        backend->readback();
+        const ClearColor fwdShadow = backend->centerPixel();
+
+        Renderer defRenderer(*backend);
+        RendererConfig defCfg;
+        defCfg.path = RenderPath::Deferred;
+        defCfg.shadows = true;
+        defCfg.clear_color = black;
+        defCfg.camera.far = 20.0f;
+        defCfg.cascades.mapSize = 256;
+        defRenderer.setConfig(defCfg);
+        defRenderer.beginFrame();
+        defRenderer.submit(ground);
+        defRenderer.submit(occ);
+        defRenderer.endFrame();
+        backend->readback();
+        const ClearColor defShadow = backend->centerPixel();
+        std::printf("shadow parity: forward centre=%d,%d,%d,%d  deferred centre=%d,%d,%d,%d  diff=%d\n",
+                    static_cast<int>(fwdShadow.r), static_cast<int>(fwdShadow.g),
+                    static_cast<int>(fwdShadow.b), static_cast<int>(fwdShadow.a),
+                    static_cast<int>(defShadow.r), static_cast<int>(defShadow.g),
+                    static_cast<int>(defShadow.b), static_cast<int>(defShadow.a),
+                    std::abs(static_cast<int>(fwdShadow.r) - static_cast<int>(defShadow.r)));
+        // The occluder shadows the centre in both paths (sun term zeroed).
+        GRACE_CHECK(withinTol(fwdShadow, ClearColor{0, 0, 0, 255}, 2));
+        GRACE_CHECK(withinTol(defShadow, ClearColor{0, 0, 0, 255}, 2));
+    }
+
     GRACE_CHECK_EQ(backend->glErrorCount(), 0u);
     backend->shutdown();
 

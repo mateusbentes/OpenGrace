@@ -83,12 +83,11 @@ public:
     /// Number of protocol violations observed so far.
     virtual std::uint64_t violationCount() const noexcept = 0;
 
-    /// Compiles and links a shader program from source. Backends with a real
-    /// compiler throw std::runtime_error carrying the compiler/linker info
-    /// log on failure; the null backend validates the sources and records the
-    /// call. Throws std::logic_error when the backend is not initialised.
-    virtual std::unique_ptr<ShaderProgram> createShaderProgram(
-        const std::string& vertexSource, const std::string& fragmentSource) = 0;
+    /// Compiles and links a shader program for the given API-neutral program
+    /// identity; the backend owns the source (decision 14). Throws
+    /// std::runtime_error carrying the compiler/linker info log on failure.
+    /// Throws std::logic_error when the backend is not initialised.
+    virtual std::unique_ptr<ShaderProgram> createShaderProgram(ShaderProgramId id) = 0;
 
     /// Creates a GPU mesh handle. Upload is explicit via GpuMesh::upload;
     /// re-uploading replaces all previously uploaded data. Throws

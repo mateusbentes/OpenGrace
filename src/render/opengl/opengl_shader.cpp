@@ -4,14 +4,50 @@
 
 namespace grace::render::opengl {
 
-GlShaderProgram::GlShaderProgram(GlLoader& gl, const std::string& vertexSource,
-                                 const std::string& fragmentSource)
+GlShaderProgram::GlShaderProgram(GlLoader& gl, ShaderProgramId id)
     : m_gl(gl)
 {
-    const ShaderSources sources{vertexSource, fragmentSource};
-    validateShaderSources(sources);  // throws std::invalid_argument when empty
-    const GLuint vertex = compileStage(true, sources.vertex);
-    const GLuint fragment = compileStage(false, sources.fragment);
+    const char* vertexSource = nullptr;
+    const char* fragmentSource = nullptr;
+    switch (id)
+    {
+    case ShaderProgramId::FlatUnlit:
+        vertexSource = kFlatVertexShader;
+        fragmentSource = kFlatFragmentShader;
+        break;
+    case ShaderProgramId::TestBrokenVertex:
+        vertexSource = kBrokenVertexShader;
+        fragmentSource = kFlatFragmentShader;
+        break;
+    case ShaderProgramId::TestBrokenFragment:
+        vertexSource = kFlatVertexShader;
+        fragmentSource = kBrokenFragmentShader;
+        break;
+    case ShaderProgramId::ForwardLighting:
+        vertexSource = kLightingVertexShader;
+        fragmentSource = kLightingFragmentShader;
+        break;
+    case ShaderProgramId::ShadowDepth:
+        vertexSource = kShadowDepthVertexShader;
+        fragmentSource = kShadowDepthFragmentShader;
+        break;
+    case ShaderProgramId::ParaboloidDepth:
+        vertexSource = kParaboloidDepthVertexShader;
+        fragmentSource = kParaboloidDepthFragmentShader;
+        break;
+    case ShaderProgramId::GBuffer:
+        vertexSource = kGBufferVertexShader;
+        fragmentSource = kGBufferFragmentShader;
+        break;
+    case ShaderProgramId::DeferredLighting:
+        vertexSource = kDeferredLightVertexShader;
+        fragmentSource = kDeferredLightFragmentShader;
+        break;
+    }
+    if (vertexSource == nullptr || fragmentSource == nullptr)
+        throw std::runtime_error("GlShaderProgram: unknown ShaderProgramId");
+    const GLuint vertex = compileStage(true, vertexSource);
+    const GLuint fragment = compileStage(false, fragmentSource);
     m_program = link(vertex, fragment);
 }
 

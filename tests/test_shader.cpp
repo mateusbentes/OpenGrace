@@ -23,23 +23,6 @@ using grace::render::VertexAttribute;
 using grace::render::VertexLayout;
 using grace::render::VertexSemantic;
 
-constexpr const char* kFlatVertexShader = R"(#version 330 core
-layout(location = 0) in vec3 position;
-void main()
-{
-    gl_Position = vec4(position, 1.0);
-}
-)";
-
-constexpr const char* kFlatFragmentShader = R"(#version 330 core
-uniform vec4 color;
-out vec4 fragment;
-void main()
-{
-    fragment = color;
-}
-)";
-
 bool withinOne(ClearColor actual, ClearColor expected)
 {
     const auto diff = [](std::uint8_t a, std::uint8_t b) {
@@ -102,32 +85,18 @@ int main()
     }
 
     // A valid pair compiles and links; uniform locations are cached.
-    auto program = backend->createShaderProgram(kFlatVertexShader, kFlatFragmentShader);
+    auto program = backend->createShaderProgram(grace::render::ShaderProgramId::FlatUnlit);
     GRACE_CHECK(program != nullptr);
     const std::int32_t color_loc = program->uniformLocation("color");
     GRACE_CHECK(color_loc >= 0);
     GRACE_CHECK_EQ(program->uniformLocation("color"), color_loc);  // cached, same value
     GRACE_CHECK_EQ(program->uniformLocation("does_not_exist"), -1);
 
-    // Empty sources are rejected before reaching the driver.
-    {
-        const std::string message = catchExceptionMessage(
-            [&] { static_cast<void>(backend->createShaderProgram("", kFlatFragmentShader)); });
-        GRACE_CHECK(message.find("vertex source is empty") != std::string::npos);
-    }
-
     // A deliberately broken vertex shader fails with its info log in the message.
     {
-        const std::string broken_vertex = R"(#version 330 core
-layout(location = 0) in vec3 position;
-void main()
-{
-    gl_Position = vec4(broken_identifier_xyz, 1.0);
-}
-)";
         const std::string message = catchExceptionMessage(
-            [&] { static_cast<void>(backend->createShaderProgram(broken_vertex, kFlatFragmentShader)); });
-        std::printf("broken vertex shader message: %s\n", message.c_str());
+            [&] { static_cast<void>(backend->createShaderProgram(grace::render::ShaderProgramId::TestBrokenVertex)); });
+        std::printf("TestBrokenVertex shader message: %s\n", message.c_str());
         GRACE_CHECK(message.find("compile failed") != std::string::npos);
         GRACE_CHECK(message.find("info log:") != std::string::npos);
         // The info log text itself must be present, not a bare status code.
@@ -136,16 +105,9 @@ void main()
 
     // A deliberately broken fragment shader fails the same way.
     {
-        const std::string broken_fragment = R"(#version 330 core
-out vec4 fragment;
-void main()
-{
-    fragment = color_uniform_that_does_not_exist;
-}
-)";
         const std::string message = catchExceptionMessage(
-            [&] { static_cast<void>(backend->createShaderProgram(kFlatVertexShader, broken_fragment)); });
-        std::printf("broken fragment shader message: %s\n", message.c_str());
+            [&] { static_cast<void>(backend->createShaderProgram(grace::render::ShaderProgramId::TestBrokenFragment)); });
+        std::printf("TestBrokenFragment shader message: %s\n", message.c_str());
         GRACE_CHECK(message.find("compile failed") != std::string::npos);
         GRACE_CHECK(message.find("info log:") != std::string::npos);
         GRACE_CHECK(message.size() > 80u);

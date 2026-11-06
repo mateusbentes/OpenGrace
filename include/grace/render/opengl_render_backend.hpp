@@ -73,8 +73,7 @@ public:
     void shutdown() override;
     std::uint64_t violationCount() const noexcept override;
 
-    std::unique_ptr<ShaderProgram> createShaderProgram(
-        const std::string& vertexSource, const std::string& fragmentSource) override;
+    std::unique_ptr<ShaderProgram> createShaderProgram(ShaderProgramId id) override;
     std::unique_ptr<GpuMesh> createGpuMesh() override;
     void draw(GpuMesh& mesh, ShaderProgram& program) override;
     void submit(const DrawSubmission& submission) override;

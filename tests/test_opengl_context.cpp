@@ -98,7 +98,7 @@ int main()
         bool threw_shader = false;
         try
         {
-            static_cast<void>(early.createShaderProgram("vertex", "fragment"));
+            static_cast<void>(early.createShaderProgram(grace::render::ShaderProgramId::FlatUnlit));
         }
         catch (const std::logic_error&)
         {

@@ -30,6 +30,9 @@ struct DrawSubmission
     Material material;                           ///< carries the surface parameters
     std::optional<DirectionalLight> sun;         ///< handled separately from the dynamic lights
     std::vector<DynamicLight> lights;            ///< at most kMaxDynamicLightsPerObject
+    /// When true, the submission only casts shadows (it feeds the shadow
+    /// passes) and is not drawn (documented; used for occluders).
+    bool castOnly = false;
     const ShadowMap* shadow = nullptr;           ///< optional cascaded sun shadow map (4c)
     const PointShadowMaps* pointShadows = nullptr;  ///< optional paraboloid maps (4d)
     /// How many leading point lights in `lights` request a shadow map. More

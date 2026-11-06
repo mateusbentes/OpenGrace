@@ -24,6 +24,7 @@ regenerate: `pandoc docs/implementation-status.md -o docs/implementation-status.
 | 4e | Trapezoidal projective transform for the sun cascades — implemented behind `CascadeProjection::Trapezoidal` and measured against the fitted default (decision 8 resolved below) | Done |
 | 5 | Deferred lighting alongside forward: MRT G-buffer, lighting pass. Light-volume GI remains milestone 7 | Done |
 | 5b | Move frame composition out of the render contract into a renderer layer (`grace::render::Renderer`); the backend is a device again. Closes decision 12 | Done |
+| 5c | Shader sources leave the API-neutral module (decision 14); deferred path consumes the existing shadow maps (G1) | Done |
 | 6 | Post-processing: HDR, bloom, filmic tonemap, DOF, AA, SSAO-STF | Planned |
 | 7 | Global illumination by light volume propagation | Planned |
 | 8 | Physics contract and the first backend | Planned |
@@ -83,6 +84,8 @@ All results below are real runs, on the tree at the stated commit.
 | 2026-11-06 | same, milestone 5 | OpenGL off: 11/11 Debug; OpenGL on: 20/20 Debug and Release; `-L opengl` 9/9; zero warnings under `-Werror`. Forward stays the default path and passes unchanged; `application.cpp` untouched (still only setClearColor/clear/shutdown) |
 | 2026-11-06 | same, milestone 5 | Deferred measurements (tests/test_deferred.cpp): G-buffer attachment 0 centre readback `255,255,255,16` (albedo white, a = shininess/1024); parity forward `128,128,128,255` vs deferred `127,127,127,255` (diff 1); 6 dynamic lights (over the forward limit of 4, rejected there) — **corrected in 5b: this measurement was wrong**. The observed value, `127,127,127,255`, is the sun alone (`0.5` at a normal-light dot of one gives `127`); the expectation, `~124`, modelled six point lights and omitted the sun. The two landed within the tolerance of three of each other, so the check passed without the dynamic lights contributing anything, and the multi-light capability this milestone claimed was not demonstrated. The corrected measurement is in the 5b row. Shadow maps are NOT consumed by the deferred path in this increment (documented); the deferred light cap is kMaxDeferredLights = 16 (shader uniform array), over-cap submissions rejected, not truncated. G-buffer: 2x RGBA8 + depth24, normals 8-bit mapped, scalar specular — ~11.1 MB at 1280×720, documented |
 | 2026-11-06 | same, milestone 5b | OpenGL off: 12/12 Debug; OpenGL on: 21/21 Debug and Release; `-L opengl` 9/9; zero warnings under `-Werror`. Contract shrank by exactly the path concept (`RenderPath`/`setRenderPath`/`renderPath`/`present`); nothing a device must do was lost. `application.cpp` diff is the 4-hunk renderer switch (recorded in decision 12) |
+| 2026-11-06 | same, milestone 5c | OpenGL off: 13/13 Debug; OpenGL on: 22/22 Debug and Release; `-L opengl` 9/9; zero warnings under `-Werror`. `shader_source_rule` test: scanned 41 files, 0 hits outside src/render/opengl/ and tests/ |
+| 2026-11-06 | same, milestone 5c | G1 implemented (option a): the deferred path now renders and consumes the existing cascade + paraboloid shadow maps via the renderer; all shadow code (free functions, matrices, configs) reused unchanged. Shadow parity with a castOnly occluder: forward centre `0,0,0,255` vs deferred centre `0,0,0,255` (diff 0). Plain parity unchanged: forward `128,128,128,255` vs deferred `127,127,127,255` (diff 1) |
 | 2026-11-06 | same, milestone 5b | Deferred via the renderer after 5b: centre pixel `127,127,127,255` — identical to the direct-contract value before the move. Parity forward `128,128,128,255` vs deferred `127,127,127,255` (diff 1). G-buffer attachment 0 readback `255,255,255,16`. CLI: `--path forward` and `--path deferred` both exit 0 with centre pixel `30,30,30,255` (deferred matches forward via the cleared-depth background rule); `--path bogus` exits 2. Check counts: version 4, fixed_step_clock 42, application 26, math 38, lights 36, cascades 133, paraboloid 27, trapezoid 80, renderer 19 (new), opengl_context 20, opengl_render 107, mesh 13, shader 16, lighting 10, shadows 8, point_shadows 7, tsm 11, deferred 21 — all zero failures; no existing suite decreased (opengl_render 113→107 because the shared checks lost the contract's path block; application unchanged at 26 with the updated event log) |
 | 2026-11-05 | same, contract extension | OpenGL off: 7/7 Debug; OpenGL on: 11/11 Debug and Release; `-L opengl` 4/4; zero warnings under `-Werror`; check counts: opengl_context 20, opengl_render 47 |
 
@@ -271,6 +274,15 @@ not exist before GL 3.2, so "3.0 core" is not a valid request.
     owns frame composition and all path/shadow/light configuration; the backend
     is a device. The renderer is not a god object — resource management, scene
     storage, culling and asset loading are explicitly out of its scope.
+14. **Where do shader sources live?** **Resolved 2026-11-06 (milestone 5c): only
+    in the OpenGL backend's shader library** (`src/render/opengl/shader_library.hpp`).
+    The contract's shader factory takes a closed, API-neutral `ShaderProgramId`
+    enum and the backend resolves it to its own source; callers (renderer,
+    shadow passes, tests) never hold shading-language text. Rule for every
+    future shader, stated once: a new shader = one `ShaderProgramId` entry + one
+    entry in the backend library; the API-neutral render module must never
+    contain shading-language source (enforced by the `shader_source_rule` test,
+    which scans the tree and fails on any hit outside `src/render/opengl/`).
 
 ## Verification commands
 

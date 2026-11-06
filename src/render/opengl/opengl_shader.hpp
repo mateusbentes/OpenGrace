@@ -7,6 +7,8 @@
 #include "grace/render/opengl/gl_loader.hpp"
 #include "grace/render/shader.hpp"
 
+#include "shader_library.hpp"
+
 namespace grace::render::opengl {
 
 /// OpenGL implementation of ShaderProgram. Compilation and link failures
@@ -14,9 +16,8 @@ namespace grace::render::opengl {
 class GlShaderProgram final : public ShaderProgram
 {
 public:
-    /// Validates, compiles and links the given sources.
-    GlShaderProgram(GlLoader& gl, const std::string& vertexSource,
-                    const std::string& fragmentSource);
+    /// Compiles and links the sources the backend's library holds for `id`.
+    GlShaderProgram(GlLoader& gl, ShaderProgramId id);
     ~GlShaderProgram() override { destroy(); }
 
     GlShaderProgram(const GlShaderProgram&) = delete;

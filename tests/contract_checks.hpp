@@ -53,16 +53,6 @@ inline grace::render::Mesh makeContractTriangle()
     return mesh;
 }
 
-constexpr const char* kContractVertexShader =
-    "#version 330 core\n"
-    "layout(location = 0) in vec3 position;\n"
-    "void main() { gl_Position = vec4(position, 1.0); }\n";
-
-constexpr const char* kContractFragmentShader =
-    "#version 330 core\n"
-    "out vec4 fragment;\n"
-    "void main() { fragment = vec4(1.0); }\n";
-
 }  // namespace detail
 
 /// Shared RenderBackend contract checks, run unchanged against every backend
@@ -101,8 +91,7 @@ void runContractChecks(Backend& backend, grace::render::ClearColor color,
     GRACE_CHECK(detail::withinOne(backend.lastReadback()[0].color, color));
 
     // Mesh + shader + draw are part of the shared contract.
-    auto program = backend.createShaderProgram(detail::kContractVertexShader,
-                                               detail::kContractFragmentShader);
+    auto program = backend.createShaderProgram(grace::render::ShaderProgramId::FlatUnlit);
     GRACE_CHECK(program != nullptr);
     auto mesh = backend.createGpuMesh();
     GRACE_CHECK(mesh != nullptr);

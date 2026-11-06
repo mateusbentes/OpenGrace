@@ -161,12 +161,21 @@ void NullRenderBackend::shutdown()
     m_shutdown = true;
 }
 
-std::unique_ptr<ShaderProgram> NullRenderBackend::createShaderProgram(
-    const std::string& vertexSource, const std::string& fragmentSource)
+std::unique_ptr<ShaderProgram> NullRenderBackend::createShaderProgram(ShaderProgramId id)
 {
-    record("createShaderProgram");
-    const ShaderSources sources{vertexSource, fragmentSource};
-    validateShaderSources(sources);  // same rejection as a real compiler path
+    const char* name = "unknown";
+    switch (id)
+    {
+    case ShaderProgramId::FlatUnlit: name = "FlatUnlit"; break;
+    case ShaderProgramId::TestBrokenVertex: name = "TestBrokenVertex"; break;
+    case ShaderProgramId::TestBrokenFragment: name = "TestBrokenFragment"; break;
+    case ShaderProgramId::ForwardLighting: name = "ForwardLighting"; break;
+    case ShaderProgramId::ShadowDepth: name = "ShadowDepth"; break;
+    case ShaderProgramId::ParaboloidDepth: name = "ParaboloidDepth"; break;
+    case ShaderProgramId::GBuffer: name = "GBuffer"; break;
+    case ShaderProgramId::DeferredLighting: name = "DeferredLighting"; break;
+    }
+    record(std::string("createShaderProgram(") + name + ")");
     if (m_shutdown)
     {
         ++m_violations;

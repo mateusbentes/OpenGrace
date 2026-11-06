@@ -4,14 +4,6 @@
 
 namespace grace::render {
 
-void validateShaderSources(const ShaderSources& sources)
-{
-    if (sources.vertex.empty())
-        throw std::invalid_argument("shader: vertex source is empty");
-    if (sources.fragment.empty())
-        throw std::invalid_argument("shader: fragment source is empty");
-}
-
 std::int32_t UniformCache::location(const std::string& name, const Query& query)
 {
     const auto it = m_locations.find(name);

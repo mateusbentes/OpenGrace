@@ -17,7 +17,6 @@
 #include "grace/render/opengl/gl_loader.hpp"
 #include "grace/render/shadow.hpp"
 
-#include "opengl_lighting.hpp"
 #include "opengl_mesh.hpp"
 #include "opengl_render_target.hpp"
 #include "opengl_shader.hpp"
@@ -32,24 +31,6 @@ constexpr int kRequestedMinor = 3;
 constexpr float kPi = 3.14159265358979323846f;
 
 // Diagnostic triangle shaders, built on the generic shader/material path.
-constexpr const char* kTriangleVertexShader = R"(#version 330 core
-layout(location = 0) in vec3 position;
-uniform mat4 mvp;
-void main()
-{
-    gl_Position = mvp * vec4(position, 1.0);
-}
-)";
-
-constexpr const char* kTriangleFragmentShader = R"(#version 330 core
-uniform vec4 color;
-out vec4 fragment;
-void main()
-{
-    fragment = color;
-}
-)";
-
 std::string glErrorText(GLenum error)
 {
     char buffer[32];
@@ -592,15 +573,14 @@ void OpenGLRenderBackend::readCenter()
     impl.has_center = true;
 }
 
-std::unique_ptr<ShaderProgram> OpenGLRenderBackend::createShaderProgram(
-    const std::string& vertexSource, const std::string& fragmentSource)
+std::unique_ptr<ShaderProgram> OpenGLRenderBackend::createShaderProgram(ShaderProgramId id)
 {
     if (!m_impl->ready())
     {
         ++m_impl->violations;
         throw std::logic_error("OpenGLRenderBackend::createShaderProgram: not initialised");
     }
-    return std::make_unique<opengl::GlShaderProgram>(m_impl->gl, vertexSource, fragmentSource);
+    return std::make_unique<opengl::GlShaderProgram>(m_impl->gl, id);
 }
 
 std::unique_ptr<GpuMesh> OpenGLRenderBackend::createGpuMesh()
@@ -703,7 +683,7 @@ void OpenGLRenderBackend::ensureLightingProgram()
     Impl& impl = *m_impl;
     if (!impl.lighting_program)
         impl.lighting_program = std::shared_ptr<ShaderProgram>(
-            createShaderProgram(opengl::kLightingVertexShader, opengl::kLightingFragmentShader));
+            createShaderProgram(ShaderProgramId::ForwardLighting));
 }
 
 void OpenGLRenderBackend::submitImpl(const DrawSubmission& submission)
@@ -1046,7 +1026,7 @@ void OpenGLRenderBackend::ensureTriangle()
     impl.tri_mesh = createGpuMesh();
     impl.tri_mesh->upload(mesh);
     impl.tri_shader = std::shared_ptr<ShaderProgram>(
-        createShaderProgram(kTriangleVertexShader, kTriangleFragmentShader));
+        createShaderProgram(ShaderProgramId::FlatUnlit));
     impl.tri_material = std::make_shared<Material>(impl.tri_shader);
 
     impl.drainGlErrors("ensureTriangle");

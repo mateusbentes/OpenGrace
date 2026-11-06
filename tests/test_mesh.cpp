@@ -23,23 +23,6 @@ using grace::render::VertexAttribute;
 using grace::render::VertexLayout;
 using grace::render::VertexSemantic;
 
-constexpr const char* kFlatVertexShader = R"(#version 330 core
-layout(location = 0) in vec3 position;
-void main()
-{
-    gl_Position = vec4(position, 1.0);
-}
-)";
-
-constexpr const char* kFlatFragmentShader = R"(#version 330 core
-uniform vec4 color;
-out vec4 fragment;
-void main()
-{
-    fragment = color;
-}
-)";
-
 bool withinOne(ClearColor actual, ClearColor expected)
 {
     const auto diff = [](std::uint8_t a, std::uint8_t b) {
@@ -99,7 +82,7 @@ int main()
         return 77;
     }
 
-    auto program = backend->createShaderProgram(kFlatVertexShader, kFlatFragmentShader);
+    auto program = backend->createShaderProgram(grace::render::ShaderProgramId::FlatUnlit);
     GRACE_CHECK(program != nullptr);
 
     const ClearColor clear_color{0, 0, 0, 255};

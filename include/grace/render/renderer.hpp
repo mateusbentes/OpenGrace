@@ -88,12 +88,14 @@ public:
     /// The deferred G-buffer target, for inspection only (readback of its
     /// attachments through the backend). nullptr in the forward path.
     RenderTarget* gbufferTarget() noexcept { return m_gbuffer; }
+    const ShadowMap& shadowMapDebug() const noexcept { return m_shadow_map; }
 
     std::uint64_t frameCount() const noexcept { return m_frame_count; }
 
 private:
     void renderForwardFrame();
     void renderDeferredFrame();
+    void renderShadowMapsIfNeeded();
     void ensureDeferredResources();
     void releaseShadowMaps();
 

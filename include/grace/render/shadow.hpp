@@ -142,7 +142,8 @@ core::mat4 fitCascadeLightMatrix(const DirectionalLight& sun, const CameraParams
 ShadowMap renderShadowCascades(RenderBackend& backend, const DirectionalLight& sun,
                                const CameraParams& camera,
                                const std::vector<DrawSubmission>& submissions,
-                               const CascadeConfig& config);
+                               const CascadeConfig& config,
+                               std::uint32_t maxDynamicLights = kMaxDynamicLightsPerObject);
 
 // --- Dual paraboloid point-light shadow maps (milestone 4d) -----------------
 //
@@ -214,6 +215,7 @@ void validatePointShadowConfig(const PointShadowConfig& config);
 PointShadowMaps renderPointShadowMaps(RenderBackend& backend,
                                        const std::vector<DynamicLight>& lights,
                                        const std::vector<DrawSubmission>& casters,
-                                       const PointShadowConfig& config);
+                                       const PointShadowConfig& config,
+                                       std::uint32_t maxDynamicLights = kMaxDynamicLightsPerObject);
 
 }  // namespace grace::render

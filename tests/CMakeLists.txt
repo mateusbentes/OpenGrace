@@ -58,6 +58,10 @@ target_include_directories(test_trapezoid PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
 add_test(NAME trapezoid COMMAND test_trapezoid)
 
+add_executable(test_shader_source_rule test_shader_source_rule.cpp)
+target_include_directories(test_shader_source_rule PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME shader_source_rule COMMAND test_shader_source_rule ${CMAKE_CURRENT_SOURCE_DIR}/..)
+
 add_executable(test_renderer test_renderer.cpp)
 
 target_link_libraries(test_renderer PRIVATE grace_render grace_null_render grace_warnings)
