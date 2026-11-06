@@ -32,6 +32,19 @@ inline constexpr std::uint32_t kMaxDeferredLights = 16;
 /// off, every pixel value is bit-identical to before the chain existed (H4).
 /// The chain runs after lighting and before frame completion, owned by the
 /// renderer, and is path-independent (forward and deferred feed it).
+/// SSAO configuration (milestone 6c), part of the post chain. The occlusion
+/// factor multiplies the ambient term only (decision 18). Temporal filtering
+/// (SSAO-STF) is NOT implemented — recorded deferred to its own increment.
+struct SSAOConfig
+{
+    bool enabled = true;          ///< on when the post chain is on
+    float radius = 0.5f;          ///< world units
+    std::uint32_t samples = 8;    ///< hemisphere samples (max 8 in the shader)
+    float bias = 0.02f;           ///< world units along the normal (self-occlusion guard)
+
+    void validate() const;
+};
+
 struct PostConfig
 {
     bool enabled = false;             ///< post-processing off by default
@@ -39,6 +52,7 @@ struct PostConfig
     float bloomThreshold = 1.0f;      ///< linear HDR threshold for the bright pass
     std::uint32_t bloomLevels = 4;    ///< downsample chain depth (half-res each)
     float bloomStrength = 1.0f;       ///< bloom compose weight
+    SSAOConfig ssao;                  ///< SSAO (6c), darkens the ambient term only
 
     void validate() const;
 };
@@ -144,6 +158,8 @@ private:
     std::unique_ptr<ShaderProgram> m_postBright;
     std::unique_ptr<ShaderProgram> m_postBlur;
     std::unique_ptr<ShaderProgram> m_postTonemap;
+    std::unique_ptr<ShaderProgram> m_postSSAO;
+    RenderTarget* m_ssao = nullptr;  ///< R8 occlusion buffer, full framebuffer size
     std::unique_ptr<ShaderProgram> m_gbuffer_program;
     std::unique_ptr<ShaderProgram> m_deferred_program;
     std::unique_ptr<GpuMesh> m_fullscreen_quad;

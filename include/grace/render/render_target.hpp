@@ -11,6 +11,7 @@ enum class PixelFormat : std::uint8_t
 {
     Rgba8,             ///< 8 bits per channel, RGBA colour attachment (linear values, no display encoding)
     Rgba16F,           ///< 16-bit float per channel, RGBA HDR colour attachment (milestone 6a): linear range ~[0, 65504], ~8 bytes/pixel
+    R8,                ///< 8-bit single channel (milestone 6c): the SSAO occlusion buffer, ~1 byte/pixel
     Depth24Stencil8    ///< 24-bit depth + 8-bit stencil attachment (sampleable as a texture)
 };
 

@@ -174,6 +174,7 @@ std::unique_ptr<ShaderProgram> NullRenderBackend::createShaderProgram(ShaderProg
     case ShaderProgramId::PostBright: name = "PostBright"; break;
     case ShaderProgramId::PostBlur: name = "PostBlur"; break;
     case ShaderProgramId::PostTonemap: name = "PostTonemap"; break;
+    case ShaderProgramId::PostSSAO: name = "PostSSAO"; break;
     }
     record(std::string("createShaderProgram(") + name + ")");
     if (m_shutdown)

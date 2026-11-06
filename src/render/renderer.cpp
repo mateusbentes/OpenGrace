@@ -10,8 +10,19 @@
 namespace grace::render {
 
 
+void SSAOConfig::validate() const
+{
+    if (!(radius > 0.0f))
+        throw std::invalid_argument("ssao config: radius must be > 0 (world units)");
+    if (samples == 0 || samples > 8)
+        throw std::invalid_argument("ssao config: samples must be in [1, 8]");
+    if (!(bias >= 0.0f))
+        throw std::invalid_argument("ssao config: bias must be >= 0");
+}
+
 void PostConfig::validate() const
 {
+    ssao.validate();
     if (!(exposure > 0.0f))
         throw std::invalid_argument("post config: exposure must be > 0");
     if (!(bloomThreshold >= 0.0f))
@@ -152,11 +163,23 @@ RenderTarget* Renderer::ensureHdrTarget()
         RenderTargetDesc desc;
         desc.width = m_backend.width();
         desc.height = m_backend.height();
-        desc.colorAttachmentCount = 1;
+        // Two colour attachments (decision 11, cap 4): 0 = direct+ambient as
+        // before, 1 = ambient alone so SSAO can scale it (6c, decision 18).
+        desc.colorAttachmentCount = 2;
         desc.colorFormats[0] = PixelFormat::Rgba16F;  // linear HDR
+        desc.colorFormats[1] = PixelFormat::Rgba16F;  // ambient only, linear
         desc.depthAttachment = true;
-        desc.depthFormat = PixelFormat::Depth24Stencil8;
+        desc.depthFormat = PixelFormat::Depth24Stencil8;  // sampleable depth for SSAO
         m_hdr = m_backend.createRenderTarget(desc);
+
+        // Occlusion buffer: R8, full framebuffer size, no depth (~1 B/pixel).
+        RenderTargetDesc sdesc;
+        sdesc.width = m_backend.width();
+        sdesc.height = m_backend.height();
+        sdesc.colorAttachmentCount = 1;
+        sdesc.colorFormats[0] = PixelFormat::R8;
+        sdesc.depthAttachment = false;
+        m_ssao = m_backend.createRenderTarget(sdesc);
 
         // Bloom downsample chain: half resolution each level, same aspect as
         // the framebuffer (the chain's uv math assumes matching aspect), float,
@@ -181,6 +204,7 @@ RenderTarget* Renderer::ensureHdrTarget()
         m_postBright = m_backend.createShaderProgram(ShaderProgramId::PostBright);
         m_postBlur = m_backend.createShaderProgram(ShaderProgramId::PostBlur);
         m_postTonemap = m_backend.createShaderProgram(ShaderProgramId::PostTonemap);
+        m_postSSAO = m_backend.createShaderProgram(ShaderProgramId::PostSSAO);
         ensureFullscreenQuad();
     }
     return m_hdr;
@@ -213,6 +237,11 @@ void Renderer::releasePostResources()
     for (RenderTarget* target : m_bloom)
         m_backend.releaseRenderTarget(target);
     m_bloom.clear();
+    if (m_ssao != nullptr)
+    {
+        m_backend.releaseRenderTarget(m_ssao);
+        m_ssao = nullptr;
+    }
     m_postBright.reset();
     m_postBlur.reset();
     m_postTonemap.reset();
@@ -257,6 +286,32 @@ void Renderer::runPostChain()
         m_backend.endRenderPass();
     }
 
+    // SSAO pass: screen-space occlusion from the scene depth texture into the
+    // R8 occlusion buffer. Forward writes scene depth into the HDR target's
+    // depth attachment directly; deferred keeps it in the G-buffer's depth
+    // (the HDR target's depth holds the lighting fullscreen quad there), so the
+    // source is chosen per path. Same scene depth in both -> identical occlusion.
+    if (m_config.post.ssao.enabled && m_ssao != nullptr)
+    {
+        RenderTarget* depthSource =
+            m_config.path == RenderPath::Deferred ? m_gbuffer : m_hdr;
+        m_backend.beginRenderPass(m_ssao);
+        m_backend.bindTexture(m_backend.renderTargetTexture(depthSource, kDepthAttachment), 0);
+        m_postSSAO->use();
+        m_postSSAO->setUniform("depthTex", 0);
+        m_postSSAO->setUniform("outSize", core::vec2{static_cast<float>(m_ssao->width()),
+                                                      static_cast<float>(m_ssao->height())});
+        m_postSSAO->setUniform("invProj", core::perspectiveInverse(
+            m_config.camera.fovYRad, m_config.camera.aspect, m_config.camera.near, m_config.camera.far));
+        m_postSSAO->setUniform("proj", core::perspective(
+            m_config.camera.fovYRad, m_config.camera.aspect, m_config.camera.near, m_config.camera.far));
+        m_postSSAO->setUniform("radius", m_config.post.ssao.radius);
+        m_postSSAO->setUniform("sampleCount", static_cast<int>(m_config.post.ssao.samples));
+        m_postSSAO->setUniform("bias", m_config.post.ssao.bias);
+        m_fullscreen_quad->drawIndexed();
+        m_backend.endRenderPass();
+    }
+
     // Tonemap + compose into the default framebuffer (display-encoded output).
     // The default target is cleared here because with post on, beginFrame
     // cleared the HDR target instead — without this, stale depth would reject
@@ -264,10 +319,16 @@ void Renderer::runPostChain()
     m_backend.beginRenderPass(nullptr);
     m_backend.clear();
     m_backend.bindTexture(m_backend.renderTargetTexture(m_hdr, 0), 0);
-    m_backend.bindTexture(m_backend.renderTargetTexture(m_bloom.back(), 0), 1);
+    m_backend.bindTexture(m_backend.renderTargetTexture(m_hdr, 1), 1);
+    m_backend.bindTexture(m_backend.renderTargetTexture(m_bloom.back(), 0), 2);
+    m_backend.bindTexture(m_backend.renderTargetTexture(m_ssao, 0), 3);
     m_postTonemap->use();
     m_postTonemap->setUniform("hdrTex", 0);
-    m_postTonemap->setUniform("bloomTex", 1);
+    m_postTonemap->setUniform("hdrAmbient", 1);
+    m_postTonemap->setUniform("bloomTex", 2);
+    m_postTonemap->setUniform("ssaoTex", 3);
+    m_postTonemap->setUniform("useSSAO",
+                              m_config.post.ssao.enabled && m_ssao != nullptr ? 1 : 0);
     m_postTonemap->setUniform("outSize", core::vec2{static_cast<float>(m_backend.width()),
                                                     static_cast<float>(m_backend.height())});
     m_postTonemap->setUniform("exposure", m_config.post.exposure);

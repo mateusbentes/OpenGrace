@@ -16,6 +16,8 @@ GLint toInternalFormat(PixelFormat format)
         return GL_RGBA8;
     case PixelFormat::Rgba16F:
         return GL_RGBA16F;
+    case PixelFormat::R8:
+        return GL_R8;
     case PixelFormat::Depth24Stencil8:
         return GL_DEPTH24_STENCIL8;
     }
@@ -24,7 +26,15 @@ GLint toInternalFormat(PixelFormat format)
 
 GLenum toPixelFormat(PixelFormat format)
 {
-    return format == PixelFormat::Depth24Stencil8 ? GL_DEPTH_STENCIL : GL_RGBA;
+    switch (format)
+    {
+    case PixelFormat::Depth24Stencil8:
+        return GL_DEPTH_STENCIL;
+    case PixelFormat::R8:
+        return GL_RED;
+    default:
+        return GL_RGBA;
+    }
 }
 
 GLenum toPixelType(PixelFormat format)
@@ -35,6 +45,8 @@ GLenum toPixelType(PixelFormat format)
         return GL_UNSIGNED_BYTE;
     case PixelFormat::Rgba16F:
         return GL_HALF_FLOAT;
+    case PixelFormat::R8:
+        return GL_UNSIGNED_BYTE;
     case PixelFormat::Depth24Stencil8:
         return GL_UNSIGNED_INT_24_8;
     }

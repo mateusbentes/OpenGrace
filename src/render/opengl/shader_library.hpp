@@ -58,6 +58,7 @@ uniform vec3 specular;
 uniform float shininess;
 uniform vec3 emissive;
 uniform float ambient;   // scene-global ambient term, linear (6b, decision 17)
+layout(location = 1) out vec4 outAmbient;  // 6c: ambient alone, for SSAO scaling (discarded on single-attachment targets)
 uniform int hasSun;
 uniform vec3 sunDirection;
 uniform vec3 sunColor;
@@ -222,6 +223,7 @@ void main()
     }
 
     vec3 result = emissive + albedo * vec3(ambient);
+    outAmbient = vec4(albedo * vec3(ambient), 1.0);
     if (hasSun == 1)
     {
         vec3 L = normalize(-sunDirection);
@@ -387,7 +389,7 @@ layout(location = 0) out vec4 outAlbedo;
 layout(location = 1) out vec4 outNormal;
 void main()
 {
-    outAlbedo = vec4(albedo, shininess / 1024.0);
+    outAlbedo = vec4(albedo, shininess / 1024.0);  // G-buffer, unchanged
     outNormal = vec4(normalize(vNormal) * 0.5 + 0.5,
                      dot(specular, vec3(0.299, 0.587, 0.114)));
 }
@@ -412,6 +414,7 @@ uniform mat4 invView;
 uniform vec3 cameraPos;
 uniform vec4 clearColor;
 uniform float ambient;   // scene-global ambient term, linear (6b, decision 17)
+layout(location = 1) out vec4 outAmbient;  // 6c: ambient alone, for SSAO scaling (discarded on single-attachment targets)
 uniform int hasSun;
 uniform vec3 sunDirection;
 uniform vec3 sunColor;
@@ -565,6 +568,7 @@ void main()
     }
 
     vec3 result = albedo * vec3(ambient);
+    outAmbient = vec4(albedo * vec3(ambient), 1.0);
     if (hasSun == 1)
     {
         vec3 L = normalize(-sunDirection);
@@ -697,8 +701,11 @@ void main()
 )";
 
 constexpr const char* kPostTonemapFragmentShader = R"(#version 330 core
-uniform sampler2D hdrTex;     // linear HDR lighting result
+uniform sampler2D hdrTex;     // linear HDR lighting result (direct + ambient)
+uniform sampler2D hdrAmbient; // linear ambient-only attachment (6c)
 uniform sampler2D bloomTex;   // linear bloom (already blurred)
+uniform sampler2D ssaoTex;    // occlusion factor in [0,1] (1 = unoccluded)
+uniform int useSSAO;          // 0 when the SSAO pass was skipped: occlusion is 1
 uniform vec2 outSize;         // default framebuffer size
 uniform float exposure;
 out vec4 fragment;
@@ -722,10 +729,87 @@ vec3 srgbEncode(vec3 c)
 void main()
 {
     vec2 uv = gl_FragCoord.xy / outSize;
-    vec3 hdr = texture(hdrTex, uv).rgb;
+    vec3 hdr = texture(hdrTex, uv).rgb;          // direct + ambient
+    vec3 amb = texture(hdrAmbient, uv).rgb;      // ambient alone (attachment 1; 0 on single-attachment targets)
     vec3 bloom = texture(bloomTex, uv).rgb;
-    vec3 tonemapped = aces((hdr + bloom) * exposure);
+    float occ = useSSAO == 1 ? texture(ssaoTex, uv).r : 1.0;
+    // 6c: occlusion multiplies the ambient term only: direct + ambient * occ.
+    vec3 tonemapped = aces((hdr - amb + amb * occ + bloom) * exposure);
     fragment = vec4(srgbEncode(tonemapped), 1.0);
+}
+)";
+
+// SSAO pass (milestone 6c): fullscreen pass over the HDR target's depth texture.
+// View-space position is reconstructed from depth; the normal is reconstructed
+// from the depth gradient (screen-space derivatives — degrades at grazing
+// angles, documented in decision 18). Samples a fixed hemisphere pattern around
+// the normal within `radius` world units; self-occlusion is prevented by the
+// normal bias. Output is the occlusion factor in [0,1] to an R8 buffer.
+// Deterministic: the sample pattern is fixed (no per-frame random rotation), so
+// tests are reproducible. Temporal filtering (SSAO-STF) is NOT implemented here.
+constexpr const char* kPostSSAOFragmentShader = R"(#version 330 core
+uniform sampler2D depthTex;
+uniform mat4 invProj;
+uniform mat4 proj;
+uniform vec2 outSize;
+uniform float radius;      // world units
+uniform int sampleCount;
+uniform float bias;        // world units along the normal
+out vec4 fragment;
+
+vec3 viewPos(vec2 uv, float d)
+{
+    vec4 clip = vec4(uv * 2.0 - 1.0, d * 2.0 - 1.0, 1.0);
+    vec4 v = invProj * clip;
+    return v.xyz / v.w;
+}
+
+// fixed hemisphere sample directions (tangent space, z >= 0), 8 samples
+vec3 sampleDir(int i)
+{
+    if (i == 0) return vec3(0.0, 0.0, 1.0);
+    if (i == 1) return vec3(0.7071, 0.0, 0.7071);
+    if (i == 2) return vec3(0.0, 0.7071, 0.7071);
+    if (i == 3) return vec3(-0.7071, 0.0, 0.7071);
+    if (i == 4) return vec3(0.0, -0.7071, 0.7071);
+    if (i == 5) return vec3(0.5, 0.5, 0.7071);
+    if (i == 6) return vec3(-0.5, 0.5, 0.7071);
+    return vec3(0.5, -0.5, 0.7071);
+}
+
+void main()
+{
+    vec2 uv = gl_FragCoord.xy / outSize;
+    float d = texture(depthTex, uv).r;
+    if (d >= 1.0) { fragment = vec4(1.0); return; }  // background: unoccluded
+    vec3 p = viewPos(uv, d);
+    vec2 texel = 1.0 / outSize;
+    vec3 px = viewPos(uv + vec2(texel.x, 0.0), texture(depthTex, uv + vec2(texel.x, 0.0)).r);
+    vec3 py = viewPos(uv + vec2(0.0, texel.y), texture(depthTex, uv + vec2(0.0, texel.y)).r);
+    vec3 n = normalize(cross(px - p, py - p));
+    vec3 t = normalize(cross(n, vec3(0.0, 1.0, 0.0)) + vec3(1e-6));
+    vec3 b = cross(n, t);
+
+    float occluded = 0.0;
+    for (int i = 0; i < sampleCount && i < 8; ++i)
+    {
+        vec3 dir = normalize(sampleDir(i));
+        float scale = radius * (0.1 + 0.9 * float(i + 1) / 8.0);
+        vec3 sp = p + (t * dir.x + b * dir.y + n * dir.z) * scale + n * bias;
+        vec4 clip = proj * vec4(sp, 1.0);
+        if (clip.w <= 0.0)
+            continue;  // sample behind the eye
+        vec2 suv = clip.xy / clip.w * 0.5 + 0.5;
+        if (suv.x < 0.0 || suv.x > 1.0 || suv.y < 0.0 || suv.y > 1.0)
+            continue;
+        float sd = texture(depthTex, suv).r;
+        vec3 sv = viewPos(suv, sd);
+        // occluded if the stored surface at the sample is closer than the sample point
+        if (sv.z > sp.z)
+            occluded += 1.0;
+    }
+    float occ = 1.0 - occluded / float(min(sampleCount, 8));
+    fragment = vec4(occ);
 }
 )";
 

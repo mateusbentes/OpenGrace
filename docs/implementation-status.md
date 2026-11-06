@@ -28,7 +28,8 @@ regenerate: `pandoc docs/implementation-status.md -o docs/implementation-status.
 | 6a | HDR pipeline: float HDR target, bloom, filmic tonemap + sRGB display encode, owned by the renderer, off by default. DOF, morphological AA and SSAO-STF remain planned (6b/6c) | Done |
 | 6a | HDR pipeline: float HDR target, bloom, filmic tonemap + sRGB display encode, owned by the renderer, off by default | Done |
 | 6b | Ambient (indirect) lighting term in both paths (decision 17 — a documented deviation from the documented light types) | Done |
-| 6 | Post-processing: HDR, bloom, filmic tonemap (6a done); DOF, AA, SSAO-STF remain planned | Partially done |
+| 6c | SSAO: occlusion factor in a second HDR attachment (ambient only), depth-gradient normals, darkens the ambient term at the tonemap (decision 18). SSAO-STF temporal filtering deferred | Done |
+| 6 | Post-processing: HDR, bloom, filmic tonemap (6a), ambient term (6b), SSAO (6c) done; DOF and morphological AA remain planned (6d) | Partially done |
 | 7 | Global illumination by light volume propagation | Planned |
 | 8 | Physics contract and the first backend | Planned |
 | 9 | Script host: AngelScript integration and type registration | Planned |
@@ -93,6 +94,8 @@ All results below are real runs, on the tree at the stated commit.
 | 2026-11-06 | same, milestone 6a | OpenGL off: 13/13 Debug; OpenGL on: 23/23 Debug and Release; `-L opengl` 10/10; zero warnings under `-Werror`. Post off: all existing pixel values unchanged (e.g. 0.5 linear -> 128 legacy). Post on: tonemap response 0.0->0, 0.18->141, 0.5->206, 1.0->232, 2.0->245, 4.0->252; bloom halo 61 @4px (0 when off); deferred+post 0.5 -> 206 (same as forward). CLI four combinations (forward/deferred x post off/on) all exit 0: 30,30,30,255 with the chain off and 110,110,110,255 with it on, in both paths. Measured after the presentation fix in the same commit; before it every combination read 30,30,30,255, because clear() captured the pixel and swapped the buffer before the tonemap ran. shader_source_rule: 0 hits outside the backend library. HDR target: Rgba16F + sampleable depth texture, ~7.4 MB colour at 1280x720 |
 | 2026-11-06 | same, milestone 6b | OpenGL off: 13/13 Debug; OpenGL on: 23/23 Debug and Release; `-L opengl` 10/10; zero warnings under `-Werror`. Ambient term in both paths, same math; renderer config `ambient` default 0.05 linear |
 | 2026-11-06 | same, milestone 6b | Defect fix with real before/after: occluded centre was `0,0,0,255` in both paths, now `13,13,13,255` in both (ambient 0.05 * albedo 1, legacy 8-bit) — test_deferred shadow parity diff 0. Parity with ambient: forward `140,140,140,255` = deferred `140,140,140,255` (diff 0; before: 128 vs 127). Unlit surface ambient check: 0.1 linear -> pixel 25. Post chain: clear colour 30 linear reads 30 legacy, 110 through the chain (both paths, all four CLI combos exit 0) |
+| 2026-11-06 | same, milestone 6c | OpenGL off: 13/13 Debug; OpenGL on: 24/24 Debug and Release; `-L opengl` 11/11; zero warnings under `-Werror`. New suite test_ssao 9/9: flat surface ssao on 232 = off 232 (no self-occlusion); corner (ground + two walls at x/y=0.35) near-corner pixel 206 (occ 0.5, 4/8 samples) vs open-area 232; path agreement on the corner forward 206 = deferred 206 (diff 0); direct-only scene (ambient 0) ssao on 206 = off 206. Post off: all legacy pixel values bit-identical (CLI 30,30,30,255 both paths, exit 0); post on: CLI 110,110,110,255 both paths, exit 0, visible and xvfb hidden |
+| 2026-11-06 | same, milestone 6c | Check counts (all zero failures): version 4, fixed_step_clock 42, application 26, math 38, lights 36, cascades 133, paraboloid 27, trapezoid 80, shader_source_rule 1, renderer 19, opengl_context 20, opengl_render 115, mesh 13, shader 15, lighting 11, shadows 8, point_shadows 7, tsm 11, deferred 23, post 12, ssao 9. No existing suite decreased. shader_source_rule: `#version` only in `src/render/opengl/shader_library.hpp`. `application.cpp` unchanged (git diff empty). R8 occlusion buffer ~1 B/pixel; HDR target 2x Rgba16F + depth (~16.6 MB colour at 1280x720) |
 | 2026-11-05 | same, contract extension | OpenGL off: 7/7 Debug; OpenGL on: 11/11 Debug and Release; `-L opengl` 4/4; zero warnings under `-Werror`; check counts: opengl_context 20, opengl_render 47 |
 
 | Published tree did not build with `GRACE_ENABLE_OPENGL=ON` | The lighting commit left the shader header unstaged and published half of a `const` change, so `drawIndexed() const` in the null backend had no matching override | Complete the change set and verify by building a fresh clone |
@@ -308,6 +311,44 @@ not exist before GL 3.2, so "3.0 core" is not a valid request.
     Consequence fixed in 6b: occluded surfaces used to read 0,0,0,255 (a defect
     recorded since the render-target milestone); they now read the ambient
     contribution (13,13,13,255 legacy) in both paths.
+
+18. **Where does the occlusion factor live, and how do the two paths get the
+    same SSAO?** **Resolved 2026-11-06 (milestone 6c): option (b) — a second
+    colour attachment on the HDR target carries the ambient contribution
+    alone, and the tonemap composes `direct + ambient * occ`.** Decision 11
+    (MRT, cap 4) already covers it: the HDR target uses 2 of 4 attachments, no
+    contract change. Cost comparison recorded: (a) a forward depth+normal
+    prepass would cost an extra geometry pass (the most expensive kind) plus a
+    normal buffer and would make forward multi-pass; (b) costs one extra
+    attachment write inside the existing lighting pass (free) plus the
+    screen-space SSAO pass that every option needs; code-wise (b) fits the
+    layering (the renderer composes passes; the contract stays generic).
+    Normals (A1): the SSAO pass reconstructs view-space positions from depth
+    and the normal from the depth gradient (screen-space cross product), so
+    BOTH paths run identical SSAO math on identical scene depth — forward reads
+    the HDR target's depth, deferred reads the G-buffer's depth (the HDR
+    target's depth holds the lighting fullscreen quad there). Depth-gradient
+    normals degrade at grazing angles (the gradient flattens); the 8-bit
+    G-buffer normals would be adequate for this low-frequency kernel but are
+    not used, to keep the paths byte-identical. Occlusion (A2): radius 0.5
+    world units, 8 fixed hemisphere samples scaled 0.1..1.0 of the radius,
+    bias 0.02 world units along the normal (the self-occlusion guard: a flat
+    surface's samples sit bias above the plane and never register as occluded
+    — measured: flat pixel 232 with SSAO on = 232 with it off). Output is an
+    R8 occlusion buffer at full framebuffer size (~1 byte/pixel, 128x96 =
+    12 KB; ~0.9 MB at 1280x720). The factor multiplies the ambient term ONLY:
+    `aces((hdr - amb + amb*occ + bloom) * exposure)` then sRGB. Smallest
+    resolvable change: occ is quantized in 1/8 steps (8 samples); at the
+    default ambient 0.05 one step is ~2/255 in 8-bit output (marginal), so the
+    tests use ambient 1.0 where one step is ~4/255 (measured 232 -> 228).
+    Temporal filtering (A3): NOT implemented — SSAO-STF is deferred to its own
+    increment; it would need per-pixel motion-vector reprojection, which
+    nothing in the project supplies today. What the non-temporal version does
+    that a temporal one would not: it is deterministic (fixed sample pattern,
+    no per-frame noise rotation), so tests are reproducible byte-for-byte.
+    Path agreement (A4): forward and deferred read the same scene depth and
+    run the same pass; measured near-corner pixel forward 206 = deferred 206
+    (diff 0), open-area 232 = 232.
 15. **Where is the linear-to-display boundary?** **Resolved 2026-11-06
     (milestone 6a).** Before 6a the pipeline wrote linear values straight into
     an 8-bit non-sRGB framebuffer — the output was missing a display encoding
