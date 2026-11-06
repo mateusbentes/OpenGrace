@@ -26,7 +26,9 @@ or TopWare Interactive.
 
 - Reimplement the documented GRACE 2 architecture as original source code.
 - Keep every subsystem behind a platform-neutral contract.
-- Target Linux x86_64 with OpenGL only; other platforms are out of scope.
+- Target Linux x86_64 with OpenGL as the implemented platform. Windows and
+  Android are planned and described in the Platforms section; neither is
+  implemented, and no source file has been adapted for them.
 - Validate each subsystem with deterministic tests and observable behaviour.
 - Document design decisions, limitations, and validation results clearly.
 
@@ -50,6 +52,39 @@ The following are intentionally excluded:
 - [docs/implementation-status.md](docs/implementation-status.md) — milestone
   progress, validation records and the open decisions.
 
+## Platforms
+
+| Platform | Graphics API | Status |
+| --- | --- | --- |
+| Linux x86_64 | OpenGL 3.3 core, falling back to 3.0 | Implemented and validated |
+| Windows x86_64 | OpenGL | Planned, not started |
+| Android | OpenGL ES 3.0 | Planned, not started |
+
+Only the first row is real. Linux x86_64 with OpenGL is the only target that
+builds and passes its tests; the other two are recorded here so the intended
+scope is explicit rather than implied. Nothing in this repository currently
+supports them, and no build file, shader or source file has been adapted for
+either.
+
+Windows is expected to be a small change rather than a port. The window and the
+context come from SDL2, the render contract is API-neutral, and the OpenGL entry
+points are resolved at runtime through `SDL_GL_GetProcAddress` instead of being
+linked directly, so there is no import library to replace. The build has not
+been exercised on Windows and the loader has not been reviewed for it.
+
+Android is a larger change and is not primarily a build-system question. OpenGL
+ES is a different API profile with a different shading language: the shaders
+target GLSL 3.30 core and would need a GLSL ES 3.00 path, and that difference
+would have to be absorbed inside the OpenGL backend so the render contract stays
+API-neutral. The application lifecycle also differs, because the application
+does not own its window and the context can be lost and recreated. None of that
+is implemented.
+
+The physics and scripting backends are not wired yet, so neither platform
+introduces a dependency that is currently unavailable there. The PhysX SDK 3.4
+upstream lists Windows, Linux, OSX, Android and iOS among its supported
+platforms, which is part of why Windows and Android are the two recorded here.
+
 ## Building
 
 Requirements: CMake 3.16 or newer and a C++17 compiler (GCC or Clang).
@@ -66,7 +101,7 @@ Build options:
 | --- | --- | --- |
 | `GRACE_BUILD_TESTS` | `ON` | Build and register the deterministic tests with CTest. |
 | `GRACE_WARNINGS_AS_ERRORS` | `ON` | Treat compiler warnings as errors. |
-| `GRACE_ENABLE_OPENGL` | `OFF` | Build the Linux OpenGL backend. Requires SDL2 and OpenGL. |
+| `GRACE_ENABLE_OPENGL` | `OFF` | Build the OpenGL backend. Requires SDL2 and OpenGL. |
 | `GRACE_ENABLE_PHYSX` | `OFF` | Build the PhysX 3.4 physics backend from a local SDK clone. |
 
 ## Dependencies

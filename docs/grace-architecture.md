@@ -152,16 +152,18 @@ baseline for OpenGrace.
 
 ## 4. Target mapping for OpenGrace
 
-OpenGrace targets Linux x86_64 with OpenGL only. This is a strict subset of the
-original platform matrix, and the choice is well supported: OpenGL 3.0+ was a
-documented GRACE 2 target.
+OpenGrace implements Linux x86_64 with OpenGL, and records Windows and Android
+as planned targets. This is a subset of the original platform matrix, and the
+implemented part is well supported: OpenGL 3.0+ was a documented GRACE 2
+target.
 
 | GRACE 2 area | OpenGrace approach |
 | --- | --- |
-| Direct3D 9/10/11 | Out of scope. OpenGL only. |
+| Direct3D 9/10/11 | Out of scope. OpenGL and OpenGL ES only. |
 | OpenGL 3.0+ | Primary target. Core profile, GLSL 3.30 or newer. |
 | Console platforms | Out of scope. |
-| Mobile platforms | Out of scope. |
+| Windows | Planned, not started. OpenGL, same backend; see 4.3. |
+| Mobile platforms | Android is a planned target, not implemented. OpenGL ES 3.0 would be the API; see 4.3. |
 | PhysX / Bullet / Box2D | Plugin contract preserved; backends chosen by licence fit. |
 | OpenAL / OpenSL / XAudio2 / MultiStream | Plugin contract preserved; OpenAL Soft on Linux. |
 | AngelScript + Tetragramaton | Both reimplemented as engine services. |
@@ -208,6 +210,36 @@ script layer holding behaviour rather than authoritative state.
 
 ---
 
+### 4.3 Platform targets
+
+| Platform | Graphics API | Status |
+| --- | --- | --- |
+| Linux x86_64 | OpenGL 3.3 core, falling back to 3.0 | Implemented and validated |
+| Windows x86_64 | OpenGL | Planned, not started |
+| Android | OpenGL ES 3.0 | Planned, not started |
+
+Only Linux is implemented. Windows and Android are recorded so the intended
+scope is explicit rather than implied, and nothing in the repository supports
+either today.
+
+Windows is expected to be a small change rather than a port. The window and the
+context come from SDL2, the render contract is API-neutral, and the OpenGL entry
+points are resolved at runtime through `SDL_GL_GetProcAddress` rather than being
+linked directly, so there is no import library to replace. The build has not
+been exercised on Windows and the loader has not been reviewed for it.
+
+Android is a larger change and is not primarily a build-system question. OpenGL
+ES is a different profile with a different shading language: the shaders target
+GLSL 3.30 core and would need a GLSL ES 3.00 path, and that difference would
+have to be absorbed inside the OpenGL backend so the render contract stays
+API-neutral. The application lifecycle also differs, because the application
+does not own its window and the context can be lost and recreated.
+
+The physics and scripting backends are not wired yet, so neither platform
+introduces a dependency that is currently unavailable there. The PhysX SDK 3.4
+upstream lists Windows, Linux, OSX, Android and iOS among its supported
+platforms, which is part of why Windows and Android are the two recorded here.
+
 ## 5. Licensing boundary
 
 This section records what may and may not be done, so the boundary is explicit
@@ -238,6 +270,11 @@ engine internals, and the two bodies of work should not be conflated.
 ---
 
 ## 6. Milestone plan
+
+This is the original coarse plan, kept as the record of intent. The
+authoritative progress record, with finer-grained numbering and validation
+results, is [implementation-status.md](implementation-status.md); its
+milestone numbers do not correspond one to one with the list below.
 
 Sequenced so that each milestone is independently testable and leaves the tree
 buildable.
