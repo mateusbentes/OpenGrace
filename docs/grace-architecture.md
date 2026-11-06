@@ -16,8 +16,8 @@ GRACE 2 was the in-house game engine of Reality Pump Studios, a division of
 TopWare Interactive, based in Kraków, Poland. It succeeded the original GRACE
 engine, the one used by *Two Worlds* (2007) and *Two Worlds II* (2010). The
 official site makes the same distinction in its own words: "its previous
-versions have powered ... games from the Two Worlds franchise". The best-
-evidenced title to run on GRACE 2 itself is the unreleased *Sacrilegium*.
+versions have powered ... games from the Two Worlds franchise". The
+best-evidenced title to run on GRACE 2 itself is the unreleased *Sacrilegium*.
 
 Which titles ran on the engine is harder to establish than the architecture.
 The official site displayed "example screenshots from games that have been
