@@ -10,10 +10,10 @@ behaviour and published technical descriptions of the original engine.
 ## What GRACE 2 was
 
 GRACE 2 was the in-house engine of Reality Pump Studios, a division of TopWare
-Interactive, based in Kraków, Poland. It succeeded the GRACE engine used by
-*Two Worlds* (2007) and *Two Worlds II* (2010), and powered *Raven's Cry* (2015)
-and the unreleased *Sacrilegium*. The studio ceased development in 2015 and no
-source release ever occurred.
+Interactive, based in Kraków, Poland. It succeeded the original GRACE engine,
+the one used by *Two Worlds* (2007) and *Two Worlds II* (2010). GRACE 2 itself
+powered *Raven's Cry* (2015) and the unreleased *Sacrilegium*. The studio
+ceased development in 2015 and no source release ever occurred.
 
 A public beta of the GRACE 2 SDK was distributed between 2012 and roughly 2014
 under a free non-commercial licence. That channel no longer exists, and this

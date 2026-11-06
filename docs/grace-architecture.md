@@ -14,8 +14,13 @@ non-public software. See "Sources" at the end for the full provenance list.
 
 GRACE 2 was the in-house game engine of Reality Pump Studios, a division of
 TopWare Interactive, based in Kraków, Poland. It succeeded the original GRACE
-engine used by *Two Worlds* (2007) and *Two Worlds II* (2010), and powered
-*Raven's Cry* (2015) and the unreleased *Sacrilegium*.
+engine, the one used by *Two Worlds* (2007) and *Two Worlds II* (2010). GRACE 2
+itself powered *Raven's Cry* (2015) and the unreleased *Sacrilegium*.
+
+The architecture recorded here is the engine as the public material describes
+it between 2012 and the studio's closure in 2015, which is its final stage. It
+is not the engine behind *Two Worlds II*, and no system in this document should
+be read as a description of that game's technology.
 
 The studio ceased development in 2015. No source release ever occurred, and the
 engine is not available in any form today. The GRACE 2 SDK was distributed as a
@@ -163,6 +168,7 @@ target.
 | OpenGL 3.0+ | Primary target. Core profile, GLSL 3.30 or newer. |
 | Console platforms | Out of scope. |
 | Windows | Planned, not started. OpenGL, same backend; see 4.3. |
+| macOS | Not a target. Apple deprecated OpenGL in macOS 10.14, so a backend would be possible but would have no future; see 4.3. |
 | Mobile platforms | Android is a planned target, not implemented. OpenGL ES 3.0 would be the API; see 4.3. |
 | PhysX / Bullet / Box2D | Plugin contract preserved; backends chosen by licence fit. |
 | OpenAL / OpenSL / XAudio2 / MultiStream | Plugin contract preserved; OpenAL Soft on Linux. |
@@ -234,6 +240,23 @@ GLSL 3.30 core and would need a GLSL ES 3.00 path, and that difference would
 have to be absorbed inside the OpenGL backend so the render contract stays
 API-neutral. The application lifecycle also differs, because the application
 does not own its window and the context can be lost and recreated.
+
+macOS is not a target. The published material lists it among supported
+platforms, and the engine shipped a Mac build in its earlier generation, so
+this is a scope decision and not a claim about the original. Apple deprecated
+OpenGL in macOS 10.14 rather than removing it, so a backend remains possible;
+it would be written against an API the platform vendor has abandoned, and that
+is the reason it is out of scope rather than a technical impossibility. The
+distinction matters: deprecated is not the same as absent, and this project
+does not get to call something impossible because it is unattractive.
+
+Android carries one concrete requirement that belongs here rather than in a
+future porting note. The HDR target is a 16-bit float colour attachment, which
+OpenGL ES 3.0 does not require to be renderable: it needs
+`EXT_color_buffer_float` or `EXT_color_buffer_half_float`, or OpenGL ES 3.2.
+An Android backend would therefore depend on an extension the target table
+does not currently mention, and discovering that during a port would be an
+expensive way to learn it.
 
 The physics and scripting backends are not wired yet, so neither platform
 introduces a dependency that is currently unavailable there. The PhysX SDK 3.4
