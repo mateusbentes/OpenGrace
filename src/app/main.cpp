@@ -9,6 +9,7 @@
 #include <system_error>
 
 #include "grace/app/application.hpp"
+#include "grace/render/renderer.hpp"
 #include "grace/render/null_render_backend.hpp"
 #ifdef GRACE_HAVE_OPENGL
 #include "grace/render/opengl_render_backend.hpp"
@@ -19,6 +20,7 @@ namespace {
 struct Options
 {
     bool headless = false;
+    std::string path = "forward";
     bool help = false;
     bool hidden = false;
     bool readback = false;
@@ -95,6 +97,12 @@ int main(int argc, char** argv)
         else if (arg == "--headless")
         {
             options.headless = true;
+        }
+        else if (arg == "--path")
+        {
+            if (i + 1 >= argc)
+                return usageError("--path requires a value");
+            options.path = argv[++i];
         }
         else if (arg == "--hidden")
         {
@@ -178,6 +186,15 @@ int main(int argc, char** argv)
     // Deterministic clear colour for every run.
     constexpr grace::render::ClearColor kClearColor{0x1E, 0x1E, 0x1E, 0xFF};
 
+    grace::render::RendererConfig rendererConfig;
+    if (options.path == "forward")
+        rendererConfig.path = grace::render::RenderPath::Forward;
+    else if (options.path == "deferred")
+        rendererConfig.path = grace::render::RenderPath::Deferred;
+    else
+        return usageError("--path expects 'forward' or 'deferred'");
+    rendererConfig.clear_color = kClearColor;
+
     grace::app::ApplicationConfig config;
     config.frame_ns = options.frame_time_ns;
     config.step = grace::core::FixedStepConfig{options.step_ns, options.max_steps};
@@ -211,10 +228,13 @@ int main(int argc, char** argv)
             backend = std::move(concrete);
         }
 
-        grace::app::Application app(config, *backend);
+        grace::render::Renderer renderer(*backend);
+        renderer.setConfig(rendererConfig);
+        grace::app::Application app(config, renderer);
         const std::uint64_t total_steps = app.run(options.frames);
 
-        std::printf("grace: backend=%s frame=%" PRIu32 "x%" PRIu32 "\n",
+        std::printf("grace: path=%s backend=%s frame=%" PRIu32 "x%" PRIu32 "\n",
+                    options.path.c_str(),
                     backend->describe().c_str(), backend->width(), backend->height());
         std::printf("grace: frames=%" PRIu64 " steps=%" PRIu64 " clamps=%" PRIu64 "\n",
                     options.frames, total_steps, app.clock().clampCount());

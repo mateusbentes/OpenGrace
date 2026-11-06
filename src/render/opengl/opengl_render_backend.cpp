@@ -17,7 +17,6 @@
 #include "grace/render/opengl/gl_loader.hpp"
 #include "grace/render/shadow.hpp"
 
-#include "opengl_gbuffer.hpp"
 #include "opengl_lighting.hpp"
 #include "opengl_mesh.hpp"
 #include "opengl_render_target.hpp"
@@ -170,16 +169,6 @@ struct OpenGLRenderBackend::Impl
 
     // Camera used by submit()/draw() (documented diagnostic default).
     CameraParams camera;
-
-    // Deferred path state (milestone 5). gbuffer is owned by the targets registry.
-    RenderPath render_path = RenderPath::Forward;
-    opengl::GlRenderTarget* gbuffer = nullptr;
-    std::shared_ptr<ShaderProgram> gbuffer_program;
-    std::shared_ptr<ShaderProgram> deferred_program;
-    std::unique_ptr<GpuMesh> fullscreen_quad;
-    bool gbuffer_cleared = false;                 // G-buffer cleared this frame?
-    std::vector<DynamicLight> frame_lights;       // lights accumulated this frame
-    std::optional<DirectionalLight> frame_sun;
 
     bool ready() const { return state == State::Initialised; }
 
@@ -396,13 +385,6 @@ void OpenGLRenderBackend::shutdownImpl(bool countViolation)
     impl.tri_material.reset();
     impl.triangle_ready = false;
     impl.lighting_program.reset();
-    impl.gbuffer_program.reset();
-    impl.deferred_program.reset();
-    impl.fullscreen_quad.reset();
-    impl.gbuffer = nullptr;  // released with the registry below
-    impl.frame_lights.clear();
-    impl.frame_sun.reset();
-    impl.gbuffer_cleared = false;
     impl.bound_target = nullptr;
     for (auto& target : impl.targets)
         target->release();
@@ -664,10 +646,7 @@ void OpenGLRenderBackend::submit(const DrawSubmission& submission)
         ++impl.violations;
         return;
     }
-    if (impl.render_path == RenderPath::Deferred)
-        submitDeferred(submission);  // validates; throws std::invalid_argument when invalid
-    else
-        submitImpl(submission);
+    submitImpl(submission);  // validates; throws std::invalid_argument when invalid
 }
 
 TextureView* OpenGLRenderBackend::renderTargetTexture(RenderTarget* target,
@@ -700,220 +679,23 @@ TextureView* OpenGLRenderBackend::renderTargetTexture(RenderTarget* target,
     return nullptr;
 }
 
-void OpenGLRenderBackend::setRenderPath(RenderPath path)
+void OpenGLRenderBackend::bindTexture(const TextureView* view, std::uint32_t unit)
 {
-    if (path != RenderPath::Forward && path != RenderPath::Deferred)
-        throw std::invalid_argument("setRenderPath: out-of-range render path");
     Impl& impl = *m_impl;
-    if (!impl.ready())
+    if (!impl.ready() || view == nullptr)
     {
         ++impl.violations;
         return;
     }
-    impl.render_path = path;
-    impl.gbuffer_cleared = false;
-    impl.frame_lights.clear();
-    impl.frame_sun.reset();
-}
-
-RenderPath OpenGLRenderBackend::renderPath() const
-{
-    return m_impl->render_path;
-}
-
-void OpenGLRenderBackend::present()
-{
-    Impl& impl = *m_impl;
-    if (!impl.ready())
+    const auto* glView = dynamic_cast<const opengl::GlTextureView*>(view);
+    if (glView == nullptr)
     {
         ++impl.violations;
         return;
     }
-    presentImpl();
-}
-
-void OpenGLRenderBackend::ensureDeferredResources()
-{
-    Impl& impl = *m_impl;
-    if (!impl.gbuffer)
-    {
-        RenderTargetDesc desc;
-        desc.width = impl.config.width;
-        desc.height = impl.config.height;
-        desc.colorAttachmentCount = 2;  // albedo+params, normal+specular (documented layout)
-        desc.colorFormats[0] = PixelFormat::Rgba8;
-        desc.colorFormats[1] = PixelFormat::Rgba8;
-        desc.depthAttachment = true;
-        desc.depthFormat = PixelFormat::Depth24Stencil8;
-        auto target = std::make_unique<opengl::GlRenderTarget>(impl.gl, desc);
-        impl.gbuffer = target.get();
-        impl.targets.push_back(std::move(target));  // owned by the registry
-    }
-    if (!impl.gbuffer_program)
-        impl.gbuffer_program = std::shared_ptr<ShaderProgram>(
-            createShaderProgram(opengl::kGBufferVertexShader, opengl::kGBufferFragmentShader));
-    if (!impl.deferred_program)
-        impl.deferred_program = std::shared_ptr<ShaderProgram>(
-            createShaderProgram(opengl::kDeferredLightVertexShader,
-                                opengl::kDeferredLightFragmentShader));
-    if (!impl.fullscreen_quad)
-    {
-        Mesh quad;
-        VertexLayout layout;
-        layout.stride = 2 * sizeof(float);
-        layout.attributes.push_back(
-            VertexAttribute{VertexSemantic::Position, ComponentType::Float32, 2, 0, false});
-        quad.setLayout(layout);
-        quad.setVertexData(std::vector<float>{-1.0f, -1.0f, 3.0f, -1.0f, -1.0f, 3.0f});
-        quad.setIndices(std::vector<std::uint32_t>{0, 1, 2});
-        impl.fullscreen_quad = createGpuMesh();
-        impl.fullscreen_quad->upload(quad);
-    }
-}
-
-void OpenGLRenderBackend::submitDeferred(const DrawSubmission& submission)
-{
-    Impl& impl = *m_impl;
-    submission.validate(kMaxDeferredLights);  // deferred: per-object limit does not apply
-    if (impl.frame_lights.size() + submission.lights.size() > kMaxDeferredLights)
-        throw std::invalid_argument(
-            "deferred pass: frame would exceed kMaxDeferredLights (16); rejected, not truncated");
-
-    ensureDeferredResources();
-    if (!impl.gbuffer_cleared)
-    {
-        beginRenderPass(impl.gbuffer);
-        clear();
-        impl.gbuffer_cleared = true;
-    }
-    else
-    {
-        beginRenderPass(impl.gbuffer);
-    }
-
-    const CameraParams& camera = impl.camera;
-    const core::mat4 view = core::lookAt(camera.eye, camera.target, camera.up);
-    const core::mat4 projection =
-        core::perspective(camera.fovYRad, camera.aspect, camera.near, camera.far);
-    const core::mat4 mvp = projection * view * submission.model;
-
-    ShaderProgram& program = *impl.gbuffer_program;
-    program.use();
-    program.setUniform("mvp", mvp);
-    program.setUniform("model", submission.model);
-    const SurfaceParams& surface = submission.material.surfaceParams();
-    program.setUniform("albedo", surface.albedo);
-    program.setUniform("specular", surface.specular);
-    program.setUniform("shininess", surface.shininess);
-    submission.mesh->drawIndexed();
-    // The G-buffer stays bound after submit in deferred mode, so readback()
-    // inspects it until present() (documented).
-
-    for (const DynamicLight& light : submission.lights)
-        impl.frame_lights.push_back(light);
-    if (submission.sun.has_value() && !impl.frame_sun.has_value())
-        impl.frame_sun = submission.sun;
-    impl.drainGlErrors("submitDeferred");
-}
-
-void OpenGLRenderBackend::presentImpl()
-{
-    Impl& impl = *m_impl;
-    if (impl.render_path == RenderPath::Forward)
-        return;  // forward draws straight to the bound target; nothing to resolve
-
-    ensureDeferredResources();
-    if (!impl.gbuffer_cleared)
-    {
-        beginRenderPass(impl.gbuffer);
-        clear();
-        impl.gbuffer_cleared = true;
-        endRenderPass();
-    }
-
-    // Lighting pass into the default framebuffer, reading the G-buffer.
-    beginRenderPass(nullptr);
-    applyViewport();
-    impl.gl.glEnable(GL_DEPTH_TEST);
-    impl.gl.glDepthFunc(GL_LESS);
-    impl.gl.glDepthMask(GL_TRUE);
-
-    auto* albedoView = static_cast<opengl::GlTextureView*>(impl.gbuffer->colorView(0));
-    auto* normalView = static_cast<opengl::GlTextureView*>(impl.gbuffer->colorView(1));
-    auto* depthView = static_cast<opengl::GlTextureView*>(impl.gbuffer->depthView());
-    impl.gl.glActiveTexture(GL_TEXTURE0);
-    impl.gl.glBindTexture(GL_TEXTURE_2D, albedoView->textureId());
-    impl.gl.glActiveTexture(GL_TEXTURE1);
-    impl.gl.glBindTexture(GL_TEXTURE_2D, normalView->textureId());
-    impl.gl.glActiveTexture(GL_TEXTURE2);
-    impl.gl.glBindTexture(GL_TEXTURE_2D, depthView->textureId());
-
-    const CameraParams& camera = impl.camera;
-    const core::mat4 view = core::lookAt(camera.eye, camera.target, camera.up);
-    const core::mat4 invView = core::inverseAffine(view);
-    const core::mat4 invProj =
-        core::perspectiveInverse(camera.fovYRad, camera.aspect, camera.near, camera.far);
-
-    ShaderProgram& program = *impl.deferred_program;
-    program.use();
-    program.setUniform("gbufAlbedo", 0);
-    program.setUniform("gbufNormal", 1);
-    program.setUniform("gbufDepth", 2);
-    program.setUniform("invProj", invProj);
-    program.setUniform("invView", invView);
-    program.setUniform("cameraPos", camera.eye);
-    if (impl.frame_sun.has_value())
-    {
-        program.setUniform("hasSun", 1);
-        program.setUniform("sunDirection", core::normalise(impl.frame_sun->direction));
-        program.setUniform("sunColor", impl.frame_sun->color);
-        program.setUniform("sunIntensity", impl.frame_sun->intensity);
-    }
-    else
-    {
-        program.setUniform("hasSun", 0);
-    }
-    const int lightCount = static_cast<int>(impl.frame_lights.size());
-    program.setUniform("lightCount", lightCount);
-    for (int i = 0; i < lightCount; ++i)
-    {
-        const std::string index = "[" + std::to_string(i) + "]";
-        std::visit(
-            [&](const auto& light) {
-                using T = std::decay_t<decltype(light)>;
-                if constexpr (std::is_same_v<T, PointLight>)
-                {
-                    program.setUniform(("lightType" + index).c_str(), 0);
-                    program.setUniform(("lightPos" + index).c_str(), light.position);
-                    program.setUniform(("lightDir" + index).c_str(), core::vec3{0, 0, 0});
-                    program.setUniform(("lightColor" + index).c_str(), light.color);
-                    program.setUniform(("lightIntensity" + index).c_str(), light.intensity);
-                    program.setUniform(("lightRange" + index).c_str(), light.radius);
-                    program.setUniform(("lightInner" + index).c_str(), 0.0f);
-                    program.setUniform(("lightOuter" + index).c_str(), 0.0f);
-                }
-                else
-                {
-                    program.setUniform(("lightType" + index).c_str(), 1);
-                    program.setUniform(("lightPos" + index).c_str(), light.position);
-                    program.setUniform(("lightDir" + index).c_str(),
-                                       core::normalise(light.direction));
-                    program.setUniform(("lightColor" + index).c_str(), light.color);
-                    program.setUniform(("lightIntensity" + index).c_str(), light.intensity);
-                    program.setUniform(("lightRange" + index).c_str(), light.range);
-                    program.setUniform(("lightInner" + index).c_str(), light.innerAngle);
-                    program.setUniform(("lightOuter" + index).c_str(), light.outerAngle);
-                }
-            },
-            impl.frame_lights[static_cast<std::size_t>(i)]);
-    }
-    impl.fullscreen_quad->drawIndexed();
-    endRenderPass();
-
-    impl.frame_lights.clear();
-    impl.frame_sun.reset();
-    impl.gbuffer_cleared = false;
-    impl.drainGlErrors("present");
+    impl.gl.glActiveTexture(GL_TEXTURE0 + static_cast<GLenum>(unit));
+    impl.gl.glBindTexture(GL_TEXTURE_2D, glView->textureId());
+    impl.drainGlErrors("bindTexture");
 }
 
 void OpenGLRenderBackend::ensureLightingProgram()

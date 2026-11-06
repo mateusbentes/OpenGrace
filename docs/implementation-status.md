@@ -22,7 +22,8 @@ regenerate: `pandoc docs/implementation-status.md -o docs/implementation-status.
 | 4c | Cascaded sun shadow mapping with per-slice corner fitting and bilateral filtering. The trapezoidal projective transform of architecture §3.4 (decision 8) is evaluated in 4e. Dual paraboloid point-light shadows are 4d | Done |
 | 4d | Dual paraboloid point-light shadow maps with bilateral filtering | Done |
 | 4e | Trapezoidal projective transform for the sun cascades — implemented behind `CascadeProjection::Trapezoidal` and measured against the fitted default (decision 8 resolved below) | Done |
-| 5 | Deferred lighting alongside forward: MRT G-buffer, lighting pass (this increment). Light-volume GI remains milestone 7 | Done |
+| 5 | Deferred lighting alongside forward: MRT G-buffer, lighting pass. Light-volume GI remains milestone 7 | Done |
+| 5b | Move frame composition out of the render contract into a renderer layer (`grace::render::Renderer`); the backend is a device again. Closes decision 12 | Done |
 | 6 | Post-processing: HDR, bloom, filmic tonemap, DOF, AA, SSAO-STF | Planned |
 | 7 | Global illumination by light volume propagation | Planned |
 | 8 | Physics contract and the first backend | Planned |
@@ -80,7 +81,9 @@ All results below are real runs, on the tree at the stated commit.
 | 2026-11-06 | same, milestone 4e | OpenGL off: 11/11 Debug; OpenGL on: 19/19 Debug and Release; `-L opengl` 8/8; zero warnings under `-Werror`. Decision 8 resolved with measurements (see above): fitted cascade remains the default; trapezoidal warp is opt-in and fell back safely in the test scene |
 | 2026-11-06 | same, milestone 4e | Check counts: version 4, fixed_step_clock 42, application 26, math 35, lights 36, cascades 133, paraboloid 27, trapezoid 80, opengl_context 20, opengl_render 91, mesh 13, shader 16, lighting 10, shadows 8, point_shadows 7, tsm 11 — all zero failures. TSM readback (both modes): acne/lit `110,110,110,255`, near occluded `0,0,0,255`, far occluded `0,0,0,255`. Density: near 0.0284, far 0.2084 world/texel (ratio 7.34) in the default (fitted) mode; temporal delta 110 on a 7x7 grid for a +0.02 camera shift, both modes |
 | 2026-11-06 | same, milestone 5 | OpenGL off: 11/11 Debug; OpenGL on: 20/20 Debug and Release; `-L opengl` 9/9; zero warnings under `-Werror`. Forward stays the default path and passes unchanged; `application.cpp` untouched (still only setClearColor/clear/shutdown) |
-| 2026-11-06 | same, milestone 5 | Deferred measurements (tests/test_deferred.cpp): G-buffer attachment 0 centre readback `255,255,255,16` (albedo white, a = shininess/1024); parity forward `128,128,128,255` vs deferred `127,127,127,255` (diff 1); 6 dynamic lights (over the forward limit of 4, rejected there) lit the centre at `127,127,127,255` in deferred (expected ~124). Shadow maps are NOT consumed by the deferred path in this increment (documented); the deferred light cap is kMaxDeferredLights = 16 (shader uniform array), over-cap submissions rejected, not truncated. G-buffer: 2x RGBA8 + depth24, normals 8-bit mapped, scalar specular — ~11.1 MB at 1280×720, documented |
+| 2026-11-06 | same, milestone 5 | Deferred measurements (tests/test_deferred.cpp): G-buffer attachment 0 centre readback `255,255,255,16` (albedo white, a = shininess/1024); parity forward `128,128,128,255` vs deferred `127,127,127,255` (diff 1); 6 dynamic lights (over the forward limit of 4, rejected there) — **corrected in 5b: this measurement was wrong**. The observed value, `127,127,127,255`, is the sun alone (`0.5` at a normal-light dot of one gives `127`); the expectation, `~124`, modelled six point lights and omitted the sun. The two landed within the tolerance of three of each other, so the check passed without the dynamic lights contributing anything, and the multi-light capability this milestone claimed was not demonstrated. The corrected measurement is in the 5b row. Shadow maps are NOT consumed by the deferred path in this increment (documented); the deferred light cap is kMaxDeferredLights = 16 (shader uniform array), over-cap submissions rejected, not truncated. G-buffer: 2x RGBA8 + depth24, normals 8-bit mapped, scalar specular — ~11.1 MB at 1280×720, documented |
+| 2026-11-06 | same, milestone 5b | OpenGL off: 12/12 Debug; OpenGL on: 21/21 Debug and Release; `-L opengl` 9/9; zero warnings under `-Werror`. Contract shrank by exactly the path concept (`RenderPath`/`setRenderPath`/`renderPath`/`present`); nothing a device must do was lost. `application.cpp` diff is the 4-hunk renderer switch (recorded in decision 12) |
+| 2026-11-06 | same, milestone 5b | Deferred via the renderer after 5b: centre pixel `127,127,127,255` — identical to the direct-contract value before the move. Parity forward `128,128,128,255` vs deferred `127,127,127,255` (diff 1). G-buffer attachment 0 readback `255,255,255,16`. CLI: `--path forward` and `--path deferred` both exit 0 with centre pixel `30,30,30,255` (deferred matches forward via the cleared-depth background rule); `--path bogus` exits 2. Check counts: version 4, fixed_step_clock 42, application 26, math 38, lights 36, cascades 133, paraboloid 27, trapezoid 80, renderer 19 (new), opengl_context 20, opengl_render 107, mesh 13, shader 16, lighting 10, shadows 8, point_shadows 7, tsm 11, deferred 21 — all zero failures; no existing suite decreased (opengl_render 113→107 because the shared checks lost the contract's path block; application unchanged at 26 with the updated event log) |
 | 2026-11-05 | same, contract extension | OpenGL off: 7/7 Debug; OpenGL on: 11/11 Debug and Release; `-L opengl` 4/4; zero warnings under `-Werror`; check counts: opengl_context 20, opengl_render 47 |
 
 | Published tree did not build with `GRACE_ENABLE_OPENGL=ON` | The lighting commit left the shader header unstaged and published half of a `const` change, so `drawIndexed() const` in the null backend had no matching override | Complete the change set and verify by building a fresh clone |
@@ -242,23 +245,32 @@ not exist before GL 3.2, so "3.0 core" is not a valid request.
    1280×720 is 12 bytes/pixel = ~11.1 MB, documented in render_target.hpp's
    users (G-buffer layout notes in the deferred shader header).
 
-12. **Is a mode-dependent present() acceptable in the contract?** The deferred
-    path added `setRenderPath` and `present` to the render contract. `present`
-    is a no-op in the forward path and runs the lighting pass in the deferred
-    path, so the contract now carries a mode and a mode-dependent operation,
-    which is the shape decision 7 removed when it took the shadow pass out. The
-    concrete symptom is that no caller in this repository drives the deferred
-    path: the application frame loop never calls `present`, so the `grace`
-    binary cannot render in deferred mode even though the contract supports it
-    and both backends implement it. Two resolutions are open. Either the
-    application calls `present` at the end of a frame, which means consciously
-    relaxing the rule that `src/app/application.cpp` does not change, on the
-    grounds that completing a frame is generic rather than a technique; or the
-    technique leaves the contract and a renderer layer in `grace::render`
-    consumes submissions and drives the contract, with the application talking
-    to the renderer. The second is the shape decision 7 pointed at and costs
-    more; the first is cheap and honest only if `present` is understood as frame
-    completion rather than as presentation.
+12. **Is a mode-dependent present() acceptable in the contract?** **Resolved
+    2026-11-06 (milestone 5b) by the second resolution: the technique left the
+    contract.** A renderer layer (`grace::render::Renderer` in
+    `include/grace/render/renderer.hpp`) now owns the frame — path selection,
+    shadow passes, geometry pass, deferred lighting pass, frame begin/end — and
+    composes them from the backend's pass primitives. The contract lost
+    `RenderPath`/`setRenderPath`/`renderPath`/`present` and keeps only device
+    capabilities (targets, passes, textures, camera, draw/submit, clear,
+    readback, shutdown, texture binding). `src/app/application.cpp` changed
+    exactly once, in this increment, with the recorded reason: the application
+    drives the renderer instead of the backend (constructor takes
+    `render::Renderer&`; runFrame calls `beginFrame()`/`endFrame()` instead of
+    `backend.clear()`; shutdown via `renderer.backend().shutdown()`). The
+    fixed-step loop, frame timing and shutdown order are unchanged. The shadow
+    free functions stay in `shadow.cpp` and are called by the renderer, which
+    owns their configuration. Known remaining leak, recorded not fixed:
+    `DrawSubmission` still carries `shadow`/`pointShadows` pointers —
+    composition data on a device-level type; the proposal is for the renderer
+    to hold the `ShadowMap` and bind it at submit time in a later increment.
+    The `grace` binary now selects the path with `--path forward|deferred`
+    (default forward, invalid value = usage error exit 2) and both paths run
+    to completion, exit 0.
+13. **Renderer vs backend layering.** Recorded with decision 12: the renderer
+    owns frame composition and all path/shadow/light configuration; the backend
+    is a device. The renderer is not a god object — resource management, scene
+    storage, culling and asset loading are explicitly out of its scope.
 
 ## Verification commands
 

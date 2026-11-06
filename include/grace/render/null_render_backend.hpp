@@ -144,9 +144,7 @@ public:
     void setCamera(const CameraParams& camera) override;
     CameraParams camera() const override { return m_camera; }
 
-    void setRenderPath(RenderPath path) override;
-    RenderPath renderPath() const override { return m_render_path; }
-    void present() override;
+    void bindTexture(const TextureView* view, std::uint32_t unit) override;
 
     void queueReadback(std::uint32_t x, std::uint32_t y) override;
     void readback() override;
@@ -174,7 +172,6 @@ private:
     std::vector<std::unique_ptr<NullRenderTarget>> m_targets;
     RenderTarget* m_bound_target = nullptr;
     CameraParams m_camera;
-    RenderPath m_render_path = RenderPath::Forward;
 
     std::uint32_t m_width;
     std::uint32_t m_height;

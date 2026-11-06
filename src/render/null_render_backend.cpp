@@ -352,24 +352,13 @@ TextureView* NullRenderBackend::renderTargetTexture(RenderTarget* target, std::u
     return nullptr;
 }
 
-void NullRenderBackend::setRenderPath(RenderPath path)
+void NullRenderBackend::bindTexture(const TextureView* view, std::uint32_t unit)
 {
-    if (path != RenderPath::Forward && path != RenderPath::Deferred)
-        throw std::invalid_argument("setRenderPath: out-of-range render path");
-    record(std::string("setRenderPath(") + (path == RenderPath::Deferred ? "deferred" : "forward") +
-           ")");
-    if (m_shutdown)
-    {
-        ++m_violations;
-        return;
-    }
-    m_render_path = path;
-}
-
-void NullRenderBackend::present()
-{
-    record("present");
-    if (m_shutdown)
+    char buffer[48];
+    std::snprintf(buffer, sizeof(buffer), "bindTexture(unit=%u,depth=%d)",
+                  static_cast<unsigned int>(unit), view != nullptr && view->isDepth() ? 1 : 0);
+    record(std::string(buffer));
+    if (view == nullptr || m_shutdown)
         ++m_violations;
 }
 

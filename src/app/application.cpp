@@ -5,11 +5,11 @@
 
 namespace grace::app {
 
-Application::Application(ApplicationConfig config, render::RenderBackend& backend,
+Application::Application(ApplicationConfig config, render::Renderer& renderer,
                          StepCallback on_step)
     : m_config(config),
       m_clock(config.step),
-      m_backend(backend),
+      m_renderer(renderer),
       m_on_step(std::move(on_step))
 {
     if (m_config.frame_ns <= 0)
@@ -25,7 +25,7 @@ void Application::initialise()
 {
     if (m_state != State::Created)
         throw std::logic_error("Application::initialise: already initialised");
-    m_backend.setClearColor(m_config.clear_color);
+    m_renderer.setClearColor(m_config.clear_color);
     m_state = State::Initialised;
 }
 
@@ -42,7 +42,8 @@ std::int64_t Application::runFrame()
         if (m_on_step)
             m_on_step(base + static_cast<std::uint64_t>(i));
     }
-    m_backend.clear();
+    m_renderer.beginFrame();
+    m_renderer.endFrame();
     return steps;
 }
 
@@ -62,7 +63,7 @@ void Application::shutdown()
 {
     if (m_state != State::Initialised)
         throw std::logic_error("Application::shutdown: not initialised");
-    m_backend.shutdown();
+    m_renderer.backend().shutdown();
     m_state = State::Shutdown;
 }
 

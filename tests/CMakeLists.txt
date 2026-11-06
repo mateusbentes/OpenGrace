@@ -58,6 +58,13 @@ target_include_directories(test_trapezoid PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
 add_test(NAME trapezoid COMMAND test_trapezoid)
 
+add_executable(test_renderer test_renderer.cpp)
+
+target_link_libraries(test_renderer PRIVATE grace_render grace_null_render grace_warnings)
+target_include_directories(test_renderer PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+add_test(NAME renderer COMMAND test_renderer)
+
 # CLI tests for the grace executable, checked for their exact exit code
 # through check_exit_code.cmake in script mode (no test framework):
 # 0 = success, 2 = usage error.

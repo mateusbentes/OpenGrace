@@ -181,26 +181,6 @@ void runContractChecks(Backend& backend, grace::render::ClearColor color,
         GRACE_CHECK(threw);
     }
 
-    // Path selection (milestone 5): default forward, switch works, invalid
-    // rejected.
-    {
-        GRACE_CHECK(backend.renderPath() == grace::render::RenderPath::Forward);
-        backend.setRenderPath(grace::render::RenderPath::Deferred);
-        GRACE_CHECK(backend.renderPath() == grace::render::RenderPath::Deferred);
-        backend.setRenderPath(grace::render::RenderPath::Forward);
-        bool threw = false;
-        try
-        {
-            backend.setRenderPath(static_cast<grace::render::RenderPath>(99));
-        }
-        catch (const std::invalid_argument&)
-        {
-            threw = true;
-        }
-        GRACE_CHECK(threw);
-        backend.present();
-    }
-
     // MRT descriptor (milestone 5, decision 9): two colour attachments + depth,
     // per-attachment views, cap enforced at creation.
     {

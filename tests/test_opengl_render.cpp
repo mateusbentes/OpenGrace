@@ -116,7 +116,6 @@ int main()
         "submit(lights=1,sun=0,shadow=0,pointShadows=0)",
         "createRenderTarget(64x64,color=0,depth=1)",
         "setCamera",
-        "setRenderPath(deferred)", "setRenderPath(forward)", "present",
         "createRenderTarget(64x64,color=2,depth=1)",
         "renderTargetTexture", "renderTargetTexture", "renderTargetTexture",
         "renderTargetTexture", "renderTargetTexture", "renderTargetTexture",

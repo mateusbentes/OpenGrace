@@ -2,6 +2,7 @@
 #include "grace/render/draw_list.hpp"
 #include "grace/render/light.hpp"
 #include "grace/render/opengl_render_backend.hpp"
+#include "grace/render/renderer.hpp"
 #include "grace/render/render_target.hpp"
 
 #include <cmath>
@@ -32,6 +33,8 @@ using grace::render::OpenGLRenderBackend;
 using grace::render::PixelFormat;
 using grace::render::PointLight;
 using grace::render::RenderPath;
+using grace::render::Renderer;
+using grace::render::RendererConfig;
 using grace::render::RenderTarget;
 using grace::render::RenderTargetDesc;
 using grace::render::SurfaceParams;
@@ -105,13 +108,18 @@ int main()
         return 77;
     }
 
-    // D3: default path is forward; selection works; invalid rejected.
-    GRACE_CHECK(backend->renderPath() == RenderPath::Forward);
-    backend->setRenderPath(RenderPath::Deferred);
-    GRACE_CHECK(backend->renderPath() == RenderPath::Deferred);
-    backend->setRenderPath(RenderPath::Forward);
-    GRACE_CHECK(throwsInvalid(
-        [&] { backend->setRenderPath(static_cast<RenderPath>(99)); }));
+    // D3: path selection lives in the renderer now; default forward; invalid rejected.
+    {
+        Renderer renderer(*backend);
+        GRACE_CHECK(renderer.config().path == RenderPath::Forward);
+        RendererConfig rc;
+        rc.path = RenderPath::Deferred;
+        renderer.setConfig(rc);
+        GRACE_CHECK(renderer.config().path == RenderPath::Deferred);
+        RendererConfig bad;
+        bad.path = static_cast<RenderPath>(99);
+        GRACE_CHECK(throwsInvalid([&] { renderer.setConfig(bad); }));
+    }
 
     // D0: MRT descriptor — cap enforced, per-attachment views.
     GRACE_CHECK_EQ(kMaxColorAttachments, 4u);
@@ -162,25 +170,40 @@ int main()
     ground.material.setSurfaceParams(surface);
     ground.sun = sun;
 
-    // D4 parity: same scene through forward and deferred.
+    // D4 parity: same scene through forward and deferred, both driven by a
+    // Renderer. (Before 5b the deferred path was driven by direct contract
+    // calls and produced centre 127,127,127,255.)
     {
-        backend->setRenderPath(RenderPath::Forward);
-        backend->clear();
-        backend->submit(ground);
+        Renderer fwdRenderer(*backend);
+        RendererConfig fwdCfg;
+        fwdCfg.path = RenderPath::Forward;
+        fwdCfg.shadows = false;
+        fwdCfg.clear_color = black;
+        fwdRenderer.setConfig(fwdCfg);
+        fwdRenderer.beginFrame();
+        fwdRenderer.submit(ground);
+        fwdRenderer.endFrame();
         backend->readback();
         const ClearColor fwd = backend->centerPixel();
 
-        backend->setRenderPath(RenderPath::Deferred);
-        backend->submit(ground);  // G-buffer write; stays bound for inspection
-        // D5: G-buffer attachment 0 contents via readback (albedo rgb + shininess/1024 in a).
+        Renderer defRenderer(*backend);
+        RendererConfig defCfg;
+        defCfg.path = RenderPath::Deferred;
+        defCfg.clear_color = black;
+        defRenderer.setConfig(defCfg);
+        defRenderer.beginFrame();
+        defRenderer.submit(ground);
+        defRenderer.endFrame();
+        // D5: G-buffer attachment 0 contents via readback of the renderer's
+        // G-buffer target (albedo rgb + shininess/1024 in a).
+        backend->beginRenderPass(defRenderer.gbufferTarget());
         backend->readback();
         const ClearColor gbuf0 = backend->centerPixel();
+        backend->endRenderPass();
         std::printf("g-buffer attachment 0 centre: %d,%d,%d,%d (albedo 255,255,255, a=shininess/1024*255~16)\n",
                     static_cast<int>(gbuf0.r), static_cast<int>(gbuf0.g),
                     static_cast<int>(gbuf0.b), static_cast<int>(gbuf0.a));
         GRACE_CHECK(withinTol(gbuf0, ClearColor{255, 255, 255, 16}, 2));
-
-        backend->present();
         backend->readback();
         const ClearColor def = backend->centerPixel();
         std::printf("parity: forward centre=%d,%d,%d,%d  deferred centre=%d,%d,%d,%d  diff=%d\n",
@@ -189,7 +212,6 @@ int main()
                     static_cast<int>(def.b), static_cast<int>(def.a),
                     std::abs(static_cast<int>(fwd.r) - static_cast<int>(def.r)));
         GRACE_CHECK(withinTol(def, fwd, 3));
-        backend->setRenderPath(RenderPath::Forward);
     }
 
     // D5: deferred lights beyond the forward per-object limit of 4. Six point
@@ -209,17 +231,34 @@ int main()
         DrawSubmission many = ground;
         many.lights = six;
         // Forward: 6 dynamic lights exceed the per-object limit -> rejected.
-        GRACE_CHECK(throwsInvalid([&] { backend->submit(many); }));
+        Renderer fwdRenderer(*backend);
+        RendererConfig fwdCfg;
+        fwdCfg.path = RenderPath::Forward;
+        fwdCfg.shadows = false;
+        fwdCfg.clear_color = black;
+        fwdRenderer.setConfig(fwdCfg);
+        GRACE_CHECK(throwsInvalid([&] {
+            fwdRenderer.beginFrame();
+            fwdRenderer.submit(many);  // validate() rejects > 4 in forward
+        }));
 
         // Deferred: accepted; the lighting pass applies all six.
-        backend->setRenderPath(RenderPath::Deferred);
-        backend->submit(many);
-        backend->present();
+        Renderer defRenderer(*backend);
+        RendererConfig defCfg;
+        defCfg.path = RenderPath::Deferred;
+        defCfg.clear_color = black;
+        defRenderer.setConfig(defCfg);
+        defRenderer.beginFrame();
+        defRenderer.submit(many);
+        defRenderer.endFrame();
         backend->readback();
         const ClearColor p = backend->centerPixel();
-        float expected = 0.0f;
-        for (const auto& l : six)
-            expected += pointAttenuation(std::get<PointLight>(l), 1.0f) * 0.2f;  // ndl = 1 at centre
+        float expected = 0.5f;  // the sun (ground has sun, ndl = 1 at the centre)
+        for (int i = 0; i < 6; ++i)
+        {
+            const float dist = 1.0f + 0.2f * static_cast<float>(i);
+            expected += pointAttenuation(std::get<PointLight>(six[static_cast<std::size_t>(i)]), dist) * 0.2f;
+        }
         const ClearColor expectedColor = ClearColor{
             static_cast<std::uint8_t>(std::fmin(expected, 1.0f) * 255.0f + 0.5f),
             static_cast<std::uint8_t>(std::fmin(expected, 1.0f) * 255.0f + 0.5f),
@@ -228,7 +267,6 @@ int main()
                     static_cast<int>(p.r), static_cast<int>(p.g), static_cast<int>(p.b),
                     static_cast<int>(p.a), static_cast<int>(expectedColor.r));
         GRACE_CHECK(withinTol(p, expectedColor, 3));
-        backend->setRenderPath(RenderPath::Forward);
     }
 
     GRACE_CHECK_EQ(backend->glErrorCount(), 0u);

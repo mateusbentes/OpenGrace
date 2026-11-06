@@ -1,5 +1,6 @@
 #include "grace/app/application.hpp"
 #include "grace/render/null_render_backend.hpp"
+#include "grace/render/renderer.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -52,6 +53,7 @@ int main()
     // Invalid configuration rejection.
     {
         NullRenderBackend backend(64, 48);
+        grace::render::Renderer renderer(backend);
         ApplicationConfig config;
         config.frame_ns = 20;
         config.step = FixedStepConfig{10, 4};
@@ -60,7 +62,7 @@ int main()
         config.frame_ns = 0;
         GRACE_CHECK(!Application::isValid(config));
         GRACE_CHECK(throwsInvalidArgument([&] {
-            const Application app(config, backend);
+            const Application app(config, renderer);
             static_cast<void>(app);
         }));
 
@@ -68,7 +70,7 @@ int main()
         config.step = FixedStepConfig{0, 4};
         GRACE_CHECK(!Application::isValid(config));
         GRACE_CHECK(throwsInvalidArgument([&] {
-            const Application app(config, backend);
+            const Application app(config, renderer);
             static_cast<void>(app);
         }));
     }
@@ -81,6 +83,7 @@ int main()
     // violations.
     {
         NullRenderBackend backend(320, 240);
+        grace::render::Renderer renderer(backend);
         ApplicationConfig config;
         config.frame_ns = 20;
         config.step = FixedStepConfig{10, 4};
@@ -88,7 +91,7 @@ int main()
 
         std::vector<std::uint64_t> step_indices;
         std::vector<std::size_t> events_at_step;
-        Application app(config, backend, [&](std::uint64_t index) {
+        Application app(config, renderer, [&](std::uint64_t index) {
             step_indices.push_back(index);
             events_at_step.push_back(backend.events().size());
         });
@@ -104,14 +107,17 @@ int main()
         const std::vector<std::uint64_t> expected_indices{0, 1, 2, 3, 4, 5};
         GRACE_CHECK(step_indices == expected_indices);
 
-        // Frame f's clear is event f+1, so every step of frame f ran while
-        // the log still had f+1 entries.
-        const std::vector<std::size_t> expected_events{1, 1, 2, 2, 3, 3};
+        // Each frame is beginRenderPass(default) + clear + endRenderPass, so
+        // frame f's steps run while the log has 1 + 3*f entries.
+        const std::vector<std::size_t> expected_events{1, 1, 5, 5, 9, 9};
         GRACE_CHECK(events_at_step == expected_events);
 
-        const std::vector<std::string> expected_log{"setClearColor(1,2,3,4)",
-                                                    "clear(1,2,3,4)", "clear(1,2,3,4)",
-                                                    "clear(1,2,3,4)", "shutdown"};
+        const std::vector<std::string> expected_log{
+            "setClearColor(1,2,3,4)",
+            "setCamera", "beginRenderPass(default)", "clear(1,2,3,4)", "endRenderPass",
+            "setCamera", "beginRenderPass(default)", "clear(1,2,3,4)", "endRenderPass",
+            "setCamera", "beginRenderPass(default)", "clear(1,2,3,4)", "endRenderPass",
+            "shutdown"};
         GRACE_CHECK(backend.events() == expected_log);
         GRACE_CHECK_EQ(backend.violationCount(), 0u);
 
@@ -129,11 +135,13 @@ int main()
         config.clear_color = ClearColor{10, 20, 30, 40};
 
         NullRenderBackend first(640, 480);
-        Application a(config, first);
+        grace::render::Renderer firstRenderer(first);
+        Application a(config, firstRenderer);
         static_cast<void>(a.run(4));
 
         NullRenderBackend second(640, 480);
-        Application b(config, second);
+        grace::render::Renderer secondRenderer(second);
+        Application b(config, secondRenderer);
         static_cast<void>(b.run(4));
 
         GRACE_CHECK(first.events() == second.events());
