@@ -199,10 +199,11 @@ void NullRenderBackend::draw(GpuMesh& mesh, ShaderProgram& program)
 void NullRenderBackend::submit(const DrawSubmission& submission)
 {
     submission.validate();  // same rejection behaviour as a real backend
-    char buffer[64];
-    std::snprintf(buffer, sizeof(buffer), "submit(lights=%u,sun=%d)",
+    char buffer[80];
+    std::snprintf(buffer, sizeof(buffer), "submit(lights=%u,sun=%d,shadow=%d)",
                   static_cast<unsigned int>(submission.lights.size()),
-                  submission.sun.has_value() ? 1 : 0);
+                  submission.sun.has_value() ? 1 : 0,
+                  submission.shadow != nullptr ? 1 : 0);
     record(std::string(buffer));
     if (m_shutdown)
         ++m_violations;
@@ -241,11 +242,11 @@ RenderTarget* NullRenderBackend::createRenderTarget(const RenderTargetDesc& desc
     return raw;
 }
 
-void NullRenderBackend::bindRenderTarget(RenderTarget* target)
+void NullRenderBackend::beginRenderPass(RenderTarget* target)
 {
     if (target == nullptr)
     {
-        record("bindRenderTarget(default)");
+        record("beginRenderPass(default)");
         if (m_shutdown)
             ++m_violations;
         else
@@ -255,12 +256,12 @@ void NullRenderBackend::bindRenderTarget(RenderTarget* target)
     NullRenderTarget* known = findTarget(target);
     if (known == nullptr || known->released)
     {
-        record("bindRenderTarget(unknown)");
+        record("beginRenderPass(unknown)");
         ++m_violations;
         return;
     }
     char buffer[64];
-    std::snprintf(buffer, sizeof(buffer), "bindRenderTarget(%ux%u)",
+    std::snprintf(buffer, sizeof(buffer), "beginRenderPass(%ux%u)",
                   static_cast<unsigned int>(known->width()),
                   static_cast<unsigned int>(known->height()));
     record(std::string(buffer));
@@ -269,7 +270,30 @@ void NullRenderBackend::bindRenderTarget(RenderTarget* target)
         ++m_violations;
         return;
     }
-    m_bound_target = known;  // binding while another is bound replaces the binding
+    m_bound_target = known;  // beginning a pass while another is bound replaces it
+}
+
+void NullRenderBackend::endRenderPass()
+{
+    record("endRenderPass");
+    if (m_shutdown)
+    {
+        ++m_violations;
+        return;
+    }
+    m_bound_target = nullptr;
+}
+
+void NullRenderBackend::setCamera(const CameraParams& camera)
+{
+    camera.validate();  // same rejection as a real backend
+    record("setCamera");
+    if (m_shutdown)
+    {
+        ++m_violations;
+        return;
+    }
+    m_camera = camera;
 }
 
 void NullRenderBackend::releaseRenderTarget(RenderTarget* target)
@@ -302,30 +326,6 @@ TextureView* NullRenderBackend::renderTargetTexture(RenderTarget* target)
         return &known->depthView;
     ++m_violations;
     return nullptr;
-}
-
-void NullRenderBackend::renderShadowMap(RenderTarget* target, const DirectionalLight& sun,
-                                        const SceneBounds& bounds,
-                                        const std::vector<DrawSubmission>& submissions)
-{
-    sun.validate();
-    if (!(bounds.radius > 0.0f))
-        throw std::invalid_argument("renderShadowMap: scene bounds radius must be > 0");
-    for (const DrawSubmission& submission : submissions)
-        submission.validate();
-
-    char buffer[96];
-    std::snprintf(buffer, sizeof(buffer), "renderShadowMap(submissions=%u,cascades=1)",
-                  static_cast<unsigned int>(submissions.size()));
-    record(std::string(buffer));
-
-    NullRenderTarget* known = target != nullptr ? findTarget(target) : nullptr;
-    if (known == nullptr || known->released || m_shutdown || m_bound_target == known ||
-        !known->hasDepthAttachment())
-    {
-        ++m_violations;
-        return;
-    }
 }
 
 void NullRenderBackend::queueReadback(std::uint32_t x, std::uint32_t y)

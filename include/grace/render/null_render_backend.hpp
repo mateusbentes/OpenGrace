@@ -125,12 +125,13 @@ public:
     void submit(const DrawSubmission& submission) override;
 
     RenderTarget* createRenderTarget(const RenderTargetDesc& desc) override;
-    void bindRenderTarget(RenderTarget* target) override;
+    void beginRenderPass(RenderTarget* target) override;
+    void endRenderPass() override;
     void releaseRenderTarget(RenderTarget* target) override;
     TextureView* renderTargetTexture(RenderTarget* target) override;
-    void renderShadowMap(RenderTarget* target, const DirectionalLight& sun,
-                         const SceneBounds& bounds,
-                         const std::vector<DrawSubmission>& submissions) override;
+
+    void setCamera(const CameraParams& camera) override;
+    CameraParams camera() const override { return m_camera; }
 
     void queueReadback(std::uint32_t x, std::uint32_t y) override;
     void readback() override;
@@ -157,6 +158,7 @@ private:
 
     std::vector<std::unique_ptr<NullRenderTarget>> m_targets;
     RenderTarget* m_bound_target = nullptr;
+    CameraParams m_camera;
 
     std::uint32_t m_width;
     std::uint32_t m_height;

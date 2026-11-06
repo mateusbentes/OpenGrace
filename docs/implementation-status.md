@@ -18,7 +18,8 @@ regenerate: `pandoc docs/implementation-status.md -o docs/implementation-status.
 | 2 | OpenGL backend, function loader, diagnostic triangle | Done |
 | 3 | Render foundation: math, mesh, shader, material | Done |
 | 4a | Forward lighting: light types, surface parameters, submission, lighting shader | Done |
-| 4b | Shadow maps: render target infrastructure, single-cascade sun shadow map (this increment). Dual paraboloid and trapezoidal cascades are 4c, out of scope | Done |
+| 4b | Shadow maps: render target infrastructure, single-cascade sun shadow map | Done |
+| 4c | Cascaded sun shadow mapping with per-slice corner fitting and bilateral filtering (this increment). The trapezoidal projective transform of architecture §3.4 is not implemented. Dual paraboloid point-light shadows are 4d, out of scope | Done |
 | 5 | Deferred lighting: G-buffer, unlimited lights, light volumes | Planned |
 | 6 | Post-processing: HDR, bloom, filmic tonemap, DOF, AA, SSAO-STF | Planned |
 | 7 | Global illumination by light volume propagation | Planned |
@@ -68,6 +69,9 @@ All results below are real runs, on the tree at the stated commit.
 | 2026-11-06 | same, milestone 4b | OpenGL off: 8/8 Debug; OpenGL on: 14/14 Debug and Release; `-L opengl` 6/6; zero warnings under `-Werror` |
 | 2026-11-06 | same, milestone 4b | Check counts: version 4, fixed_step_clock 42, application 26, math 35, lights 36, opengl_context 20, opengl_render 75, mesh 13, shader 16, lighting 10, shadows 9 — all zero failures. Shadow readback pixels: lit `128,128,128,255`, occluded `0,0,0,255`, no-sun emissive-only `64,128,191,255` |
 | 2026-11-06 | same, milestone 4b | Scope note: the sun shadow map is a **single orthographic cascade covering the whole scene bounds** (fixed 1024 resolution by config, constant documented depth bias, applied to the sun term only; dynamic lights unshadowed). Trapezoidal cascaded shadow mapping and dual paraboloid point-light shadow maps from architecture §3.4 are **4c and not implemented**; the original engine's shadow behaviour is not reproduced |
+| 2026-11-06 | same, milestone 4c | OpenGL off: 9/9 Debug; OpenGL on: 15/15 Debug and Release; `-L opengl` 6/6; zero warnings under `-Werror`. Decision 7 resolved as generic render-pass composition (option b); `renderShadowMap` removed from the contract |
+| 2026-11-06 | same, milestone 4c | Check counts: version 4, fixed_step_clock 42, application 26, math 35, lights 36, cascades 133, opengl_context 20, opengl_render 79, mesh 13, shader 16, lighting 10, shadows 8 — all zero failures. Shadow readback pixels: near-surface lit `128,128,128,255`, near occluded `0,0,0,255`, far-surface lit `128,128,128,255`, far occluded `0,0,0,255`, no-sun emissive-only `64,128,191,255`, debug cascade index `0,0,255,255` |
+| 2026-11-06 | same, milestone 4c | Scope note: cascades are N=4 (documented, clamped to [1,4]) with practical log/uniform splits, per-slice corner fitting of the light-space box to the slice's transformed frustum corners (the standard fitted cascade; the trapezoidal projective transform of §3.4 is not implemented), view-depth cascade selection with a 25% blend zone at cascade boundaries, and a bilateral 3x3 filter (spatial Gaussian x depth-range weight, documented tolerance) — not plain PCF. Sun term only; dynamic lights unshadowed. Dual paraboloid point-light shadows (architecture §3.4) are **4d, not implemented**; the original's shadow behaviour is not fully reproduced |
 | 2026-11-05 | same, contract extension | OpenGL off: 7/7 Debug; OpenGL on: 11/11 Debug and Release; `-L opengl` 4/4; zero warnings under `-Werror`; check counts: opengl_context 20, opengl_render 47 |
 
 | Published tree did not build with `GRACE_ENABLE_OPENGL=ON` | The lighting commit left the shader header unstaged and published half of a `const` change, so `drawIndexed() const` in the null backend had no matching override | Complete the change set and verify by building a fresh clone |
@@ -126,6 +130,17 @@ not exist before GL 3.2, so "3.0 core" is not a valid request.
 ---
 
 ## Open decisions
+8. **Is the fitted cascade a sufficient substitute for the trapezoidal
+   transform?** Section 3.4 of the architectural reference describes
+   trapezoidal cascaded shadow mapping: a trapezoid projected from the light
+   and warped to the unit square by a projective transform, which concentrates
+   resolution near the viewer. What 4c implements is the standard fitted
+   cascade, where the light-space box is fitted to the bounds of the slice's
+   transformed corners. The two differ in how resolution is distributed within
+   a slice, not in correctness. Reproducing the trapezoidal transform is a
+   candidate for 4d, alongside the dual paraboloid point-light shadows; until
+   then the documentation states which one is implemented.
+
 
 1. **Forward or deferred rendering as the primary path?** **Resolved
    2026-11-06: forward is the primary path.** The original supported both
@@ -154,6 +169,18 @@ not exist before GL 3.2, so "3.0 core" is not a valid request.
 6. **Engine name.** OpenGrace follows the convention of OpenMW, OpenRCT2,
    OpenTTD and OpenSAGE, all of which take their name from the original product.
    The closest precedent is OpenSAGE, which reimplements an internal EA engine.
+7. **Shadow-pass contract shape: technique-named method or generic render-pass
+   composition?** The 4b contract method `renderShadowMap(target, sun, bounds,
+   submissions)` could not carry several cascades without becoming a different
+   method. **Resolved 2026-11-06: option (b), generic render-pass composition.**
+   The contract now exposes `beginRenderPass(target)` / `endRenderPass()` with
+   `clear()`/`draw()`/`submit()` operating on the pass target, and no longer
+   knows what a shadow is; `renderShadowMap` was removed and the cascaded pass
+   is built from those primitives in the render module (`renderShadowCascades`),
+   with the shadow map crossing `DrawSubmission` as plain data (`ShadowMap`).
+   Reasoning: it serves a deferred shading path equally, and there was only one
+   consumer to migrate. This was preferred over widening a technique-named
+   method (option (a)), which would have kept the contract shadow-aware.
 
 ---
 

@@ -91,7 +91,8 @@ add_library(grace_render STATIC
     src/render/light.cpp
     src/render/draw_list.cpp
     src/render/render_target.cpp
-    src/render/shadow.cpp)
+    src/render/shadow.cpp
+    src/render/camera.cpp)
 
 target_include_directories(grace_render PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)

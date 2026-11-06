@@ -3,6 +3,8 @@
 #include <stdexcept>
 #include <string>
 
+#include "grace/render/shadow.hpp"
+
 namespace grace::render {
 
 void DrawSubmission::validate() const
@@ -20,6 +22,15 @@ void DrawSubmission::validate() const
     for (const DynamicLight& light : lights)
         validateLight(light);
     validateSurfaceParams(material.surfaceParams());
+    if (shadow != nullptr)
+    {
+        if (shadow->cascadeCount == 0 || shadow->cascadeCount > kMaxCascadeCount)
+            throw std::invalid_argument("draw submission: invalid shadow cascade count");
+        if (shadow->targets.size() != shadow->cascadeCount ||
+            shadow->lightMatrices.size() != shadow->cascadeCount ||
+            shadow->splitDepths.size() != shadow->cascadeCount + 1u)
+            throw std::invalid_argument("draw submission: inconsistent shadow map arrays");
+    }
 }
 
 }  // namespace grace::render

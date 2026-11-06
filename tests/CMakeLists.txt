@@ -37,6 +37,13 @@ target_include_directories(test_lights PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
 add_test(NAME lights COMMAND test_lights)
 
+add_executable(test_cascades test_cascades.cpp)
+
+target_link_libraries(test_cascades PRIVATE grace_render grace_null_render grace_warnings)
+target_include_directories(test_cascades PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+add_test(NAME cascades COMMAND test_cascades)
+
 # CLI tests for the grace executable, checked for their exact exit code
 # through check_exit_code.cmake in script mode (no test framework):
 # 0 = success, 2 = usage error.

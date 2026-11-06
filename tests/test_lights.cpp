@@ -175,7 +175,7 @@ int main()
         // The null backend accepts and records the same submissions.
         null_backend.submit(submission);
         GRACE_CHECK(!null_backend.events().empty());
-        GRACE_CHECK(null_backend.events().back() == std::string("submit(lights=4,sun=0)"));
+        GRACE_CHECK(null_backend.events().back() == std::string("submit(lights=4,sun=0,shadow=0)"));
         GRACE_CHECK_EQ(null_backend.violationCount(), 0u);
         null_backend.shutdown();
         null_backend.submit(submission);  // after shutdown: recorded + violation

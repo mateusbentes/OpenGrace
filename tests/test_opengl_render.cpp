@@ -122,25 +122,26 @@ int main()
         "draw",
         "use",
         "drawIndexed",
-        "submit(lights=1,sun=0)",
+        "submit(lights=1,sun=0,shadow=0)",
         "createRenderTarget(64x64,color=0,depth=1)",
-        "bindRenderTarget(64x64)",
+        "setCamera",
+        "beginRenderPass(64x64)",
         "clear(1,2,3,4)",
-        "renderTargetTexture",  // bound for rendering: violation
-        "bindRenderTarget(default)",
+        "draw",
+        "use",
+        "drawIndexed",
+        "renderTargetTexture",  // inside a pass: violation
+        "endRenderPass",
         "renderTargetTexture",
         "releaseRenderTarget",
-        "bindRenderTarget(unknown)",  // after release: violation
-        "renderTargetTexture",         // after release: violation
-        "bindRenderTarget(unknown)",  // never created: violation
-        "createRenderTarget(64x64,color=0,depth=1)",
-        "renderShadowMap(submissions=1,cascades=1)",
-        "releaseRenderTarget",
+        "beginRenderPass(unknown)",  // after release: violation
+        "renderTargetTexture",        // after release: violation
+        "beginRenderPass(unknown)",  // never created: violation
         "shutdown",
         "draw",    // post-shutdown: violation
         "readback",  // post-shutdown: violation
         "clear(1,2,3,4)",
-        "submit(lights=1,sun=0)"};  // post-shutdown: violation
+        "submit(lights=1,sun=0,shadow=0)"};  // post-shutdown: violation
     GRACE_CHECK(null_backend.events() == expected_events);
 
     OpenGLBackendConfig parity_config;

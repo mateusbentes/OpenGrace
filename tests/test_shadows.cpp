@@ -1,3 +1,4 @@
+#include "grace/render/camera.hpp"
 #include "grace/render/draw_list.hpp"
 #include "grace/render/light.hpp"
 #include "grace/render/opengl_render_backend.hpp"
@@ -14,6 +15,7 @@
 namespace {
 
 using grace::core::vec3;
+using grace::render::CascadeConfig;
 using grace::render::ClearColor;
 using grace::render::ComponentType;
 using grace::render::DirectionalLight;
@@ -22,14 +24,13 @@ using grace::render::Material;
 using grace::render::Mesh;
 using grace::render::OpenGLBackendConfig;
 using grace::render::OpenGLRenderBackend;
-using grace::render::PixelFormat;
 using grace::render::RenderTarget;
-using grace::render::RenderTargetDesc;
-using grace::render::SceneBounds;
+using grace::render::ShadowMap;
 using grace::render::SurfaceParams;
 using grace::render::VertexAttribute;
 using grace::render::VertexLayout;
 using grace::render::VertexSemantic;
+using grace::render::renderShadowCascades;
 
 bool withinTol(ClearColor actual, ClearColor expected, int tol)
 {
@@ -85,7 +86,6 @@ int main()
     config.height = 96;  // non-square on purpose
     config.hidden = true;
     config.readback_center = true;
-    config.shadow_map_size = 256;  // fixed documented resolution, from config
 
     std::unique_ptr<OpenGLRenderBackend> backend;
     try
@@ -99,20 +99,14 @@ int main()
         return 77;
     }
 
+    // Camera with a 20-unit far plane so near and far cases land in different
+    // cascades (splits are derived from these parameters).
+    grace::render::CameraParams camera = backend->camera();
+    camera.far = 20.0f;
+    backend->setCamera(camera);
+
     auto gpu_mesh = backend->createGpuMesh();
     gpu_mesh->upload(makeGroundMesh());
-
-    // Depth-only shadow target at the configured fixed resolution.
-    RenderTargetDesc shadow_desc;
-    shadow_desc.width = config.shadow_map_size;
-    shadow_desc.height = config.shadow_map_size;
-    shadow_desc.colorAttachment = false;  // depth-only: what a shadow pass needs
-    shadow_desc.depthAttachment = true;
-    shadow_desc.depthFormat = PixelFormat::Depth24Stencil8;
-    RenderTarget* shadow_target = backend->createRenderTarget(shadow_desc);
-    GRACE_CHECK(shadow_target != nullptr);
-    GRACE_CHECK(shadow_target->hasDepthAttachment());
-    GRACE_CHECK(!shadow_target->hasColorAttachment());
 
     const ClearColor black{0, 0, 0, 255};
     backend->setClearColor(black);
@@ -125,67 +119,120 @@ int main()
     sun.color = vec3{0.5f, 0.5f, 0.5f};
     sun.intensity = 1.0f;
 
-    SceneBounds bounds;
-    bounds.center = vec3{0.0f, 0.0f, 0.25f};
-    bounds.radius = 1.5f;
-
     DrawSubmission ground;
     ground.mesh = gpu_mesh.get();
     ground.material.setSurfaceParams(surface);
     ground.sun = sun;
 
-    DrawSubmission occluder = ground;  // same triangle, lifted towards the sun
-    occluder.model = grace::core::translation(vec3{0.0f, 0.0f, 0.5f});
+    DrawSubmission occluder_near = ground;  // between the sun and the ground, close to the camera
+    occluder_near.model = grace::core::translation(vec3{0.0f, 0.0f, 0.5f});
+
+    DrawSubmission ground_far = ground;  // same surface far from the camera
+    ground_far.model = grace::core::translation(vec3{0.0f, 0.0f, -8.0f});
+    DrawSubmission occluder_far = ground_far;  // between the sun and the far surface
+    occluder_far.model = grace::core::translation(vec3{0.0f, 0.0f, -7.0f});
+
+    CascadeConfig cascade_config;
+    cascade_config.count = 4;
+    cascade_config.mapSize = 256;
+
+    std::vector<RenderTarget*> all_targets;
+
+    auto renderShadow = [&](const std::vector<DrawSubmission>& casters, bool debug) {
+        CascadeConfig cc = cascade_config;
+        cc.debug = debug;
+        ShadowMap map = renderShadowCascades(*backend, sun, backend->camera(), casters, cc);
+        for (RenderTarget* t : map.targets)
+            all_targets.push_back(t);
+        return map;
+    };
 
     // Case A: surface facing the sun, nothing between it and the sun -> lit.
     {
-        std::vector<DrawSubmission> casters;
-        casters.push_back(ground);
-        backend->renderShadowMap(shadow_target, sun, bounds, casters);
+        ShadowMap shadow = renderShadow({ground}, false);
+        DrawSubmission sub = ground;
+        sub.shadow = &shadow;
         backend->clear();
-        backend->submit(ground);
+        backend->submit(sub);
         backend->readback();
         const ClearColor expected = toColor(0.5f, 0.5f, 0.5f);
-        printPixel("lit", backend->centerPixel());
+        printPixel("lit (no occluder)", backend->centerPixel());
         GRACE_CHECK(withinTol(backend->centerPixel(), expected, 2));
     }
 
-    // Case B: an occluder between the surface and the sun -> darker (shadowed).
+    // Case B: occluder close to the camera casts a shadow on the near surface.
     {
-        std::vector<DrawSubmission> casters;
-        casters.push_back(ground);
-        casters.push_back(occluder);
-        backend->renderShadowMap(shadow_target, sun, bounds, casters);
+        ShadowMap shadow = renderShadow({ground, occluder_near}, false);
+        DrawSubmission sub = ground;
+        sub.shadow = &shadow;
         backend->clear();
-        backend->submit(ground);
+        backend->submit(sub);
         backend->readback();
-        const ClearColor expected_shadowed = toColor(0.0f, 0.0f, 0.0f);
-        printPixel("occluded", backend->centerPixel());
-        GRACE_CHECK(withinTol(backend->centerPixel(), expected_shadowed, 2));
+        const ClearColor expected = toColor(0.0f, 0.0f, 0.0f);
+        printPixel("occluded (near occluder)", backend->centerPixel());
+        GRACE_CHECK(withinTol(backend->centerPixel(), expected, 2));
     }
 
-    // Case C: sun disabled -> lit only by its other terms (emissive here).
+    // Case C: the same occluder far from the camera casts a shadow on the far
+    // surface — a different cascade; the single 4b map could not cover both
+    // reliably at one resolution.
+    {
+        ShadowMap shadow_lit = renderShadow({ground_far}, false);
+        DrawSubmission sub_lit = ground_far;
+        sub_lit.shadow = &shadow_lit;
+        backend->clear();
+        backend->submit(sub_lit);
+        backend->readback();
+        const ClearColor expected_lit = toColor(0.5f, 0.5f, 0.5f);
+        printPixel("far surface lit", backend->centerPixel());
+        GRACE_CHECK(withinTol(backend->centerPixel(), expected_lit, 2));
+
+        ShadowMap shadow_occ = renderShadow({ground_far, occluder_far}, false);
+        DrawSubmission sub_occ = ground_far;
+        sub_occ.shadow = &shadow_occ;
+        backend->clear();
+        backend->submit(sub_occ);
+        backend->readback();
+        const ClearColor expected_occ = toColor(0.0f, 0.0f, 0.0f);
+        printPixel("far surface occluded (far occluder)", backend->centerPixel());
+        GRACE_CHECK(withinTol(backend->centerPixel(), expected_occ, 2));
+    }
+
+    // Case D: sun disabled -> lit only by its other terms (emissive here).
     {
         SurfaceParams emissive_surface = surface;
         emissive_surface.emissive = vec3{0.25f, 0.5f, 0.75f};
-        DrawSubmission no_sun;
-        no_sun.mesh = gpu_mesh.get();
-        no_sun.material.setSurfaceParams(emissive_surface);
+        DrawSubmission sub;
+        sub.mesh = gpu_mesh.get();
+        sub.material.setSurfaceParams(emissive_surface);
         backend->clear();
-        backend->submit(no_sun);
+        backend->submit(sub);
         backend->readback();
         const ClearColor expected = toColor(0.25f, 0.5f, 0.75f);
         printPixel("no-sun emissive-only", backend->centerPixel());
         GRACE_CHECK(withinTol(backend->centerPixel(), expected, 2));
     }
 
-    // Misuse: shadow pass into a released or non-depth target is a violation.
+    // Case E: diagnostics (C5) — cascade-index visualisation, off by default.
+    {
+        ShadowMap shadow = renderShadow({ground}, true);  // debug = true
+        DrawSubmission sub = ground;
+        sub.shadow = &shadow;
+        backend->clear();
+        backend->submit(sub);
+        backend->readback();
+        // Ground centre is at view depth ~1 -> cascade 0 of 4 -> (0, 0, 1).
+        const ClearColor expected = toColor(0.0f, 0.0f, 1.0f);
+        printPixel("debug cascade index", backend->centerPixel());
+        GRACE_CHECK(withinTol(backend->centerPixel(), expected, 2));
+    }
+
+    // Misuse: beginning a pass on a released target is a violation.
     {
         const std::uint64_t before = backend->violationCount();
-        backend->renderShadowMap(shadow_target, sun, bounds, {});  // empty list is valid
-        GRACE_CHECK_EQ(backend->violationCount(), before);
-        backend->releaseRenderTarget(shadow_target);
-        backend->renderShadowMap(shadow_target, sun, bounds, {});  // after release
+        for (RenderTarget* t : all_targets)
+            backend->releaseRenderTarget(t);
+        backend->beginRenderPass(all_targets[0]);
         GRACE_CHECK_EQ(backend->violationCount(), before + 1u);
     }
 

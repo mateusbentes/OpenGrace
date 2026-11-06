@@ -160,45 +160,48 @@ void runContractChecks(Backend& backend, grace::render::ClearColor color,
         GRACE_CHECK(threw);
     }
 
-    backend.bindRenderTarget(target);
+    // Camera round-trip and validation.
+    {
+        grace::render::CameraParams cam = backend.camera();
+        GRACE_CHECK(cam.near > 0.0f);
+        backend.setCamera(cam);
+        GRACE_CHECK(backend.camera().far == cam.far);
+        grace::render::CameraParams bad = cam;
+        bad.far = bad.near;  // far <= near
+        bool threw = false;
+        try
+        {
+            backend.setCamera(bad);
+        }
+        catch (const std::invalid_argument&)
+        {
+            threw = true;
+        }
+        GRACE_CHECK(threw);
+    }
+
+    // Render-pass composition: begin, clear, draw into the target, end.
+    backend.beginRenderPass(target);
     backend.clear();
-    // Texture view while bound for rendering is a feedback loop: violation.
+    backend.draw(*mesh, *program);
+    // Texture view inside a render pass is a feedback loop: violation.
     GRACE_CHECK(backend.renderTargetTexture(target) == nullptr);
     GRACE_CHECK_EQ(backend.violationCount(), 1u);
-    backend.bindRenderTarget(nullptr);
+    backend.endRenderPass();
     grace::render::TextureView* view = backend.renderTargetTexture(target);
     GRACE_CHECK(view != nullptr);
     GRACE_CHECK(view->isDepth());
     GRACE_CHECK_EQ(view->width(), 64u);
     backend.releaseRenderTarget(target);
 
-    // Misuse: bind after release, texture after release, never-created target.
-    backend.bindRenderTarget(target);
+    // Misuse: pass begin after release, texture after release, never-created
+    // target.
+    backend.beginRenderPass(target);
     GRACE_CHECK(backend.renderTargetTexture(target) == nullptr);
     grace::render::RenderTarget* bogus = reinterpret_cast<grace::render::RenderTarget*>(
         static_cast<std::uintptr_t>(0x1));
-    backend.bindRenderTarget(bogus);
+    backend.beginRenderPass(bogus);
     GRACE_CHECK_EQ(backend.violationCount(), 4u);
-
-    // Shadow pass: the same submission list through a depth target.
-    {
-        grace::render::SceneBounds bounds;
-        bounds.center = grace::core::vec3{0.0f, 0.0f, 0.0f};
-        bounds.radius = 2.0f;
-        grace::render::DirectionalLight sun;
-        sun.direction = grace::core::vec3{0.0f, 0.0f, -1.0f};
-        std::vector<grace::render::DrawSubmission> list;
-        list.push_back(submission);
-        grace::render::RenderTargetDesc shadow_desc;
-        shadow_desc.width = 64;
-        shadow_desc.height = 64;
-        shadow_desc.colorAttachment = false;
-        shadow_desc.depthAttachment = true;
-        grace::render::RenderTarget* shadow_target = backend.createRenderTarget(shadow_desc);
-        backend.renderShadowMap(shadow_target, sun, bounds, list);
-        GRACE_CHECK_EQ(backend.violationCount(), 4u);  // no new violations
-        backend.releaseRenderTarget(shadow_target);
-    }
 
     backend.shutdown();
 

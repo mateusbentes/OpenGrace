@@ -15,6 +15,7 @@
 #include "grace/core/math/transform.hpp"
 #include "grace/render/material.hpp"
 #include "grace/render/opengl/gl_loader.hpp"
+#include "grace/render/shadow.hpp"
 
 #include "opengl_lighting.hpp"
 #include "opengl_mesh.hpp"
@@ -166,11 +167,8 @@ struct OpenGLRenderBackend::Impl
     std::vector<std::unique_ptr<opengl::GlRenderTarget>> targets;
     opengl::GlRenderTarget* bound_target = nullptr;
 
-    // Shadow pass state (milestone 4b, single cascade).
-    std::shared_ptr<ShaderProgram> shadow_program;
-    opengl::GlRenderTarget* shadow_target = nullptr;
-    core::mat4 light_space{};
-    bool has_shadow = false;
+    // Camera used by submit()/draw() (documented diagnostic default).
+    CameraParams camera;
 
     bool ready() const { return state == State::Initialised; }
 
@@ -193,6 +191,10 @@ OpenGLRenderBackend::OpenGLRenderBackend(OpenGLBackendConfig config)
         throw std::invalid_argument(
             "OpenGLRenderBackend: width and height must be positive");
     m_impl->config = config;
+    // Documented diagnostic default camera: eye (0,0,1) at the origin, up +Y,
+    // fovY 90 degrees, aspect from the frame size.
+    m_impl->camera.aspect =
+        static_cast<float>(config.width) / static_cast<float>(config.height);
 }
 
 OpenGLRenderBackend::~OpenGLRenderBackend()
@@ -383,9 +385,6 @@ void OpenGLRenderBackend::shutdownImpl(bool countViolation)
     impl.tri_material.reset();
     impl.triangle_ready = false;
     impl.lighting_program.reset();
-    impl.shadow_program.reset();
-    impl.has_shadow = false;
-    impl.shadow_target = nullptr;
     impl.bound_target = nullptr;
     for (auto& target : impl.targets)
         target->release();
@@ -475,6 +474,10 @@ ClearColor OpenGLRenderBackend::readPixel(std::uint32_t x, std::uint32_t y)
         ++impl.violations;
         return ClearColor{0, 0, 0, 0};
     }
+    // Reading colour from a target without a colour attachment (e.g. a
+    // depth-only pass target) is invalid: skip the GL call.
+    if (impl.bound_target != nullptr && !impl.bound_target->hasColorAttachment())
+        return ClearColor{0, 0, 0, 0};
     GLubyte pixel[4] = {0, 0, 0, 0};
     impl.gl.glReadPixels(static_cast<GLint>(x), static_cast<GLint>(y), 1, 1, GL_RGBA,
                          GL_UNSIGNED_BYTE, pixel);
@@ -490,6 +493,8 @@ float OpenGLRenderBackend::readDepth(std::uint32_t x, std::uint32_t y)
         ++impl.violations;
         return 0.0f;
     }
+    if (impl.bound_target != nullptr && !impl.bound_target->hasDepthAttachment())
+        return 0.0f;
     GLfloat depth = 0.0f;
     impl.gl.glReadPixels(static_cast<GLint>(x), static_cast<GLint>(y), 1, 1,
                          GL_DEPTH_COMPONENT, GL_FLOAT, &depth);
@@ -505,6 +510,8 @@ std::int32_t OpenGLRenderBackend::readStencilAt(std::uint32_t x, std::uint32_t y
         ++impl.violations;
         return 0;
     }
+    if (impl.bound_target != nullptr && !impl.bound_target->hasDepthAttachment())
+        return 0;
     GLubyte stencil = 0;
     impl.gl.glReadPixels(static_cast<GLint>(x), static_cast<GLint>(y), 1, 1, GL_STENCIL_INDEX,
                          GL_UNSIGNED_BYTE, &stencil);
@@ -656,14 +663,12 @@ void OpenGLRenderBackend::submitImpl(const DrawSubmission& submission)
     submission.validate();  // enforces the per-object light limit and parameter ranges
     ensureLightingProgram();
 
-    // Fixed diagnostic camera (documented): eye (0, 0, 1) looking at the
-    // origin, up +Y, vertical fov 90 degrees.
-    const float aspect = static_cast<float>(impl.config.width) /
-                         static_cast<float>(impl.config.height);
-    const core::mat4 view =
-        core::lookAt(core::vec3{0.0f, 0.0f, 1.0f}, core::vec3{0.0f, 0.0f, 0.0f},
-                     core::vec3{0.0f, 1.0f, 0.0f});
-    const core::mat4 projection = core::perspective(kPi / 2.0f, aspect, 0.1f, 100.0f);
+    // Camera set through setCamera() (documented diagnostic default:
+    // eye (0,0,1) looking at the origin, up +Y, fovY 90 degrees).
+    const CameraParams& camera = impl.camera;
+    const core::mat4 view = core::lookAt(camera.eye, camera.target, camera.up);
+    const core::mat4 projection =
+        core::perspective(camera.fovYRad, camera.aspect, camera.near, camera.far);
     const core::mat4 mvp = projection * view * submission.model;
 
     applyViewport();
@@ -674,7 +679,8 @@ void OpenGLRenderBackend::submitImpl(const DrawSubmission& submission)
     program.use();
     program.setUniform("mvp", mvp);
     program.setUniform("model", submission.model);
-    program.setUniform("cameraPos", core::vec3{0.0f, 0.0f, 1.0f});
+    program.setUniform("viewMatrix", view);
+    program.setUniform("cameraPos", camera.eye);
 
     const SurfaceParams& surface = submission.material.surfaceParams();
     program.setUniform("albedo", surface.albedo);
@@ -694,20 +700,43 @@ void OpenGLRenderBackend::submitImpl(const DrawSubmission& submission)
         program.setUniform("hasSun", 0);
     }
 
-    // Single-cascade sun shadow map from the most recent renderShadowMap call
-    // (milestone 4b). The shadow factor applies to the sun term only; dynamic
-    // lights stay unshadowed (documented). A released shadow target disables
-    // the lookup.
-    if (impl.has_shadow && impl.shadow_target != nullptr && !impl.shadow_target->released)
+    // Cascaded sun shadow map carried by the submission (milestone 4c). The
+    // shadow factor applies to the sun term only; dynamic lights stay
+    // unshadowed (documented). The backend treats it as plain data: depth
+    // textures, light matrices and split depths uploaded as uniforms.
+    const ShadowMap* shadow = submission.shadow;
+    if (shadow != nullptr && shadow->cascadeCount > 0)
     {
-        auto* shadow_view =
-            static_cast<opengl::GlTextureView*>(impl.shadow_target->depthView());
-        impl.gl.glActiveTexture(GL_TEXTURE0);
-        impl.gl.glBindTexture(GL_TEXTURE_2D, shadow_view->textureId());
-        program.setUniform("shadowMap", 0);
+        const int count = static_cast<int>(shadow->cascadeCount);
         program.setUniform("hasShadowMap", 1);
-        program.setUniform("lightSpaceMatrix", impl.light_space);
-        program.setUniform("shadowBias", impl.config.shadow_bias);
+        program.setUniform("cascadeCount", count);
+        program.setUniform("shadowBias", shadow->bias);
+        program.setUniform("filterTolerance", shadow->filterTolerance);
+        program.setUniform("shadowMapSize", static_cast<float>(shadow->mapSize));
+        program.setUniform("debugCascades", shadow->debug ? 1 : 0);
+        for (int i = 0; i < count; ++i)
+        {
+            TextureView* texView =
+                renderTargetTexture(shadow->targets[static_cast<std::size_t>(i)]);
+            if (texView == nullptr)
+            {
+                program.setUniform("hasShadowMap", 0);
+                break;
+            }
+            auto* glView = static_cast<opengl::GlTextureView*>(texView);
+            impl.gl.glActiveTexture(GL_TEXTURE0 + static_cast<GLenum>(i));
+            impl.gl.glBindTexture(GL_TEXTURE_2D, glView->textureId());
+            const std::string index = "[" + std::to_string(i) + "]";
+            program.setUniform(("shadowMaps" + index).c_str(), i);
+            program.setUniform(("lightMatrices" + index).c_str(),
+                               shadow->lightMatrices[static_cast<std::size_t>(i)]);
+        }
+        for (int i = 0; i <= count; ++i)
+        {
+            const std::string index = "[" + std::to_string(i) + "]";
+            program.setUniform(("splitDepths" + index).c_str(),
+                               shadow->splitDepths[static_cast<std::size_t>(i)]);
+        }
     }
     else
     {
@@ -769,7 +798,7 @@ RenderTarget* OpenGLRenderBackend::createRenderTarget(const RenderTargetDesc& de
     return raw;
 }
 
-void OpenGLRenderBackend::bindRenderTarget(RenderTarget* target)
+void OpenGLRenderBackend::beginRenderPass(RenderTarget* target)
 {
     Impl& impl = *m_impl;
     if (!impl.ready())
@@ -779,11 +808,11 @@ void OpenGLRenderBackend::bindRenderTarget(RenderTarget* target)
     }
     if (target == nullptr)
     {
-        // Bind the default framebuffer.
+        // Target the default framebuffer.
         impl.bound_target = nullptr;
         impl.gl.glBindFramebuffer(GL_FRAMEBUFFER, 0);
         applyViewport();
-        impl.drainGlErrors("bindRenderTarget");
+        impl.drainGlErrors("beginRenderPass");
         return;
     }
     opengl::GlRenderTarget* known = findGlTarget(impl.targets, target);
@@ -793,11 +822,42 @@ void OpenGLRenderBackend::bindRenderTarget(RenderTarget* target)
         ++impl.violations;
         return;
     }
-    // Binding while another target is bound simply replaces the binding.
+    // Beginning a pass while another target is bound simply replaces it.
     impl.bound_target = known;
     impl.gl.glBindFramebuffer(GL_FRAMEBUFFER, known->framebufferId());
     applyViewport();
-    impl.drainGlErrors("bindRenderTarget");
+    impl.drainGlErrors("beginRenderPass");
+}
+
+void OpenGLRenderBackend::endRenderPass()
+{
+    Impl& impl = *m_impl;
+    if (!impl.ready())
+    {
+        ++impl.violations;
+        return;
+    }
+    impl.bound_target = nullptr;
+    impl.gl.glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    applyViewport();
+    impl.drainGlErrors("endRenderPass");
+}
+
+void OpenGLRenderBackend::setCamera(const CameraParams& camera)
+{
+    camera.validate();  // throws std::invalid_argument on invalid parameters
+    Impl& impl = *m_impl;
+    if (!impl.ready())
+    {
+        ++impl.violations;
+        throw std::logic_error("OpenGLRenderBackend::setCamera: not initialised");
+    }
+    impl.camera = camera;
+}
+
+CameraParams OpenGLRenderBackend::camera() const
+{
+    return m_impl->camera;
 }
 
 void OpenGLRenderBackend::releaseRenderTarget(RenderTarget* target)
@@ -819,12 +879,6 @@ void OpenGLRenderBackend::releaseRenderTarget(RenderTarget* target)
         impl.bound_target = nullptr;
         impl.gl.glBindFramebuffer(GL_FRAMEBUFFER, 0);
         applyViewport();
-    }
-    if (impl.shadow_target == known)
-    {
-        // Documented: releasing the shadow target disables the shadow lookup.
-        impl.shadow_target = nullptr;
-        impl.has_shadow = false;
     }
     known->release();  // deletes GL objects; the handle stays in the registry
 }
@@ -852,77 +906,7 @@ TextureView* OpenGLRenderBackend::renderTargetTexture(RenderTarget* target)
     return nullptr;
 }
 
-void OpenGLRenderBackend::ensureShadowProgram()
-{
-    Impl& impl = *m_impl;
-    if (!impl.shadow_program)
-        impl.shadow_program = std::shared_ptr<ShaderProgram>(
-            createShaderProgram(opengl::kShadowVertexShader, opengl::kShadowFragmentShader));
-}
 
-void OpenGLRenderBackend::renderShadowMap(RenderTarget* target, const DirectionalLight& sun,
-                                          const SceneBounds& bounds,
-                                          const std::vector<DrawSubmission>& submissions)
-{
-    Impl& impl = *m_impl;
-    if (!impl.ready())
-    {
-        ++impl.violations;
-        return;
-    }
-    sun.validate();
-    if (!(bounds.radius > 0.0f))
-        throw std::invalid_argument("renderShadowMap: scene bounds radius must be > 0");
-    for (const DrawSubmission& submission : submissions)
-        submission.validate();
-
-    opengl::GlRenderTarget* known =
-        target != nullptr ? findGlTarget(impl.targets, target) : nullptr;
-    if (known == nullptr || known->released || impl.bound_target == known ||
-        !known->hasDepthAttachment())
-    {
-        ++impl.violations;
-        return;
-    }
-
-    // Single orthographic cascade covering the scene bounds (milestone 4b).
-    // near is fixed at 0.1; far = near + 2 * radius covers the whole bounding
-    // sphere (documented rule in grace/render/shadow.hpp).
-    constexpr float kShadowNear = 0.1f;
-    const float shadow_far = kShadowNear + 2.0f * bounds.radius;
-    const core::mat4 light_space = sunLightSpaceMatrix(sun, bounds, kShadowNear, shadow_far);
-
-    ensureShadowProgram();
-
-    // Render the draw list from the sun's point of view into the depth target.
-    impl.bound_target = known;
-    impl.gl.glBindFramebuffer(GL_FRAMEBUFFER, known->framebufferId());
-    applyViewport();
-    impl.gl.glEnable(GL_DEPTH_TEST);
-    impl.gl.glDepthFunc(GL_LESS);
-    impl.gl.glClearDepth(1.0);
-    impl.gl.glClear(GL_DEPTH_BUFFER_BIT);
-    impl.drainGlErrors("renderShadowMap clear");
-
-    ShaderProgram& program = *impl.shadow_program;
-    program.use();
-    for (const DrawSubmission& submission : submissions)
-    {
-        const core::mat4 light_mvp = light_space * submission.model;
-        program.setUniform("lightMVP", light_mvp);
-        submission.mesh->drawIndexed();
-    }
-    impl.drainGlErrors("renderShadowMap");
-
-    // Back to the default framebuffer; remember the shadow map for submit().
-    impl.bound_target = nullptr;
-    impl.gl.glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    applyViewport();
-    impl.shadow_target = known;
-    impl.light_space = light_space;
-    impl.has_shadow = true;
-    impl.drainGlErrors("renderShadowMap");
-}
 
 void OpenGLRenderBackend::ensureTriangle()
 {
