@@ -95,7 +95,7 @@ void GlMesh::upload(const Mesh& mesh)
     m_uploaded = true;
 }
 
-void GlMesh::drawIndexed()
+void GlMesh::drawIndexed() const
 {
     if (!m_uploaded)
         throw std::logic_error("GlMesh::drawIndexed: no mesh uploaded");

@@ -19,7 +19,7 @@ public:
     GlMesh& operator=(const GlMesh&) = delete;
 
     void upload(const Mesh& mesh) override;
-    void drawIndexed() override;
+    void drawIndexed() const override;
 
 private:
     void destroy();

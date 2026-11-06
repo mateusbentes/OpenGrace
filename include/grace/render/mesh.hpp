@@ -101,7 +101,7 @@ public:
     virtual void upload(const Mesh& mesh) = 0;
 
     /// Indexed triangle draw of the last uploaded mesh.
-    virtual void drawIndexed() = 0;
+    virtual void drawIndexed() const = 0;
 };
 
 }  // namespace grace::render
