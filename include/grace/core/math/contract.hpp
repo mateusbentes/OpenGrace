@@ -3,6 +3,15 @@
 #include <cstdio>
 #include <cstdlib>
 
+/// The violation handler is process-global mutable state, not a per-thread or
+/// per-instance setting. It is not synchronised: installing a handler while
+/// another thread is inside a math function is a data race. Install it once
+/// during start-up, before any other thread runs.
+///
+/// The default handler aborts. A host embedding the engine cannot recover from
+/// a violation in a Debug build, by design: a violated math contract means the
+/// calling code is wrong, and continuing produces silently corrupt transforms.
+
 namespace grace::core::math::detail {
 
 /// Handler for degenerate math inputs. When installed, it is called with the

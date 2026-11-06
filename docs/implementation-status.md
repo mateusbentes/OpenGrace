@@ -17,7 +17,8 @@ regenerate: `pandoc docs/implementation-status.md -o docs/implementation-status.
 | 1 | Fixed-step clock, application lifecycle, null render backend | Done |
 | 2 | OpenGL backend, function loader, diagnostic triangle | Done |
 | 3 | Render foundation: math, mesh, shader, material | Done |
-| 4 | Forward lighting: point, spot, directional, shadow maps | Planned |
+| 4a | Forward lighting: light types, surface parameters, submission, lighting shader | Done |
+| 4b | Shadow maps: dual paraboloid with bilateral filtering, trapezoidal cascades for sunlight | Next |
 | 5 | Deferred lighting: G-buffer, unlimited lights, light volumes | Planned |
 | 6 | Post-processing: HDR, bloom, filmic tonemap, DOF, AA, SSAO-STF | Planned |
 | 7 | Global illumination by light volume propagation | Planned |
@@ -65,6 +66,8 @@ All results below are real runs, on the tree at the stated commit.
 | 2026-11-06 | same | Check counts: version 4, fixed_step_clock 42, application 26, math 31 (Debug) / 28 (Release), lights 30, opengl_context 20, opengl_render 49, mesh 13, shader 16, lighting 10 — all zero failures. Open decision 1 resolved: forward primary, deferred stays planned as milestone 5. Debug math contract violations abort (exit 134) with a named message; Release keeps the documented silent behaviour |
 | 2026-11-06 | same | Visible run: `opengl 4.6 core` Iris Xe, pixel `30,30,30,255`, exit 0; hidden `xvfb-run` run: llvmpipe `4.5 core`, same pixel, exit 0. Lighting readback checks pass: sun-only, point falloff at known distance, spot inside/outside cone, emissive-only; 5-light submission rejected with "exceeds the per-object limit of 4" |
 | 2026-11-05 | same, contract extension | OpenGL off: 7/7 Debug; OpenGL on: 11/11 Debug and Release; `-L opengl` 4/4; zero warnings under `-Werror`; check counts: opengl_context 20, opengl_render 47 |
+
+| Published tree did not build with `GRACE_ENABLE_OPENGL=ON` | The lighting commit left the shader header unstaged and published half of a `const` change, so `drawIndexed() const` in the null backend had no matching override | Complete the change set and verify by building a fresh clone |
 
 ### Defects found by the tests, and fixed
 
