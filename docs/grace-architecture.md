@@ -14,10 +14,19 @@ non-public software. See "Sources" at the end for the full provenance list.
 
 GRACE 2 was the in-house game engine of Reality Pump Studios, a division of
 TopWare Interactive, based in Kraków, Poland. It succeeded the original GRACE
-engine, the one used by *Two Worlds* (2007) and *Two Worlds II* (2010). The
-official site makes the same distinction in its own words: "its previous
-versions have powered ... games from the Two Worlds franchise". The
-best-evidenced title to run on GRACE 2 itself is the unreleased *Sacrilegium*.
+engine. *Two Worlds II* (2010) ran on it, and the official site for that game
+credits "the all-new GRACE game engine", which is the clearest statement of
+the relationship that exists. The GRACE2 site draws the same distinction in
+its own words, though less precisely: "its previous versions have powered ...
+games from the Two Worlds franchise", which the franchise's later titles and
+expansions satisfy without naming the first game.
+
+The engine behind the original *Two Worlds* (2007) is not publicly documented.
+Community discussion sometimes calls it "Antalor", after the name of the
+game's world, but no official source uses that term and this document does not
+adopt it. What can be said is the negative: it is not described anywhere as a
+GRACE version, and the assumption that it was belongs to the same class of
+inherited belief that this section has already had to correct.
 
 Which titles ran on the engine is harder to establish than the architecture.
 The official site displayed "example screenshots from games that have been
