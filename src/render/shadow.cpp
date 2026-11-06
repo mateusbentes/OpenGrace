@@ -28,6 +28,67 @@ void main()
 }
 )";
 
+// Dual paraboloid depth pass (milestone 4d): the vertex stage projects the
+// light-space position onto the selected hemisphere's paraboloid and stores
+// LINEAR depth (distance from the light, mapped to [0,1]) in the depth
+// buffer. Geometry on the wrong side of the seam is clipped in this pass
+// (documented singularity handling), so nothing is ever looked up in the
+// wrong hemisphere.
+// Projective form of the paraboloid projection: with w = 1 + dir.z (front) or
+// 1 - dir.z (back), ndc.x/y become exactly the paraboloid uv and ndc.z the
+// radial depth, both computed per fragment by the rasterizer — so the stored
+// depth is directly comparable with the lookup's linear distance depth.
+// (A plain w=1 projection would interpolate depth wrongly in uv space.)
+constexpr const char* kParaboloidDepthVertexShader = R"(#version 330 core
+layout(location = 0) in vec3 position;
+uniform mat4 lightView;    // world -> light space, light forward = +Z
+uniform mat4 model;
+uniform float nearRange;
+uniform float farRange;
+uniform int hemisphere;    // 0 = front, 1 = back
+out vec3 vL;               // light-space position, interpolated exactly (w != 1)
+void main()
+{
+    vec4 l = lightView * model * vec4(position, 1.0);
+    float dist = length(l.xyz);
+    vL = l.xyz;
+    vec3 dir = l.xyz / max(dist, 1e-6);
+    float u;
+    float v;
+    float w;
+    if (hemisphere == 0)
+    {
+        if (dir.z <= 0.0) { gl_Position = vec4(0.0, 0.0, -2.0, 1.0); return; }  // clipped
+        u = dir.x;
+        v = dir.y;
+        w = 1.0 + dir.z;
+    }
+    else
+    {
+        if (dir.z >= 0.0) { gl_Position = vec4(0.0, 0.0, -2.0, 1.0); return; }  // clipped
+        u = -dir.x;
+        v = -dir.y;
+        w = 1.0 - dir.z;
+    }
+    float depth = clamp((dist - nearRange) / (farRange - nearRange), 0.0, 1.0);
+    gl_Position = vec4(u * w, v * w, (2.0 * depth - 1.0) * w, w);
+}
+)";
+
+// Per-fragment radial depth: the light-space position varying interpolates
+// exactly under the projective w, so gl_FragDepth stores the true distance of
+// the rasterized surface point (per-vertex interpolation would not).
+constexpr const char* kParaboloidDepthFragmentShader = R"(#version 330 core
+in vec3 vL;
+uniform float nearRange;
+uniform float farRange;
+void main()
+{
+    float dist = length(vL);
+    gl_FragDepth = clamp((dist - nearRange) / (farRange - nearRange), 0.0, 1.0);
+}
+)";
+
 }  // namespace
 
 core::mat4 sunLightSpaceMatrix(const DirectionalLight& sun, const SceneBounds& bounds,
@@ -250,6 +311,99 @@ ShadowMap renderShadowCascades(RenderBackend& backend, const DirectionalLight& s
         shadow.lightMatrices.push_back(lightMatrix);
     }
     return shadow;
+}
+
+void validatePointShadowConfig(const PointShadowConfig& config)
+{
+    if (config.mapSize == 0)
+        throw std::invalid_argument("point shadow config: mapSize must be > 0");
+    if (!(config.near > 0.0f))
+        throw std::invalid_argument("point shadow config: near must be > 0");
+    if (!(config.far > config.near))
+        throw std::invalid_argument("point shadow config: far must be > near");
+    if (!(config.biasWorld >= 0.0f))
+        throw std::invalid_argument("point shadow config: biasWorld must be >= 0");
+    if (!(config.filterTolerance > 0.0f))
+        throw std::invalid_argument("point shadow config: filterTolerance must be > 0");
+}
+
+PointShadowMaps renderPointShadowMaps(RenderBackend& backend,
+                                       const std::vector<DynamicLight>& lights,
+                                       const std::vector<DrawSubmission>& casters,
+                                       const PointShadowConfig& config)
+{
+    validatePointShadowConfig(config);
+    for (const DrawSubmission& caster : casters)
+        caster.validate();
+
+    std::uint32_t maxLights = config.maxLights;
+    if (maxLights == 0)
+        maxLights = 1;
+    if (maxLights > kMaxShadowCastingPointLights)
+        maxLights = kMaxShadowCastingPointLights;  // documented budget clamp
+
+    // Collect the point lights to shadow (first maxLights point lights).
+    std::vector<std::uint32_t> pointLightIndices;
+    for (std::uint32_t i = 0; i < lights.size() && pointLightIndices.size() < maxLights; ++i)
+        if (std::holds_alternative<PointLight>(lights[i]))
+            pointLightIndices.push_back(i);
+
+    auto depthProgram = backend.createShaderProgram(kParaboloidDepthVertexShader,
+                                                    kParaboloidDepthFragmentShader);
+
+    PointShadowMaps result;
+    result.mapSize = config.mapSize;
+    result.biasWorld = config.biasWorld;
+    result.filterTolerance = config.filterTolerance;
+
+    for (const std::uint32_t lightIndex : pointLightIndices)
+    {
+        const PointLight& light = std::get<PointLight>(lights[lightIndex]);
+        light.validate();
+
+        PointShadowMapEntry entry;
+        entry.lightIndex = lightIndex;
+        entry.near = config.near;
+        entry.far = config.far;
+        // Point lights emit in all directions; the light's own "forward" is
+        // arbitrary for the paraboloid (the two hemispheres cover the sphere),
+        // so +Z with an arbitrary non-parallel up is used (documented).
+        entry.lightView = paraboloidLightView(light.position, core::vec3{0.0f, 0.0f, 1.0f},
+                                              core::vec3{0.0f, 1.0f, 0.0f});
+
+        // Two targets per light: one per hemisphere (documented D2 choice —
+        // one target with two viewports would need a viewport API in the
+        // contract, which decision 7 forbids adding for one technique).
+        RenderTarget* targets[2] = {nullptr, nullptr};
+        for (int hemi = 0; hemi < 2; ++hemi)
+        {
+            RenderTargetDesc desc;
+            desc.width = config.mapSize;
+            desc.height = config.mapSize;
+            desc.colorAttachment = false;  // depth-only
+            desc.depthAttachment = true;
+            desc.depthFormat = PixelFormat::Depth24Stencil8;
+            targets[hemi] = backend.createRenderTarget(desc);
+
+            backend.beginRenderPass(targets[hemi]);
+            backend.clear();
+            depthProgram->use();
+            depthProgram->setUniform("lightView", entry.lightView);
+            depthProgram->setUniform("nearRange", config.near);
+            depthProgram->setUniform("farRange", config.far);
+            depthProgram->setUniform("hemisphere", hemi);
+            for (const DrawSubmission& caster : casters)
+            {
+                depthProgram->setUniform("model", caster.model);
+                caster.mesh->drawIndexed();
+            }
+            backend.endRenderPass();
+        }
+        entry.front = targets[0];
+        entry.back = targets[1];
+        result.entries.push_back(entry);
+    }
+    return result;
 }
 
 }  // namespace grace::render

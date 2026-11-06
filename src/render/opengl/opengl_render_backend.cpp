@@ -743,6 +743,65 @@ void OpenGLRenderBackend::submitImpl(const DrawSubmission& submission)
         program.setUniform("hasShadowMap", 0);
     }
 
+    // Dual paraboloid point-light shadow maps (milestone 4d), plain data from
+    // the submission. Texture units 4..7; the cascades use 0..3.
+    const PointShadowMaps* pointShadows = submission.pointShadows;
+    if (submission.shadowLightRequests > kMaxShadowCastingPointLights)
+        ++impl.violations;  // documented: over-budget request, excess lights unshadowed
+    if (pointShadows != nullptr && !pointShadows->entries.empty())
+    {
+        const int entryCount = static_cast<int>(pointShadows->entries.size());
+        program.setUniform("pointShadowCount", entryCount);
+        program.setUniform("pointFilterTolerance", pointShadows->filterTolerance);
+        program.setUniform("pointShadowMapSize", static_cast<float>(pointShadows->mapSize));
+        for (int k = 0; k < entryCount; ++k)
+        {
+            const PointShadowMapEntry& entry =
+                pointShadows->entries[static_cast<std::size_t>(k)];
+            const std::string index = "[" + std::to_string(k) + "]";
+            TextureView* frontView = renderTargetTexture(entry.front);
+            TextureView* backView = renderTargetTexture(entry.back);
+            if (frontView == nullptr || backView == nullptr)
+            {
+                program.setUniform("pointShadowCount", 0);
+                break;
+            }
+            auto* frontGl = static_cast<opengl::GlTextureView*>(frontView);
+            auto* backGl = static_cast<opengl::GlTextureView*>(backView);
+            impl.gl.glActiveTexture(GL_TEXTURE0 + static_cast<GLenum>(4 + 2 * k));
+            impl.gl.glBindTexture(GL_TEXTURE_2D, frontGl->textureId());
+            impl.gl.glActiveTexture(GL_TEXTURE0 + static_cast<GLenum>(5 + 2 * k));
+            impl.gl.glBindTexture(GL_TEXTURE_2D, backGl->textureId());
+            program.setUniform(("pointShadowFront" + index).c_str(), 4 + 2 * k);
+            program.setUniform(("pointShadowBack" + index).c_str(), 5 + 2 * k);
+            program.setUniform(("pointLightViews" + index).c_str(), entry.lightView);
+            const PointLight& pointLight =
+                std::get<PointLight>(submission.lights[entry.lightIndex]);
+            program.setUniform(("pointLightPos" + index).c_str(), pointLight.position);
+            program.setUniform(("pointLightRange" + index).c_str(),
+                               core::vec2{entry.near, entry.far});
+            // D4: paraboloid depth is linear in world distance, so a constant
+            // bias is sufficient — the world bias divided by the depth range.
+            const float bias01 = pointShadows->biasWorld / (entry.far - entry.near);
+            program.setUniform(("pointShadowBias" + index).c_str(), bias01);
+        }
+        // Association (documented): dynamic light i uses entry k whose
+        // lightIndex == i; otherwise slot -1 = no shadow map, full light.
+        for (int i = 0; i < static_cast<int>(submission.lights.size()); ++i)
+        {
+            int slot = -1;
+            for (int k = 0; k < entryCount; ++k)
+                if (pointShadows->entries[static_cast<std::size_t>(k)].lightIndex ==
+                    static_cast<std::uint32_t>(i))
+                    slot = k;
+            program.setUniform(("pointLightSlot[" + std::to_string(i) + "]").c_str(), slot);
+        }
+    }
+    else
+    {
+        program.setUniform("pointShadowCount", 0);
+    }
+
     const int light_count = static_cast<int>(submission.lights.size());
     program.setUniform("lightCount", light_count);
     for (int i = 0; i < light_count; ++i)
@@ -812,6 +871,9 @@ void OpenGLRenderBackend::beginRenderPass(RenderTarget* target)
         impl.bound_target = nullptr;
         impl.gl.glBindFramebuffer(GL_FRAMEBUFFER, 0);
         applyViewport();
+        impl.gl.glEnable(GL_DEPTH_TEST);
+        impl.gl.glDepthFunc(GL_LESS);
+        impl.gl.glDepthMask(GL_TRUE);
         impl.drainGlErrors("beginRenderPass");
         return;
     }
@@ -826,6 +888,11 @@ void OpenGLRenderBackend::beginRenderPass(RenderTarget* target)
     impl.bound_target = known;
     impl.gl.glBindFramebuffer(GL_FRAMEBUFFER, known->framebufferId());
     applyViewport();
+    // Depth state for the pass: a shadow/depth pass must write depth even
+    // before any submit() has enabled the test globally.
+    impl.gl.glEnable(GL_DEPTH_TEST);
+    impl.gl.glDepthFunc(GL_LESS);
+    impl.gl.glDepthMask(GL_TRUE);
     impl.drainGlErrors("beginRenderPass");
 }
 

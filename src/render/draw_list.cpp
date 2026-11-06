@@ -31,6 +31,21 @@ void DrawSubmission::validate() const
             shadow->splitDepths.size() != shadow->cascadeCount + 1u)
             throw std::invalid_argument("draw submission: inconsistent shadow map arrays");
     }
+    if (pointShadows != nullptr)
+    {
+        if (pointShadows->entries.size() > kMaxShadowCastingPointLights)
+            throw std::invalid_argument(
+                "draw submission: more point shadow map entries than the budget of " +
+                std::to_string(kMaxShadowCastingPointLights));
+        for (const PointShadowMapEntry& entry : pointShadows->entries)
+        {
+            if (entry.lightIndex >= lights.size())
+                throw std::invalid_argument(
+                    "draw submission: point shadow entry light index out of range");
+            if (entry.front == nullptr || entry.back == nullptr)
+                throw std::invalid_argument("draw submission: point shadow entry without maps");
+        }
+    }
 }
 
 }  // namespace grace::render

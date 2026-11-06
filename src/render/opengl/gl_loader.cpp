@@ -44,6 +44,7 @@ bool GlLoader::load(ResolveFn resolve, std::string& missingSymbol)
     GRACE_GL_LOAD(glEnable, "glEnable");
     GRACE_GL_LOAD(glDisable, "glDisable");
     GRACE_GL_LOAD(glDepthFunc, "glDepthFunc");
+    GRACE_GL_LOAD(glDepthMask, "glDepthMask");
 
     GRACE_GL_LOAD(glGenVertexArrays, "glGenVertexArrays");
     GRACE_GL_LOAD(glBindVertexArray, "glBindVertexArray");

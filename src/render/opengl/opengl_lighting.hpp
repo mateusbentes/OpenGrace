@@ -71,6 +71,19 @@ uniform float shadowBias;
 uniform float filterTolerance;
 uniform float shadowMapSize;  // per-cascade resolution, for the filter's texel step
 uniform int debugCascades;
+// Dual paraboloid point-light shadow maps (milestone 4d). pointLightSlot[i]
+// associates dynamic light i with a map entry (or -1 = no shadow map: the
+// light is applied fully, documented). Front/back are the two hemispheres.
+uniform int pointShadowCount;
+uniform sampler2D pointShadowFront[2];
+uniform sampler2D pointShadowBack[2];
+uniform mat4 pointLightViews[2];
+uniform vec3 pointLightPos[2];
+uniform vec2 pointLightRange[2];   // near, far (world units)
+uniform float pointShadowBias[2];  // [0,1] linear depth units
+uniform float pointFilterTolerance;
+uniform float pointShadowMapSize;
+uniform int pointLightSlot[4];
 out vec4 fragment;
 
 float rangeAtten(float intensity, float range, float d)
@@ -124,6 +137,49 @@ float cascadeShadow(int idx, vec2 uv, float depth)
     if (idx == 1) return cascadeShadow1(uv, depth);
     if (idx == 2) return cascadeShadow2(uv, depth);
     return cascadeShadow3(uv, depth);
+}
+
+// Bilateral filter for the paraboloid maps: same 3x3 kernel shape as the
+// cascade filter (documented), but the depth tolerance is in LINEAR [0,1]
+// depth units because the paraboloid stores linear distance depth (D4 note),
+// not clip depth. Sampler arrays need literal indices in GLSL 3.30, so one
+// function per (light slot, hemisphere).
+#define GRACE_DEFINE_PARABOLOID_SHADOW(FN, SAMP)                              \
+    float FN(vec2 uv, float depth, float bias)                               \
+    {                                                                        \
+        if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || depth > 1.0) \
+            return 1.0;  /* outside the map: lit (documented) */              \
+        float weightSum = 0.0;                                               \
+        float depthSum = 0.0;                                                \
+        for (int oy = -1; oy <= 1; ++oy)                                     \
+        {                                                                    \
+            for (int ox = -1; ox <= 1; ++ox)                                 \
+            {                                                                \
+                float spatial =                                              \
+                    (ox == 0 ? (oy == 0 ? 4.0 : 2.0) : (oy == 0 ? 2.0 : 1.0)) / 16.0; \
+                vec2 offset = vec2(float(ox), float(oy)) / pointShadowMapSize; \
+                float stored = texture(SAMP, uv + offset).r;                 \
+                float rangeW = max(0.0, 1.0 - abs(stored - depth) / pointFilterTolerance); \
+                float w = spatial * rangeW;                                  \
+                weightSum += w;                                              \
+                depthSum += w * stored;                                      \
+            }                                                                \
+        }                                                                    \
+        float filtered = weightSum > 0.0 ? depthSum / weightSum             \
+                                         : texture(SAMP, uv).r;              \
+        return (depth <= filtered + bias) ? 1.0 : 0.0;                       \
+    }
+
+GRACE_DEFINE_PARABOLOID_SHADOW(paraboloidFront0, pointShadowFront[0])
+GRACE_DEFINE_PARABOLOID_SHADOW(paraboloidBack0, pointShadowBack[0])
+GRACE_DEFINE_PARABOLOID_SHADOW(paraboloidFront1, pointShadowFront[1])
+GRACE_DEFINE_PARABOLOID_SHADOW(paraboloidBack1, pointShadowBack[1])
+
+float pointLightShadow(int slot, int hemi, vec2 uv, float depth, float bias)
+{
+    if (slot <= 0)
+        return hemi == 0 ? paraboloidFront0(uv, depth, bias) : paraboloidBack0(uv, depth, bias);
+    return hemi == 0 ? paraboloidFront1(uv, depth, bias) : paraboloidBack1(uv, depth, bias);
 }
 
 // Light-space uv/depth of the fragment in cascade i.
@@ -202,8 +258,29 @@ void main()
         float atten = rangeAtten(lightIntensity[i], lightRange[i], d) * cone;
         vec3 H = normalize(L + V);
         float spec = pow(max(dot(N, H), 0.0), shininess);
-        result += albedo * lightColor[i] * atten * ndl
-                + specular * lightColor[i] * atten * spec * ndl;
+        // Paraboloid shadow factor for shadowed point lights (milestone 4d).
+        // A light with no map (slot < 0, or a spot) gets the full light
+        // (documented: shadow factor 1.0). The sun keeps its cascaded path.
+        float lshadow = 1.0;
+        int slot = pointLightSlot[i];
+        if (slot >= 0 && lightType[i] == 0)
+        {
+            vec4 l = pointLightViews[slot] * vec4(vWorldPos, 1.0);
+            float ldist = length(l.xyz);
+            vec3 ldir = l.xyz / max(ldist, 1e-6);
+            float ldepth = clamp((ldist - pointLightRange[slot].x) /
+                                     (pointLightRange[slot].y - pointLightRange[slot].x),
+                                 0.0, 1.0);
+            int hemi = (l.z >= 0.0) ? 0 : 1;
+            float u;
+            float v;
+            if (hemi == 0) { u = ldir.x / (1.0 + ldir.z); v = ldir.y / (1.0 + ldir.z); }
+            else { u = -ldir.x / (1.0 - ldir.z); v = -ldir.y / (1.0 - ldir.z); }
+            vec2 luv = vec2(u, v) * 0.5 + 0.5;
+            lshadow = pointLightShadow(slot, hemi, luv, ldepth, pointShadowBias[slot]);
+        }
+        result += (albedo * lightColor[i] * atten * ndl
+                 + specular * lightColor[i] * atten * spec * ndl) * lshadow;
     }
     fragment = vec4(clamp(result, 0.0, 1.0), 1.0);
 }

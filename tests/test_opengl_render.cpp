@@ -122,7 +122,7 @@ int main()
         "draw",
         "use",
         "drawIndexed",
-        "submit(lights=1,sun=0,shadow=0)",
+        "submit(lights=1,sun=0,shadow=0,pointShadows=0)",
         "createRenderTarget(64x64,color=0,depth=1)",
         "setCamera",
         "beginRenderPass(64x64)",
@@ -137,11 +137,38 @@ int main()
         "beginRenderPass(unknown)",  // after release: violation
         "renderTargetTexture",        // after release: violation
         "beginRenderPass(unknown)",  // never created: violation
+        "createShaderProgram",
+        "createRenderTarget(64x64,color=0,depth=1)",
+        "beginRenderPass(64x64)",
+        "clear(1,2,3,4)",
+        "use",
+        "setUniform(lightView)",
+        "setUniform(nearRange)",
+        "setUniform(farRange)",
+        "setUniform(hemisphere)",
+        "setUniform(model)",
+        "drawIndexed",
+        "endRenderPass",
+        "createRenderTarget(64x64,color=0,depth=1)",
+        "beginRenderPass(64x64)",
+        "clear(1,2,3,4)",
+        "use",
+        "setUniform(lightView)",
+        "setUniform(nearRange)",
+        "setUniform(farRange)",
+        "setUniform(hemisphere)",
+        "setUniform(model)",
+        "drawIndexed",
+        "endRenderPass",
+        "submit(lights=1,sun=0,shadow=0,pointShadows=1)",
+        "submit(lights=1,sun=0,shadow=0,pointShadows=1)",  // over-budget: violation
+        "releaseRenderTarget",
+        "releaseRenderTarget",
         "shutdown",
         "draw",    // post-shutdown: violation
         "readback",  // post-shutdown: violation
         "clear(1,2,3,4)",
-        "submit(lights=1,sun=0,shadow=0)"};  // post-shutdown: violation
+        "submit(lights=1,sun=0,shadow=0,pointShadows=0)"};  // post-shutdown: violation
     GRACE_CHECK(null_backend.events() == expected_events);
 
     OpenGLBackendConfig parity_config;
@@ -160,7 +187,7 @@ int main()
         return 77;
     }
     grace::test::runContractChecks(*gl_backend, contract_color, 3);
-    GRACE_CHECK_EQ(gl_backend->violationCount(), 8u);  // 4 RT misuse + 4 post-shutdown calls
+    GRACE_CHECK_EQ(gl_backend->violationCount(), 9u);  // 4 RT misuse + 1 over-budget + 4 post-shutdown
     GRACE_CHECK_EQ(gl_backend->glErrorCount(), 0u);
 
     return grace::test::summary("opengl_render");

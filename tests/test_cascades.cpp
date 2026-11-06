@@ -179,7 +179,7 @@ int main()
         // The submission with the shadow attached is recorded as such.
         submission.shadow = &shadow;
         backend.submit(submission);
-        GRACE_CHECK(backend.events().back() == std::string("submit(lights=0,sun=1,shadow=1)"));
+        GRACE_CHECK(backend.events().back() == std::string("submit(lights=0,sun=1,shadow=1,pointShadows=0)"));
         GRACE_CHECK_EQ(backend.violationCount(), 0u);
 
         // Passes were composed through the contract.

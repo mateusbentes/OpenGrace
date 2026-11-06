@@ -11,7 +11,8 @@
 
 namespace grace::render {
 
-struct ShadowMap;  // defined in grace/render/shadow.hpp
+struct ShadowMap;        // defined in grace/render/shadow.hpp
+struct PointShadowMaps;  // defined in grace/render/shadow.hpp
 
 /// The documented per-object dynamic light limit: the original engine's
 /// forward path supports "up to four lights per object plus sunlight"
@@ -30,6 +31,12 @@ struct DrawSubmission
     std::optional<DirectionalLight> sun;         ///< handled separately from the dynamic lights
     std::vector<DynamicLight> lights;            ///< at most kMaxDynamicLightsPerObject
     const ShadowMap* shadow = nullptr;           ///< optional cascaded sun shadow map (4c)
+    const PointShadowMaps* pointShadows = nullptr;  ///< optional paraboloid maps (4d)
+    /// How many leading point lights in `lights` request a shadow map. More
+    /// than kMaxShadowCastingPointLights is not rejected: the excess lights
+    /// are lit WITHOUT a shadow map (documented), and submit() counts a
+    /// protocol violation for the over-budget request so it is never silent.
+    std::uint32_t shadowLightRequests = 0;
 
     /// Throws std::invalid_argument with a specific message when the
     /// submission is invalid: null mesh, more than

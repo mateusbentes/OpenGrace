@@ -23,6 +23,7 @@ using FnReadPixels = void (*)(GLint x, GLint y, GLsizei width, GLsizei height,
 using FnEnable = void (*)(GLenum cap);
 using FnDisable = void (*)(GLenum cap);
 using FnDepthFunc = void (*)(GLenum func);
+using FnDepthMask = void (*)(GLboolean flag);
 using FnGenVertexArrays = void (*)(GLsizei n, GLuint* arrays);
 using FnBindVertexArray = void (*)(GLuint array);
 using FnDeleteVertexArrays = void (*)(GLsizei n, const GLuint* arrays);
@@ -103,6 +104,7 @@ public:
     FnEnable glEnable = nullptr;
     FnDisable glDisable = nullptr;
     FnDepthFunc glDepthFunc = nullptr;
+    FnDepthMask glDepthMask = nullptr;
 
     // OpenGL 3.x entry points (VAO/VBO/shader path).
     FnGenVertexArrays glGenVertexArrays = nullptr;

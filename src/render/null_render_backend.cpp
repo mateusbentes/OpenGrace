@@ -3,6 +3,8 @@
 #include <cstdio>
 #include <stdexcept>
 
+#include "grace/render/shadow.hpp"
+
 namespace grace::render {
 
 namespace {
@@ -199,12 +201,15 @@ void NullRenderBackend::draw(GpuMesh& mesh, ShaderProgram& program)
 void NullRenderBackend::submit(const DrawSubmission& submission)
 {
     submission.validate();  // same rejection behaviour as a real backend
-    char buffer[80];
-    std::snprintf(buffer, sizeof(buffer), "submit(lights=%u,sun=%d,shadow=%d)",
+    char buffer[96];
+    std::snprintf(buffer, sizeof(buffer), "submit(lights=%u,sun=%d,shadow=%d,pointShadows=%d)",
                   static_cast<unsigned int>(submission.lights.size()),
                   submission.sun.has_value() ? 1 : 0,
-                  submission.shadow != nullptr ? 1 : 0);
+                  submission.shadow != nullptr ? 1 : 0,
+                  submission.pointShadows != nullptr ? 1 : 0);
     record(std::string(buffer));
+    if (submission.shadowLightRequests > kMaxShadowCastingPointLights)
+        ++m_violations;  // documented: over-budget request, excess lights unshadowed
     if (m_shutdown)
         ++m_violations;
 }

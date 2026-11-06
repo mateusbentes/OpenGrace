@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "grace/render/render_backend.hpp"
+#include "grace/render/shadow.hpp"
 #include "test_support.hpp"
 
 namespace grace::test {
@@ -203,6 +204,42 @@ void runContractChecks(Backend& backend, grace::render::ClearColor color,
     backend.beginRenderPass(bogus);
     GRACE_CHECK_EQ(backend.violationCount(), 4u);
 
+    // Point-light (paraboloid) shadow maps, assembled from the same pass
+    // primitives — one pair of depth targets for one point light.
+    {
+        grace::render::PointShadowConfig pointConfig;
+        pointConfig.mapSize = 64;
+        pointConfig.far = 10.0f;
+        grace::render::DynamicLight pointLight = grace::render::PointLight{};
+        grace::render::PointShadowMaps pointMaps = grace::render::renderPointShadowMaps(
+            backend, {pointLight}, {submission}, pointConfig);
+        GRACE_CHECK_EQ(pointMaps.entries.size(), 1u);
+        GRACE_CHECK(pointMaps.entries[0].front != nullptr);
+        GRACE_CHECK(pointMaps.entries[0].back != nullptr);
+        GRACE_CHECK_EQ(backend.violationCount(), 4u);  // no new violations
+
+        grace::render::DrawSubmission lit = submission;
+        lit.lights.clear();
+        lit.lights.push_back(pointLight);
+        lit.pointShadows = &pointMaps;
+        lit.shadowLightRequests = 1;
+        backend.submit(lit);
+        GRACE_CHECK_EQ(backend.violationCount(), 4u);
+
+        // Over-budget request: handled as documented (excess lights unshadowed)
+        // and counted as a violation, never silently truncated.
+        grace::render::DrawSubmission overBudget = lit;
+        overBudget.shadowLightRequests = grace::render::kMaxShadowCastingPointLights + 1u;
+        backend.submit(overBudget);
+        GRACE_CHECK_EQ(backend.violationCount(), 5u);
+
+        for (const grace::render::PointShadowMapEntry& entry : pointMaps.entries)
+        {
+            backend.releaseRenderTarget(entry.front);
+            backend.releaseRenderTarget(entry.back);
+        }
+    }
+
     backend.shutdown();
 
     // Post-shutdown misuse: draw, readback, clear and submit are each a
@@ -211,7 +248,7 @@ void runContractChecks(Backend& backend, grace::render::ClearColor color,
     backend.readback();
     backend.clear();
     backend.submit(submission);
-    GRACE_CHECK_EQ(backend.violationCount(), 8u);
+    GRACE_CHECK_EQ(backend.violationCount(), 9u);  // 5 pre-shutdown + 4 post-shutdown
 
     GRACE_CHECK(!backend.describe().empty());
 }

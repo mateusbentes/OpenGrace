@@ -8,6 +8,7 @@
 #include "grace/render/camera.hpp"
 #include "grace/render/draw_list.hpp"
 #include "grace/render/light.hpp"
+#include "grace/render/paraboloid.hpp"
 #include "grace/render/render_target.hpp"
 
 namespace grace::render {
@@ -50,7 +51,9 @@ struct CascadeConfig
     std::uint32_t count = 4;        ///< cascade count, clamped to [1, kMaxCascadeCount]
     std::uint32_t mapSize = 1024;   ///< fixed, documented per-cascade resolution
     float splitLambda = 0.5f;       ///< practical split scheme mix in [0, 1]
-    float bias = 0.005f;            ///< constant light-space [0,1] depth bias
+    float bias = 0.005f;            ///< constant light-space [0,1] depth bias;
+                                    ///< calibrated for the derived range, not universal
+                                    ///< (see the depth bias note above)
     float filterTolerance = 0.01f;  ///< bilateral depth-comparison tolerance, [0,1] depth
     bool debug = false;             ///< visualise the cascade index (off by default)
 };
@@ -124,5 +127,77 @@ ShadowMap renderShadowCascades(RenderBackend& backend, const DirectionalLight& s
                                const CameraParams& camera,
                                const std::vector<DrawSubmission>& submissions,
                                const CascadeConfig& config);
+
+// --- Dual paraboloid point-light shadow maps (milestone 4d) -----------------
+//
+// Assembled from the same generic pass primitives as the cascades (decision 7
+// evidence): createRenderTarget + beginRenderPass + clear + draw +
+// endRenderPass, per hemisphere. No technique-specific contract method.
+
+/// Maximum number of shadow-casting point lights, separate from
+/// kMaxDynamicLightsPerObject (the per-object light limit of the original's
+/// forward path). Chosen as 2: each shadow-casting point light needs two
+/// depth maps (one per hemisphere), so the memory cost is
+/// maxLights * 2 * mapSize^2 * 4 bytes = 2 * 2 * 1024^2 * 4 = ~16 MB at the
+/// default 1024 resolution, which stays modest while covering the common
+/// case of one or two shadow-casting lamps.
+inline constexpr std::uint32_t kMaxShadowCastingPointLights = 2;
+
+/// One shadow-casting point light: a pair of depth maps (front/back
+/// hemisphere) plus the light-space view. lightIndex associates the entry with
+/// the light at that index in DrawSubmission::lights (documented association).
+struct PointShadowMapEntry
+{
+    std::uint32_t lightIndex = 0;       ///< index into DrawSubmission::lights
+    RenderTarget* front = nullptr;      ///< backend-owned handle, front hemisphere
+    RenderTarget* back = nullptr;       ///< backend-owned handle, back hemisphere
+    core::mat4 lightView{};             ///< world -> light space (forward = +Z)
+    float near = 0.1f;                  ///< light near range, world units
+    float far = 20.0f;                  ///< light far range, world units
+};
+
+/// The point-light shadow maps of a submission, as plain data.
+struct PointShadowMaps
+{
+    std::vector<PointShadowMapEntry> entries;  ///< at most kMaxShadowCastingPointLights
+    std::uint32_t mapSize = 0;
+    float biasWorld = 0.05f;            ///< world-space depth bias (see D4 note)
+    float filterTolerance = 0.01f;      ///< bilateral depth tolerance in linear [0,1] depth
+};
+
+/// Configuration of the point-light shadow pass.
+struct PointShadowConfig
+{
+    std::uint32_t maxLights = kMaxShadowCastingPointLights;  ///< clamped to [1, kMax...]
+    std::uint32_t mapSize = 1024;       ///< fixed, documented per-hemisphere resolution
+    float near = 0.1f;                  ///< > 0, world units
+    float far = 20.0f;                  ///< > near, world units
+    float biasWorld = 0.05f;            ///< world-space bias; converted to linear-depth units
+    float filterTolerance = 0.01f;      ///< > 0, linear [0,1] depth units
+};
+
+/// Throws std::invalid_argument on invalid config values.
+void validatePointShadowConfig(const PointShadowConfig& config);
+
+/// Renders dual paraboloid shadow maps for the point lights in `lights` (at
+/// most config.maxLights of them; any beyond the budget are simply not given
+/// maps — see D2), using `casters` as the shadow-casting geometry. Each light
+/// gets two depth-only targets (front/back hemisphere — two targets, not one
+/// target with two viewports, because a viewport API would be a contract
+/// change; documented). Returns the plain-data result; the caller releases the
+/// targets through backend.releaseRenderTarget.
+///
+/// Depth bias note (D4): the paraboloid stores LINEAR depth in world distance,
+/// unlike the perspective/ortho clip depth of the cascades, so a constant bias
+/// IS sufficient here: the world-space biasWorld is divided by (far - near) to
+/// get the [0,1] depth bias. The cascade bias is a different case and stays a
+/// constant calibrated for the range sunLightSpaceMatrix derives; that range
+/// grows with the scene, so the cascade bias is not universal and a
+/// slope-scaled form remains the robust choice there. Recorded finding; see
+/// docs/implementation-status.md.
+PointShadowMaps renderPointShadowMaps(RenderBackend& backend,
+                                       const std::vector<DynamicLight>& lights,
+                                       const std::vector<DrawSubmission>& casters,
+                                       const PointShadowConfig& config);
 
 }  // namespace grace::render
