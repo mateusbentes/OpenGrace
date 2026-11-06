@@ -61,6 +61,9 @@ All results below are real runs, on the tree at the stated commit.
 | 2026-11-05 | same, milestone 3 | OpenGL off: 7/7 Debug; OpenGL on: 11/11 Debug and Release; `-L opengl` 4/4; zero warnings under `-Werror` |
 | 2026-11-05 | same, milestone 3 | Check counts: version 4, fixed_step_clock 42, application 26, math 28, opengl_context 17, opengl_render 32, mesh 13, shader 16 — all zero failures |
 | 2026-11-05 | same, milestone 3 | Visible CLI run: `opengl 4.6 core` Iris Xe, centre pixel `30,30,30,255`, exit 0; hidden run under `xvfb-run`: llvmpipe `4.5 core`, same pixel, exit 0. Broken-shader failures surface the real info log, e.g. ``error: `broken_identifier_xyz' undeclared`` |
+| 2026-11-06 | same, forward-lighting increment | OpenGL off: 8/8 Debug; OpenGL on: 13/13 Debug and Release; `-L opengl` 5/5; zero warnings under `-Werror` |
+| 2026-11-06 | same | Check counts: version 4, fixed_step_clock 42, application 26, math 31 (Debug) / 28 (Release), lights 30, opengl_context 20, opengl_render 49, mesh 13, shader 16, lighting 10 — all zero failures. Open decision 1 resolved: forward primary, deferred stays planned as milestone 5. Debug math contract violations abort (exit 134) with a named message; Release keeps the documented silent behaviour |
+| 2026-11-06 | same | Visible run: `opengl 4.6 core` Iris Xe, pixel `30,30,30,255`, exit 0; hidden `xvfb-run` run: llvmpipe `4.5 core`, same pixel, exit 0. Lighting readback checks pass: sun-only, point falloff at known distance, spot inside/outside cone, emissive-only; 5-light submission rejected with "exceeds the per-object limit of 4" |
 | 2026-11-05 | same, contract extension | OpenGL off: 7/7 Debug; OpenGL on: 11/11 Debug and Release; `-L opengl` 4/4; zero warnings under `-Werror`; check counts: opengl_context 20, opengl_render 47 |
 
 ### Defects found by the tests, and fixed
@@ -118,10 +121,15 @@ not exist before GL 3.2, so "3.0 core" is not a valid request.
 
 ## Open decisions
 
-1. **Forward or deferred rendering as the primary path?** The original supported
-   both: forward with up to four dynamic lights per object plus sunlight, and
-   deferred with unlimited lights. This must be settled before milestone 4,
-   because it determines material layout and the lighting pass structure.
+1. **Forward or deferred rendering as the primary path?** **Resolved
+   2026-11-06: forward is the primary path.** The original supported both
+   (forward with up to four dynamic lights per object plus sunlight, deferred
+   with unlimited lights); this project adopts the forward path as primary
+   because the Linux/OpenGL target and the per-object light model map onto it
+   directly, and it keeps materials and the lighting pass simple and
+   testable. The per-object dynamic light limit is enforced at exactly four
+   (`kMaxDynamicLightsPerObject`), matching the documented behaviour. The
+   deferred path is **not** cancelled: it remains planned as milestone 5.
 2. **Readback inside the contract or OpenGL-only?** It currently lives in the
    OpenGL backend, so the shared contract checks cannot verify framebuffer
    contents through the null backend. Promoting it to an optional capability

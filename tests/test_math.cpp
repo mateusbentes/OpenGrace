@@ -8,6 +8,9 @@
 #include <cmath>
 #include <cstdint>
 #include <stdexcept>
+#include <string>
+#include <utility>
+#include <vector>
 
 #include "test_support.hpp"
 
@@ -79,11 +82,51 @@ int main()
                          1.0f, 1e-6f)));
     }
 
-    // Normalising a zero vector is documented to return the zero vector, never NaN.
+    // Degenerate inputs (D4): in Debug builds they are reported through the
+    // violation handler (and abort without one); in Release builds the
+    // documented behaviour is preserved exactly and silently.
     {
-        const vec3 z = grace::core::normalise(vec3{0.0f, 0.0f, 0.0f});
+        const vec3 zero = vec3{0.0f, 0.0f, 0.0f};
+#ifndef NDEBUG
+        // Debug: install a handler and verify each degenerate case is
+        // reported with the function name and the invalid input.
+        static std::vector<std::pair<std::string, std::string>> reports;
+        reports.clear();
+        grace::core::math::detail::setViolationHandler(
+            [](const char* function, const char* what) {
+                reports.emplace_back(function, what);
+            });
+        const vec3 z = grace::core::normalise(zero);
+        static_cast<void>(grace::core::rotation(zero, 1.0f));
+        static_cast<void>(grace::core::lookAt(vec3{0.0f, 0.0f, 0.0f}, vec3{0.0f, 0.0f, 1.0f},
+                                             vec3{0.0f, 0.0f, 1.0f}));
+        bool named_normalise = false;
+        bool named_rotation = false;
+        bool named_lookAt = false;
+        for (const auto& report : reports)
+        {
+            if (report.first == "normalise")
+                named_normalise = true;
+            if (report.first == "rotation")
+                named_rotation = true;
+            if (report.first == "lookAt")
+                named_lookAt = true;
+        }
+        GRACE_CHECK(named_normalise);
+        GRACE_CHECK(named_rotation);
+        GRACE_CHECK(named_lookAt);
         GRACE_CHECK((z == vec3{0.0f, 0.0f, 0.0f}));
         GRACE_CHECK(!std::isnan(z.x) && !std::isnan(z.y) && !std::isnan(z.z));
+        grace::core::math::detail::setViolationHandler(nullptr);
+#else
+        // Release: no handler, silent, documented results preserved exactly.
+        const vec3 z = grace::core::normalise(zero);
+        static_cast<void>(grace::core::rotation(zero, 1.0f));
+        static_cast<void>(grace::core::lookAt(vec3{0.0f, 0.0f, 0.0f}, vec3{0.0f, 0.0f, 1.0f},
+                                             vec3{0.0f, 0.0f, 1.0f}));
+        GRACE_CHECK((z == vec3{0.0f, 0.0f, 0.0f}));
+        GRACE_CHECK(!std::isnan(z.x) && !std::isnan(z.y) && !std::isnan(z.z));
+#endif
     }
 
     // mat4 identity and matrix-vector product.

@@ -77,6 +77,7 @@ public:
         const std::string& vertexSource, const std::string& fragmentSource) override;
     std::unique_ptr<GpuMesh> createGpuMesh() override;
     void draw(GpuMesh& mesh, ShaderProgram& program) override;
+    void submit(const DrawSubmission& submission) override;
 
     /// Queues a pixel to be read back before the next buffer swap. The back
     /// buffer contents are undefined after a swap, so all readback happens
@@ -116,6 +117,8 @@ private:
     void shutdownImpl(bool countViolation);
     void ensureTriangle();
     void drawTriangle();
+    void ensureLightingProgram();
+    void submitImpl(const DrawSubmission& submission);
     void readCenter();
     void captureQueuedReadbacks();
     ClearColor readPixel(std::uint32_t x, std::uint32_t y);

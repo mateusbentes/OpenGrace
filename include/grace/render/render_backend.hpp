@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include "grace/render/draw_list.hpp"
 #include "grace/render/mesh.hpp"
 #include "grace/render/shader.hpp"
 
@@ -96,6 +97,13 @@ public:
     /// with an indexed draw. Calls before initialisation or after shutdown
     /// are protocol violations.
     virtual void draw(GpuMesh& mesh, ShaderProgram& program) = 0;
+
+    /// Submits a lit draw (mesh + transform + surface + sun + dynamic lights,
+    /// at most kMaxDynamicLightsPerObject of them) for drawing with the
+    /// backend's forward lighting pass. The submission is validated first;
+    /// invalid submissions throw std::invalid_argument. Calls before
+    /// initialisation or after shutdown are protocol violations.
+    virtual void submit(const DrawSubmission& submission) = 0;
 
     /// Queues a pixel to be captured by the next readback(). For backends with
     /// a buffer swap, readback captures before the swap (the back buffer is

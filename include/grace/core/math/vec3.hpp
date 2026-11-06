@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstddef>
 
+#include "grace/core/math/contract.hpp"
 #include "grace/core/math/vec2.hpp"
 
 namespace grace::core {
@@ -64,12 +65,17 @@ inline float length(const vec3& v)
 }
 
 /// Returns v scaled to unit length. A zero vector normalises to the zero
-/// vector (documented behaviour); it never produces NaN.
+/// vector (documented Release behaviour); it never produces NaN. In Debug
+/// builds a zero input is a contract violation: it is reported through
+/// detail::degenerateInput (abort unless a handler is installed).
 inline vec3 normalise(const vec3& v)
 {
     const float len = length(v);
     if (len == 0.0f)
+    {
+        math::detail::degenerateInput("normalise", "zero-length vector");
         return vec3{0.0f, 0.0f, 0.0f};
+    }
     return v / len;
 }
 

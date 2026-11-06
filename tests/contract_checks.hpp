@@ -118,13 +118,23 @@ void runContractChecks(Backend& backend, grace::render::ClearColor color,
         GRACE_CHECK(draw_recorded);
     }
 
+    // A lit submission is part of the shared contract too.
+    grace::render::DrawSubmission submission;
+    submission.mesh = mesh.get();
+    submission.material.setSurfaceParams(grace::render::SurfaceParams{});
+    submission.lights.push_back(grace::render::PointLight{});
+    backend.submit(submission);
+    GRACE_CHECK_EQ(backend.violationCount(), 0u);
+
     backend.shutdown();
 
-    // Post-shutdown misuse: draw, readback and clear are each a violation.
+    // Post-shutdown misuse: draw, readback, clear and submit are each a
+    // violation.
     backend.draw(*mesh, *program);
     backend.readback();
     backend.clear();
-    GRACE_CHECK_EQ(backend.violationCount(), 3u);
+    backend.submit(submission);
+    GRACE_CHECK_EQ(backend.violationCount(), 4u);
 
     GRACE_CHECK(!backend.describe().empty());
 }

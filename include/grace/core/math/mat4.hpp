@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <stdexcept>
 
+#include "grace/core/math/contract.hpp"
 #include "grace/core/math/vec3.hpp"
 #include "grace/core/math/vec4.hpp"
 
@@ -89,10 +90,16 @@ constexpr mat4 scale(const vec3& s)
 }
 
 /// Rotation about an arbitrary axis (Rodrigues' formula). The axis need not
-/// be normalised. angle is in radians, right-hand rule about the axis.
+/// be normalised, but must not be zero: in Debug builds a zero axis is a
+/// contract violation reported through detail::degenerateInput (abort unless
+/// a handler is installed); in Release the documented behaviour is preserved
+/// (normalise returns the zero vector and the result is a degenerate matrix).
+/// angle is in radians, right-hand rule about the axis.
 /// Not constexpr in C++17 (std::sin/std::cos are not constexpr).
 inline mat4 rotation(const vec3& axis, float angle)
 {
+    if (length(axis) == 0.0f)
+        math::detail::degenerateInput("rotation", "zero-length axis");
     const vec3 a = normalise(axis);
     const float c = static_cast<float>(std::cos(angle));
     const float s = static_cast<float>(std::sin(angle));

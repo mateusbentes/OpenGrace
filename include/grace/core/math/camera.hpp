@@ -2,6 +2,7 @@
 
 #include <cmath>
 
+#include "grace/core/math/contract.hpp"
 #include "grace/core/math/mat4.hpp"
 #include "grace/core/math/vec3.hpp"
 
@@ -14,7 +15,10 @@ namespace grace::core {
 inline mat4 lookAt(const vec3& eye, const vec3& target, const vec3& up)
 {
     const vec3 forward = normalise(target - eye);
-    const vec3 right = normalise(cross(forward, up));
+    const vec3 rightRaw = cross(forward, up);
+    if (length(rightRaw) == 0.0f)
+        math::detail::degenerateInput("lookAt", "up vector parallel to the view direction");
+    const vec3 right = normalise(rightRaw);
     const vec3 realUp = cross(right, forward);
 
     mat4 m = mat4::identity();

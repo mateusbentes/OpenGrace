@@ -86,7 +86,10 @@ target_link_libraries(grace_core PRIVATE grace_warnings)
 
 add_library(grace_render STATIC
     src/render/mesh.cpp
-    src/render/shader.cpp)
+    src/render/shader.cpp
+    src/render/material.cpp
+    src/render/light.cpp
+    src/render/draw_list.cpp)
 
 target_include_directories(grace_render PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)

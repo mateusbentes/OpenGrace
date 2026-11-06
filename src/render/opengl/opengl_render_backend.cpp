@@ -7,6 +7,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -15,6 +16,7 @@
 #include "grace/render/material.hpp"
 #include "grace/render/opengl/gl_loader.hpp"
 
+#include "opengl_lighting.hpp"
 #include "opengl_mesh.hpp"
 #include "opengl_shader.hpp"
 
@@ -145,6 +147,9 @@ struct OpenGLRenderBackend::Impl
     std::shared_ptr<ShaderProgram> tri_shader;
     std::shared_ptr<Material> tri_material;
     bool triangle_ready = false;
+
+    // Forward lighting pass program (built lazily on first submit).
+    std::shared_ptr<ShaderProgram> lighting_program;
 
     bool ready() const { return state == State::Initialised; }
 
@@ -356,6 +361,7 @@ void OpenGLRenderBackend::shutdownImpl(bool countViolation)
     impl.tri_shader.reset();
     impl.tri_material.reset();
     impl.triangle_ready = false;
+    impl.lighting_program.reset();
     impl.drainGlErrors("shutdown");
     if (impl.context != nullptr)
     {
@@ -585,6 +591,107 @@ void OpenGLRenderBackend::draw(GpuMesh& mesh, ShaderProgram& program)
     program.use();
     mesh.drawIndexed();
     impl.drainGlErrors("draw");
+}
+
+void OpenGLRenderBackend::submit(const DrawSubmission& submission)
+{
+    Impl& impl = *m_impl;
+    if (!impl.ready())
+    {
+        ++impl.violations;
+        return;
+    }
+    submitImpl(submission);  // validates; throws std::invalid_argument when invalid
+}
+
+void OpenGLRenderBackend::ensureLightingProgram()
+{
+    Impl& impl = *m_impl;
+    if (!impl.lighting_program)
+        impl.lighting_program = std::shared_ptr<ShaderProgram>(
+            createShaderProgram(opengl::kLightingVertexShader, opengl::kLightingFragmentShader));
+}
+
+void OpenGLRenderBackend::submitImpl(const DrawSubmission& submission)
+{
+    Impl& impl = *m_impl;
+    submission.validate();  // enforces the per-object light limit and parameter ranges
+    ensureLightingProgram();
+
+    // Fixed diagnostic camera (documented): eye (0, 0, 1) looking at the
+    // origin, up +Y, vertical fov 90 degrees.
+    const float aspect = static_cast<float>(impl.config.width) /
+                         static_cast<float>(impl.config.height);
+    const core::mat4 view =
+        core::lookAt(core::vec3{0.0f, 0.0f, 1.0f}, core::vec3{0.0f, 0.0f, 0.0f},
+                     core::vec3{0.0f, 1.0f, 0.0f});
+    const core::mat4 projection = core::perspective(kPi / 2.0f, aspect, 0.1f, 100.0f);
+    const core::mat4 mvp = projection * view * submission.model;
+
+    impl.gl.glViewport(0, 0, static_cast<GLsizei>(impl.config.width),
+                       static_cast<GLsizei>(impl.config.height));
+
+    ShaderProgram& program = *impl.lighting_program;
+    program.use();
+    program.setUniform("mvp", mvp);
+    program.setUniform("model", submission.model);
+    program.setUniform("cameraPos", core::vec3{0.0f, 0.0f, 1.0f});
+
+    const SurfaceParams& surface = submission.material.surfaceParams();
+    program.setUniform("albedo", surface.albedo);
+    program.setUniform("specular", surface.specular);
+    program.setUniform("shininess", surface.shininess);
+    program.setUniform("emissive", surface.emissive);
+
+    if (submission.sun.has_value())
+    {
+        program.setUniform("hasSun", 1);
+        program.setUniform("sunDirection", core::normalise(submission.sun->direction));
+        program.setUniform("sunColor", submission.sun->color);
+        program.setUniform("sunIntensity", submission.sun->intensity);
+    }
+    else
+    {
+        program.setUniform("hasSun", 0);
+    }
+
+    const int light_count = static_cast<int>(submission.lights.size());
+    program.setUniform("lightCount", light_count);
+    for (int i = 0; i < light_count; ++i)
+    {
+        const std::string index = "[" + std::to_string(i) + "]";
+        std::visit(
+            [&](const auto& light) {
+                using T = std::decay_t<decltype(light)>;
+                if constexpr (std::is_same_v<T, PointLight>)
+                {
+                    program.setUniform(("lightType" + index).c_str(), 0);
+                    program.setUniform(("lightPos" + index).c_str(), light.position);
+                    program.setUniform(("lightDir" + index).c_str(), core::vec3{0.0f, 0.0f, 0.0f});
+                    program.setUniform(("lightColor" + index).c_str(), light.color);
+                    program.setUniform(("lightIntensity" + index).c_str(), light.intensity);
+                    program.setUniform(("lightRange" + index).c_str(), light.radius);
+                    program.setUniform(("lightInner" + index).c_str(), 0.0f);
+                    program.setUniform(("lightOuter" + index).c_str(), 0.0f);
+                }
+                else
+                {
+                    program.setUniform(("lightType" + index).c_str(), 1);
+                    program.setUniform(("lightPos" + index).c_str(), light.position);
+                    program.setUniform(("lightDir" + index).c_str(),
+                                       core::normalise(light.direction));
+                    program.setUniform(("lightColor" + index).c_str(), light.color);
+                    program.setUniform(("lightIntensity" + index).c_str(), light.intensity);
+                    program.setUniform(("lightRange" + index).c_str(), light.range);
+                    program.setUniform(("lightInner" + index).c_str(), light.innerAngle);
+                    program.setUniform(("lightOuter" + index).c_str(), light.outerAngle);
+                }
+            },
+            submission.lights[static_cast<std::size_t>(i)]);
+    }
+
+    submission.mesh->drawIndexed();
+    impl.drainGlErrors("submit");
 }
 
 void OpenGLRenderBackend::ensureTriangle()

@@ -36,7 +36,7 @@ void NullGpuMesh::upload(const Mesh& mesh)
         m_owner.countViolation();
 }
 
-void NullGpuMesh::drawIndexed()
+void NullGpuMesh::drawIndexed() const
 {
     m_owner.record("drawIndexed");
     if (!m_owner.ready())
@@ -194,6 +194,18 @@ void NullRenderBackend::draw(GpuMesh& mesh, ShaderProgram& program)
     }
     program.use();
     mesh.drawIndexed();
+}
+
+void NullRenderBackend::submit(const DrawSubmission& submission)
+{
+    submission.validate();  // same rejection behaviour as a real backend
+    char buffer[64];
+    std::snprintf(buffer, sizeof(buffer), "submit(lights=%u,sun=%d)",
+                  static_cast<unsigned int>(submission.lights.size()),
+                  submission.sun.has_value() ? 1 : 0);
+    record(std::string(buffer));
+    if (m_shutdown)
+        ++m_violations;
 }
 
 void NullRenderBackend::queueReadback(std::uint32_t x, std::uint32_t y)

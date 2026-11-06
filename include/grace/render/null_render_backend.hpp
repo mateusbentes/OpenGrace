@@ -20,7 +20,7 @@ public:
     explicit NullGpuMesh(NullRenderBackend& owner) : m_owner(owner) {}
 
     void upload(const Mesh& mesh) override;
-    void drawIndexed() override;
+    void drawIndexed() const override;
 
 private:
     NullRenderBackend& m_owner;
@@ -79,6 +79,7 @@ public:
         const std::string& vertexSource, const std::string& fragmentSource) override;
     std::unique_ptr<GpuMesh> createGpuMesh() override;
     void draw(GpuMesh& mesh, ShaderProgram& program) override;
+    void submit(const DrawSubmission& submission) override;
 
     void queueReadback(std::uint32_t x, std::uint32_t y) override;
     void readback() override;
