@@ -813,4 +813,167 @@ void main()
 }
 )";
 
+// Morphological anti-aliasing (milestone 6d, decision 21). A simple
+// morphological pass in the shape of MLAA's edge detection — NOT SMAA: no
+// pattern search, no reprojection, one pass. Edges are detected on Rec709
+// luminance contrast (linear units) OR NDC depth contrast; each pixel that
+// contrasts with the centre adds its colour (and its ambient-attachment
+// value, so the direct/ambient split stays consistent) to an equal-weight
+// average. A single-pixel-wide edge is blended to about half intensity; a
+// high-contrast interior boundary (e.g. a bright HUD edge) is blended too —
+// that is the stated cost of the simple morphology.
+constexpr const char* kPostMLAAFragmentShader = R"(#version 330 core
+uniform sampler2D srcTex;       // linear HDR colour (direct + ambient)
+uniform sampler2D srcAmbient;   // linear ambient-only attachment
+uniform sampler2D depthTex;     // scene depth (NDC [0,1])
+uniform vec2 outSize;
+uniform float lumThreshold;     // linear luminance delta that marks an edge
+uniform float depthThreshold;   // NDC depth delta that marks an edge
+layout(location = 0) out vec4 outColor;
+layout(location = 1) out vec4 outAmb;
+
+float luminance(vec3 c)
+{
+    return dot(c, vec3(0.2126, 0.7152, 0.0722));
+}
+
+void main()
+{
+    vec2 uv = gl_FragCoord.xy / outSize;
+    vec2 t = 1.0 / outSize;
+    vec3 c = texture(srcTex, uv).rgb;
+    vec3 a = texture(srcAmbient, uv).rgb;
+    float d = texture(depthTex, uv).r;
+    float lc = luminance(c);
+
+    vec2 offsets[4];
+    offsets[0] = vec2(0.0, t.y);
+    offsets[1] = vec2(0.0, -t.y);
+    offsets[2] = vec2(t.x, 0.0);
+    offsets[3] = vec2(-t.x, 0.0);
+
+    vec3 sum = c;
+    vec3 asum = a;
+    float count = 1.0;
+    for (int i = 0; i < 4; ++i)
+    {
+        vec3 nc = texture(srcTex, uv + offsets[i]).rgb;
+        float nd = texture(depthTex, uv + offsets[i]).r;
+        if (abs(luminance(nc) - lc) > lumThreshold || abs(nd - d) > depthThreshold)
+        {
+            sum += nc;
+            asum += texture(srcAmbient, uv + offsets[i]).rgb;
+            count += 1.0;
+        }
+    }
+    outColor = vec4(sum / count, 1.0);
+    outAmb = vec4(asum / count, 1.0);
+}
+)";
+
+// Depth of field with bokeh (milestone 6d, decision 21). Runs in LINEAR HDR
+// before the tonemap (blurring light, not display codes). The circle of
+// confusion is derived from the scene depth: view distance d from the depth
+// buffer via invProj (camera looks down -Z), coc = clamp(aperture * |d -
+// focusDistance| / d, 0, maxCocPixels) — focusDistance and aperture in world
+// units, maxCocPixels the clamp in pixels. The blur is a 16-tap fixed DISC
+// (bokeh), a single gather pass, NOT separable: a separable blur would be a
+// Gaussian cross, and a disc costs the full 2D tap count (bounded by the CoC
+// clamp). Silhouette measure: a tap contributes only if its own view distance
+// silhouette: a tap closer to the eye than the centre pixel is rejected, so a
+// blurred foreground object cannot bleed over a sharp background; taps behind
+// the centre are accepted, which is what spreads a defocused surface's light
+// into the bokeh disc. Both HDR attachments (colour and ambient) are blurred
+// with the same weights so the tonemap compose stays consistent. No temporal
+// or physically-based accumulation.
+constexpr const char* kPostDOFFragmentShader = R"(#version 330 core
+uniform sampler2D srcTex;        // linear HDR colour (direct + ambient)
+uniform sampler2D srcAmbient;    // linear ambient-only attachment
+uniform sampler2D depthTex;      // scene depth (NDC [0,1])
+uniform mat4 invProj;
+uniform vec2 outSize;
+uniform float tanHalfFovY;       // tan(fovY / 2), for the world->pixel conversion
+uniform float focusDistance;     // world units: the sharp plane
+uniform float aperture;          // world units: CoC scale
+uniform float maxCocPixels;      // clamp, pixels
+layout(location = 0) out vec4 outColor;
+layout(location = 1) out vec4 outAmb;
+
+vec3 viewPos(vec2 uv, float d)
+{
+    vec4 clip = vec4(uv * 2.0 - 1.0, d * 2.0 - 1.0, 1.0);
+    vec4 v = invProj * clip;
+    return v.xyz / v.w;
+}
+
+// 16 fixed taps on the unit disc: centre + 5 at radius 0.42 + 10 at radius 0.85
+vec2 discTap(int i)
+{
+    if (i == 0)
+        return vec2(0.0, 0.0);
+    int j = i - 1;
+    if (j < 5)
+    {
+        float ang = 6.2831853 * float(j) / 5.0 + 0.3;
+        return vec2(cos(ang), sin(ang)) * 0.42;
+    }
+    int k = j - 5;
+    float ang = 6.2831853 * float(k) / 10.0 + 0.11;
+    return vec2(cos(ang), sin(ang)) * 0.85;
+}
+
+void main()
+{
+    vec2 uv = gl_FragCoord.xy / outSize;
+    vec2 t = 1.0 / outSize;
+    float d = texture(depthTex, uv).r;
+    if (d >= 1.0)  // background: copy through
+    {
+        outColor = texture(srcTex, uv);
+        outAmb = texture(srcAmbient, uv);
+        return;
+    }
+    vec3 p = viewPos(uv, d);
+    float dist = -p.z;  // view distance: camera looks down -Z
+    // Circle of confusion (documented formula and clamp, decision 21): the
+    // world-space CoC aperture*|d-focus|/d converted to pixels at this
+    // distance (worldPerPixel = 2*d*tan(fovY/2)/height), clamped to maxCocPixels.
+    float worldPerPixel = 2.0 * dist * tanHalfFovY / outSize.y;
+    float coc = clamp(aperture * abs(dist - focusDistance) / max(dist, 0.05) / worldPerPixel,
+                      0.0, maxCocPixels);
+    if (coc < 0.5)  // sharp: copy through
+    {
+        outColor = texture(srcTex, uv);
+        outAmb = texture(srcAmbient, uv);
+        return;
+    }
+    vec3 sum = vec3(0.0);
+    vec3 asum = vec3(0.0);
+    float wsum = 0.0;
+    for (int i = 0; i < 16; ++i)
+    {
+        vec2 suv = uv + discTap(i) * coc * t;
+        if (suv.x < 0.0 || suv.x > 1.0 || suv.y < 0.0 || suv.y > 1.0)
+            continue;
+        float sd = texture(depthTex, suv).r;
+        float sdist = -viewPos(suv, sd).z;
+        // Silhouette guard: reject taps closer to the eye than the centre
+        // (a blurred foreground must not bleed over a sharp background);
+        // taps behind the centre are accepted (bokeh spread).
+        float w = sdist >= dist - 0.02 ? 1.0 : 0.0;
+        sum += w * texture(srcTex, suv).rgb;
+        asum += w * texture(srcAmbient, suv).rgb;
+        wsum += w;
+    }
+    if (wsum < 0.5)
+    {
+        outColor = texture(srcTex, uv);
+        outAmb = texture(srcAmbient, uv);
+        return;
+    }
+    outColor = vec4(sum / wsum, 1.0);
+    outAmb = vec4(asum / wsum, 1.0);
+}
+)";
+
 }  // namespace grace::render::opengl

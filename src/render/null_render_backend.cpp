@@ -137,6 +137,13 @@ void NullRenderBackend::setClearColor(ClearColor color)
     m_clear_color = color;
 }
 
+void NullRenderBackend::setDepthTestEnabled(bool enabled)
+{
+    record(enabled ? "setDepthTestEnabled(1)" : "setDepthTestEnabled(0)");
+    if (m_shutdown)
+        ++m_violations;
+}
+
 void NullRenderBackend::clear()
 {
     record("clear(" + colorText(m_clear_color) + ")");
@@ -175,6 +182,8 @@ std::unique_ptr<ShaderProgram> NullRenderBackend::createShaderProgram(ShaderProg
     case ShaderProgramId::PostBlur: name = "PostBlur"; break;
     case ShaderProgramId::PostTonemap: name = "PostTonemap"; break;
     case ShaderProgramId::PostSSAO: name = "PostSSAO"; break;
+    case ShaderProgramId::PostMLAA: name = "PostMLAA"; break;
+    case ShaderProgramId::PostDOF: name = "PostDOF"; break;
     }
     record(std::string("createShaderProgram(") + name + ")");
     if (m_shutdown)
@@ -360,6 +369,22 @@ TextureView* NullRenderBackend::renderTargetTexture(RenderTarget* target, std::u
         return &known->colorViews[attachment];
     ++m_violations;
     return nullptr;
+}
+
+void NullRenderBackend::copyDepthAttachment(RenderTarget* source, RenderTarget* destination)
+{
+    record("copyDepthAttachment");
+    NullRenderTarget* src = findTarget(source);
+    NullRenderTarget* dst = findTarget(destination);
+    if (m_shutdown || src == nullptr || dst == nullptr || src->released || dst->released ||
+        !src->hasDepthAttachment() || !dst->hasDepthAttachment() || source == destination ||
+        src->width() != dst->width() || src->height() != dst->height() ||
+        m_bound_target == src || m_bound_target == dst)
+    {
+        ++m_violations;
+        return;
+    }
+    // Null backend: depth contents are not modelled; the copy is a no-op.
 }
 
 void NullRenderBackend::bindTexture(const TextureView* view, std::uint32_t unit)

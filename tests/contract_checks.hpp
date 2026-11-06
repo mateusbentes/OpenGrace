@@ -224,6 +224,31 @@ void runContractChecks(Backend& backend, grace::render::ClearColor color,
         backend.releaseRenderTarget(mrtTarget);
     }
 
+    // Depth-test device state and depth-attachment copy (milestone 6d,
+    // decision 19): generic primitives, exercised on both backends.
+    {
+        const std::uint64_t depthViolations = backend.violationCount();
+        grace::render::RenderTargetDesc depthDesc;
+        depthDesc.width = 32;
+        depthDesc.height = 32;
+        depthDesc.colorAttachmentCount = 0;  // depth-only
+        depthDesc.depthAttachment = true;
+        grace::render::RenderTarget* depthA = backend.createRenderTarget(depthDesc);
+        grace::render::RenderTarget* depthB = backend.createRenderTarget(depthDesc);
+        GRACE_CHECK(depthA != nullptr && depthB != nullptr);
+        GRACE_CHECK(depthA->hasDepthAttachment());
+        backend.setDepthTestEnabled(false);
+        backend.setDepthTestEnabled(true);
+        backend.copyDepthAttachment(depthA, depthB);
+        GRACE_CHECK_EQ(backend.violationCount(), depthViolations);
+        backend.copyDepthAttachment(depthA, depthA);  // same target: violation
+        GRACE_CHECK_EQ(backend.violationCount(), depthViolations + 1u);
+        backend.releaseRenderTarget(depthA);
+        backend.copyDepthAttachment(depthA, depthB);  // released source: violation
+        GRACE_CHECK_EQ(backend.violationCount(), depthViolations + 2u);
+        backend.releaseRenderTarget(depthB);
+    }
+
     // Render-pass composition: begin, clear, draw into the target, end.
     const std::uint64_t baseViolations = backend.violationCount();
     backend.beginRenderPass(target);

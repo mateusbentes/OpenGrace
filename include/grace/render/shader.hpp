@@ -30,6 +30,8 @@ enum class ShaderProgramId : std::uint8_t
     PostBlur,           ///< post: separable Gaussian blur
     PostTonemap,        ///< post: filmic tonemap + bloom compose + sRGB display encode
     PostSSAO,           ///< post: screen-space ambient occlusion from the HDR depth
+    PostMLAA,           ///< post: morphological anti-aliasing on the linear HDR (6d)
+    PostDOF,            ///< post: depth of field with a bokeh disc, linear HDR (6d)
 };
 
 /// Caches uniform locations by name so repeated sets do not re-query the

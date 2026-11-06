@@ -122,6 +122,7 @@ public:
     std::string describe() const override;
     void setClearColor(ClearColor color) override;
     ClearColor clearColor() const override { return m_clear_color; }
+    void setDepthTestEnabled(bool enabled) override;
     void clear() override;
     std::uint32_t width() const override { return m_width; }
     std::uint32_t height() const override { return m_height; }
@@ -144,6 +145,7 @@ public:
     CameraParams camera() const override { return m_camera; }
 
     void bindTexture(const TextureView* view, std::uint32_t unit) override;
+    void copyDepthAttachment(RenderTarget* source, RenderTarget* destination) override;
 
     void queueReadback(std::uint32_t x, std::uint32_t y) override;
     void readback() override;

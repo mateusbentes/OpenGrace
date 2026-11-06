@@ -62,6 +62,7 @@ using FnEnableVertexAttribArray = void (*)(GLuint index);
 using FnDrawArrays = void (*)(GLenum mode, GLint first, GLsizei count);
 using FnDrawElements = void (*)(GLenum mode, GLsizei count, GLenum type, const GLvoid* indices);
 using FnGenFramebuffers = void (*)(GLsizei n, GLuint* ids);
+using FnBlitFramebuffer = void (*)(GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1, GLint dstX0, GLint dstY0, GLint dstX1, GLint dstY1, GLbitfield mask, GLenum filter);
 using FnBindFramebuffer = void (*)(GLenum target, GLuint framebuffer);
 using FnFramebufferTexture2D = void (*)(GLenum target, GLenum attachment, GLenum textarget,
                                         GLuint texture, GLint level);
@@ -143,6 +144,7 @@ public:
     FnDrawElements glDrawElements = nullptr;
     FnGenFramebuffers glGenFramebuffers = nullptr;
     FnBindFramebuffer glBindFramebuffer = nullptr;
+    FnBlitFramebuffer glBlitFramebuffer = nullptr;
     FnFramebufferTexture2D glFramebufferTexture2D = nullptr;
     FnCheckFramebufferStatus glCheckFramebufferStatus = nullptr;
     FnDeleteFramebuffers glDeleteFramebuffers = nullptr;

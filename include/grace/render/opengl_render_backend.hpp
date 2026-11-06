@@ -67,6 +67,7 @@ public:
     std::string describe() const override;
     void setClearColor(ClearColor color) override;
     ClearColor clearColor() const override;
+    void setDepthTestEnabled(bool enabled) override;
     void clear() override;
     std::uint32_t width() const override;
     std::uint32_t height() const override;
@@ -88,6 +89,7 @@ public:
     void setCamera(const CameraParams& camera) override;
     CameraParams camera() const override;
     void bindTexture(const TextureView* view, std::uint32_t unit) override;
+    void copyDepthAttachment(RenderTarget* source, RenderTarget* destination) override;
 
     /// Queues a pixel to be read back before the next buffer swap. The back
     /// buffer contents are undefined after a swap, so all readback happens
@@ -131,6 +133,7 @@ private:
     void ensureLightingProgram();
     void submitImpl(const DrawSubmission& submission);
     void applyViewport();
+    void applyDepthState();
     void readCenter();
     void captureQueuedReadbacks();
     ClearColor readPixel(std::uint32_t x, std::uint32_t y);

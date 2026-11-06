@@ -4,6 +4,7 @@
 #include "grace/render/opengl_render_backend.hpp"
 #include "grace/render/renderer.hpp"
 
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <exception>
@@ -263,6 +264,37 @@ int main()
         std::printf("direct-only scene: ssao on=%d  ssao off=%d (must be equal)\n",
                     static_cast<int>(a.r), static_cast<int>(b.r));
         GRACE_CHECK(withinTol(a, b, 1));
+    }
+
+    // A5 base repair (decision 19): the HDR target's depth attachment is the
+    // scene depth in BOTH paths — read it back after a full frame and compare.
+    // Before the repair the deferred path's fullscreen lighting quad overwrote
+    // it with 0.5 (the quad's window depth); now it must equal the forward
+    // path's scene depth, and neither may be 0.5.
+    {
+        auto hdrDepthAt = [&](Renderer& renderer) {
+            backend->beginRenderPass(renderer.hdrTarget());
+            backend->queueReadback(64, 48);
+            backend->readback();
+            const float depth = backend->lastReadback()[0].depth;
+            backend->endRenderPass();
+            return depth;
+        };
+
+        Renderer fwd(*backend);
+        fwd.setConfig(baseConfig(RenderPath::Forward, 1.0f));
+        runFrame(*backend, fwd, {ambientScene(groundMesh.get(), 1.0f)}, center);
+        const float fwdDepth = hdrDepthAt(fwd);
+
+        Renderer def(*backend);
+        def.setConfig(baseConfig(RenderPath::Deferred, 1.0f));
+        runFrame(*backend, def, {ambientScene(groundMesh.get(), 1.0f)}, center);
+        const float defDepth = hdrDepthAt(def);
+
+        std::printf("HDR depth after frame: forward=%.4f  deferred=%.4f (quad depth would be 0.5)\n",
+                    fwdDepth, defDepth);
+        GRACE_CHECK(std::fabs(fwdDepth - defDepth) < 0.001f);
+        GRACE_CHECK(std::fabs(fwdDepth - 0.5f) > 0.001f);  // not the fullscreen quad's depth
     }
 
     GRACE_CHECK_EQ(backend->glErrorCount(), 0u);

@@ -120,6 +120,10 @@ struct OpenGLRenderBackend::Impl
     std::int32_t clear_stencil = 0;
     std::uint32_t clear_mask = static_cast<std::uint32_t>(
         ClearBuffer::Color | ClearBuffer::Depth | ClearBuffer::Stencil);
+    // Device state (decision 19): when false, passes run without a depth
+    // test and without depth writes, so fullscreen passes never overwrite a
+    // target's scene depth. Default true; geometry passes rely on it.
+    bool depth_test = true;
 
     bool has_center = false;
     ClearColor center_pixel{0, 0, 0, 0};
@@ -603,6 +607,22 @@ std::unique_ptr<GpuMesh> OpenGLRenderBackend::createGpuMesh()
     return std::make_unique<opengl::GlMesh>(m_impl->gl);
 }
 
+void OpenGLRenderBackend::applyDepthState()
+{
+    Impl& impl = *m_impl;
+    if (impl.depth_test)
+    {
+        impl.gl.glEnable(GL_DEPTH_TEST);
+        impl.gl.glDepthFunc(GL_LESS);
+        impl.gl.glDepthMask(GL_TRUE);
+    }
+    else
+    {
+        impl.gl.glDisable(GL_DEPTH_TEST);
+        impl.gl.glDepthMask(GL_FALSE);
+    }
+}
+
 void OpenGLRenderBackend::applyViewport()
 {
     Impl& impl = *m_impl;
@@ -669,6 +689,41 @@ TextureView* OpenGLRenderBackend::renderTargetTexture(RenderTarget* target,
     return nullptr;
 }
 
+void OpenGLRenderBackend::copyDepthAttachment(RenderTarget* source, RenderTarget* destination)
+{
+    Impl& impl = *m_impl;
+    if (!impl.ready())
+    {
+        ++impl.violations;
+        return;
+    }
+    opengl::GlRenderTarget* src = findGlTarget(impl.targets, source);
+    opengl::GlRenderTarget* dst = findGlTarget(impl.targets, destination);
+    if (src == nullptr || dst == nullptr || src->released || dst->released ||
+        !src->hasDepthAttachment() || !dst->hasDepthAttachment() || source == destination ||
+        src->width() != dst->width() || src->height() != dst->height() ||
+        impl.bound_target == src || impl.bound_target == dst)
+    {
+        ++impl.violations;
+        return;
+    }
+    impl.gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, src->framebufferId());
+    impl.gl.glBindFramebuffer(GL_DRAW_FRAMEBUFFER, dst->framebufferId());
+    impl.gl.glBlitFramebuffer(0, 0, static_cast<GLsizei>(src->width()),
+                              static_cast<GLsizei>(src->height()), 0, 0,
+                              static_cast<GLsizei>(dst->width()),
+                              static_cast<GLsizei>(dst->height()), GL_DEPTH_BUFFER_BIT,
+                              GL_NEAREST);
+    // Restore the previous bindings: the current pass (if any) stays bound.
+    impl.gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+    impl.gl.glBindFramebuffer(
+        GL_DRAW_FRAMEBUFFER,
+        impl.bound_target != nullptr ? impl.bound_target->framebufferId() : 0);
+    impl.gl.glBindFramebuffer(GL_FRAMEBUFFER,
+                              impl.bound_target != nullptr ? impl.bound_target->framebufferId() : 0);
+    impl.drainGlErrors("copyDepthAttachment");
+}
+
 void OpenGLRenderBackend::bindTexture(const TextureView* view, std::uint32_t unit)
 {
     Impl& impl = *m_impl;
@@ -711,8 +766,7 @@ void OpenGLRenderBackend::submitImpl(const DrawSubmission& submission)
     const core::mat4 mvp = projection * view * submission.model;
 
     applyViewport();
-    impl.gl.glEnable(GL_DEPTH_TEST);
-    impl.gl.glDepthFunc(GL_LESS);
+    applyDepthState();
 
     ShaderProgram& program = *impl.lighting_program;
     program.use();
@@ -897,6 +951,31 @@ RenderTarget* OpenGLRenderBackend::createRenderTarget(const RenderTargetDesc& de
     return raw;
 }
 
+void OpenGLRenderBackend::setDepthTestEnabled(bool enabled)
+{
+    Impl& impl = *m_impl;
+    if (!impl.ready())
+    {
+        ++impl.violations;
+        return;
+    }
+    impl.depth_test = enabled;
+    if (enabled)
+    {
+        impl.gl.glEnable(GL_DEPTH_TEST);
+        impl.gl.glDepthFunc(GL_LESS);
+        impl.gl.glDepthMask(GL_TRUE);
+    }
+    else
+    {
+        // No test and no writes (decision 19): fullscreen passes must not
+        // touch the depth attachment of the target they render into.
+        impl.gl.glDisable(GL_DEPTH_TEST);
+        impl.gl.glDepthMask(GL_FALSE);
+    }
+    impl.drainGlErrors("setDepthTestEnabled");
+}
+
 void OpenGLRenderBackend::beginRenderPass(RenderTarget* target)
 {
     Impl& impl = *m_impl;
@@ -911,9 +990,7 @@ void OpenGLRenderBackend::beginRenderPass(RenderTarget* target)
         impl.bound_target = nullptr;
         impl.gl.glBindFramebuffer(GL_FRAMEBUFFER, 0);
         applyViewport();
-        impl.gl.glEnable(GL_DEPTH_TEST);
-        impl.gl.glDepthFunc(GL_LESS);
-        impl.gl.glDepthMask(GL_TRUE);
+        applyDepthState();
         impl.drainGlErrors("beginRenderPass");
         return;
     }
@@ -928,11 +1005,9 @@ void OpenGLRenderBackend::beginRenderPass(RenderTarget* target)
     impl.bound_target = known;
     impl.gl.glBindFramebuffer(GL_FRAMEBUFFER, known->framebufferId());
     applyViewport();
-    // Depth state for the pass: a shadow/depth pass must write depth even
-    // before any submit() has enabled the test globally.
-    impl.gl.glEnable(GL_DEPTH_TEST);
-    impl.gl.glDepthFunc(GL_LESS);
-    impl.gl.glDepthMask(GL_TRUE);
+    // Depth state for the pass follows the device flag (decision 19): a
+    // shadow/depth pass writes depth; a fullscreen post pass does not.
+    applyDepthState();
     impl.drainGlErrors("beginRenderPass");
 }
 

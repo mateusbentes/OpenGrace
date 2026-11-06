@@ -79,6 +79,7 @@ bool GlLoader::load(ResolveFn resolve, std::string& missingSymbol)
     GRACE_GL_LOAD(glDrawElements, "glDrawElements");
     GRACE_GL_LOAD(glGenFramebuffers, "glGenFramebuffers");
     GRACE_GL_LOAD(glBindFramebuffer, "glBindFramebuffer");
+    GRACE_GL_LOAD(glBlitFramebuffer, "glBlitFramebuffer");
     GRACE_GL_LOAD(glFramebufferTexture2D, "glFramebufferTexture2D");
     GRACE_GL_LOAD(glCheckFramebufferStatus, "glCheckFramebufferStatus");
     GRACE_GL_LOAD(glDeleteFramebuffers, "glDeleteFramebuffers");

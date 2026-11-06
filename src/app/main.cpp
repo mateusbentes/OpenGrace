@@ -21,6 +21,8 @@ struct Options
 {
     bool headless = false;
     bool post = false;
+    bool dof = false;   ///< enable the 6d depth-of-field post pass (with --post)
+    bool mlaa = false;  ///< enable the 6d morphological AA post pass (with --post)
     std::string path = "forward";
     bool help = false;
     bool hidden = false;
@@ -102,6 +104,14 @@ int main(int argc, char** argv)
         else if (arg == "--post")
         {
             options.post = true;
+        }
+        else if (arg == "--dof")
+        {
+            options.dof = true;
+        }
+        else if (arg == "--mlaa")
+        {
+            options.mlaa = true;
         }
         else if (arg == "--path")
         {
@@ -200,6 +210,8 @@ int main(int argc, char** argv)
         return usageError("--path expects 'forward' or 'deferred'");
     rendererConfig.clear_color = kClearColor;
     rendererConfig.post.enabled = options.post;
+    rendererConfig.post.dof.enabled = options.dof;   // 6d: off unless --dof
+    rendererConfig.post.mlaa.enabled = options.mlaa; // 6d: off unless --mlaa
 
     grace::app::ApplicationConfig config;
     config.frame_ns = options.frame_time_ns;

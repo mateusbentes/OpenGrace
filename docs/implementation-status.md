@@ -29,7 +29,8 @@ regenerate: `pandoc docs/implementation-status.md -o docs/implementation-status.
 | 6a | HDR pipeline: float HDR target, bloom, filmic tonemap + sRGB display encode, owned by the renderer, off by default | Done |
 | 6b | Ambient (indirect) lighting term in both paths (decision 17 — a documented deviation from the documented light types) | Done |
 | 6c | SSAO: occlusion factor in a second HDR attachment (ambient only), depth-gradient normals, darkens the ambient term at the tonemap (decision 18). SSAO-STF temporal filtering deferred | Done |
-| 6 | Post-processing: HDR, bloom, filmic tonemap (6a), ambient term (6b), SSAO (6c) done; DOF and morphological AA remain planned (6d) | Partially done |
+| 6d | Base repair (decision 20: fullscreen passes never write depth; HDR depth = scene depth in both paths) + ambient default 0.2 (decision 21) + DOF with bokeh and morphological AA (decision 22 chain order), both off by default | Done |
+| 6 | Post-processing: HDR, bloom, filmic tonemap (6a), ambient term (6b), SSAO (6c), DOF + morphological AA (6d) — all documented in section 3.2 except SSAO-STF temporal filtering, which remains deferred to its own increment | Done (SSAO-STF deferred) |
 | 7 | Global illumination by light volume propagation | Planned |
 | 8 | Physics contract and the first backend | Planned |
 | 9 | Script host: AngelScript integration and type registration | Planned |
@@ -95,7 +96,9 @@ All results below are real runs, on the tree at the stated commit.
 | 2026-11-06 | same, milestone 6b | OpenGL off: 13/13 Debug; OpenGL on: 23/23 Debug and Release; `-L opengl` 10/10; zero warnings under `-Werror`. Ambient term in both paths, same math; renderer config `ambient` default 0.05 linear |
 | 2026-11-06 | same, milestone 6b | Defect fix with real before/after: occluded centre was `0,0,0,255` in both paths, now `13,13,13,255` in both (ambient 0.05 * albedo 1, legacy 8-bit) — test_deferred shadow parity diff 0. Parity with ambient: forward `140,140,140,255` = deferred `140,140,140,255` (diff 0; before: 128 vs 127). Unlit surface ambient check: 0.1 linear -> pixel 25. Post chain: clear colour 30 linear reads 30 legacy, 110 through the chain (both paths, all four CLI combos exit 0) |
 | 2026-11-06 | same, milestone 6c | OpenGL off: 13/13 Debug; OpenGL on: 24/24 Debug and Release; `-L opengl` 11/11; zero warnings under `-Werror`. New suite test_ssao 9/9: flat surface ssao on 232 = off 232 (no self-occlusion); corner (ground + two walls at x/y=0.35) near-corner pixel 206 (occ 0.5, 4/8 samples) vs open-area 232; path agreement on the corner forward 206 = deferred 206 (diff 0); direct-only scene (ambient 0) ssao on 206 = off 206. Post off: all legacy pixel values bit-identical (CLI 30,30,30,255 both paths, exit 0); post on: CLI 110,110,110,255 both paths, exit 0, visible and xvfb hidden |
-| 2026-11-06 | same, milestone 6c | Check counts (all zero failures): version 4, fixed_step_clock 42, application 26, math 38, lights 36, cascades 133, paraboloid 27, trapezoid 80, shader_source_rule 1, renderer 19, opengl_context 20, opengl_render 115, mesh 13, shader 15, lighting 11, shadows 8, point_shadows 7, tsm 11, deferred 23, post 12, ssao 9. No existing suite decreased. shader_source_rule: `#version` only in `src/render/opengl/shader_library.hpp`. `application.cpp` unchanged (git diff empty). R8 occlusion buffer ~1 B/pixel; HDR target 2x Rgba16F + depth (~16.6 MB colour at 1280x720) |
+| 2026-11-06 | same, milestone 6d | OpenGL off: 13/13 Debug; OpenGL on: 25/25 Debug and Release; `-L opengl` 12/12; zero warnings under `-Werror`. Base repair: contract +setDepthTestEnabled/+copyDepthAttachment (null events regenerated, opengl_render 125 checks; violation count 11 -> 13 for the 2 new depth-copy misuse checks). test_ssao 11/11 incl. the new HDR-depth proof: after a full frame, HDR depth readback forward 0.9045 = deferred 0.9045 (quad depth would be 0.5); occlusion values unmoved (corner 206 vs open 232, paths 206=206) — defect fix, not a re-baseline. Ambient default 0.05 -> 0.2 (decision 21): test_deferred occluded parity 13 -> 51,51,51,255 both paths (diff 0), lit parity 140 -> 178; test_post deferred+post 210 -> 220 |
+| 2026-11-06 | same, milestone 6d | New suite test_dof_mlaa 40/40: DOF edge row (ground split at x=0, sun 0.5 + ambient 0.2, hard edge 44/220 at column 64): off and focus=1.0 identical (sharp plane at focus); focus=0.5 (CoC clamped 12 px) blends the edge 220->195 at x=64, 44->82 at x=54 (10 px out), x=50 (14 px) and x=76 untouched — the disc cutoff at the 12 px CoC, not a Gaussian decay; deferred row matches forward within 1 (195 182 163 133 133 83 45 45 201 209 215 220). MLAA edge row (ambient-only, dark 12 / bright 149): off hard step, on the two straddling pixels blend to ~103, interiors unchanged. Both techniques off: flat ambient-1.0 pixel 232 = pre-6d tree. CLI 16 visible + 8 xvfb combos (paths x post off/on x technique flags) all exit 0: 30,30,30,255 post off, 110,110,110,255 post on (centre sample is background, so technique flags do not move it) |
+| 2026-11-06 | same, milestone 6c | Check counts (all zero failures): version 4, fixed_step_clock 42, application 26, math 38, lights 36, cascades 133, paraboloid 27, trapezoid 80, shader_source_rule 1, renderer 19, opengl_context 20, opengl_render 125, mesh 13, shader 15, lighting 11, shadows 8, point_shadows 7, tsm 11, deferred 23, post 12, ssao 11, dof_mlaa 40. No existing suite decreased (opengl_render grew 115 -> 125 for the new contract checks; ssao 9 -> 11 for the depth proof). shader_source_rule: `#version` only in `src/render/opengl/shader_library.hpp`. `application.cpp` unchanged (git diff empty). R8 occlusion buffer ~1 B/pixel; HDR target 2x Rgba16F + depth (~16.6 MB colour at 1280x720) |
 | 2026-11-05 | same, contract extension | OpenGL off: 7/7 Debug; OpenGL on: 11/11 Debug and Release; `-L opengl` 4/4; zero warnings under `-Werror`; check counts: opengl_context 20, opengl_render 47 |
 
 | Published tree did not build with `GRACE_ENABLE_OPENGL=ON` | The lighting commit left the shader header unstaged and published half of a `const` change, so `drawIndexed() const` in the null backend had no matching override | Complete the change set and verify by building a fresh clone |
@@ -154,6 +157,8 @@ not exist before GL 3.2, so "3.0 core" is not a valid request.
 ---
 
 ## Open decisions
+
+
 
 1. **Forward or deferred rendering as the primary path?** **Resolved
    2026-11-06: forward is the primary path.** The original supported both
@@ -401,6 +406,80 @@ not exist before GL 3.2, so "3.0 core" is not a valid request.
     path that exists. It is not deferred because it is unimportant. It is
     deferred because implementing it before the light-volume milestone would mean
     writing the same sampling twice.
+
+20. **Do fullscreen passes write depth, and where does scene depth live?**
+    **Resolved 2026-11-06 (milestone 6d base repair): fullscreen passes never
+    write depth, and the HDR target's depth attachment is the scene depth in
+    BOTH paths.** Before the repair, `beginRenderPass` unconditionally enabled
+    the depth test with writes, so the deferred lighting quad overwrote the
+    HDR depth (0.5) after clearing it to 1.0 — the asymmetry decision 18
+    worked around by reading G-buffer depth in deferred. The contract gains
+    two GENERIC primitives (decision 7 shape, no technique names):
+    `setDepthTestEnabled(bool)` (device state, default on; disabling
+    GL_DEPTH_TEST also disables depth writes per the GL spec) and
+    `copyDepthAttachment(src, dst)` (a blit of the depth attachment between
+    same-sized targets; misuse is a counted violation). The renderer runs
+    every fullscreen pass with the test off, and the deferred path copies
+    G-buffer depth into the HDR target after its lighting pass, so SSAO (and
+    DOF) read `m_hdr` depth unconditionally — the path-dependent branch is
+    deleted. Proof (test_ssao): after a full frame the HDR depth readback is
+    forward 0.9045 = deferred 0.9045 (the ground's scene depth), not 0.5.
+    Existing occlusion measurements did NOT move (corner 206/232, flat 232,
+    paths 206=206): the blit feeds the same depth the G-buffer read provided,
+    so this is a DEFECT FIX (the asymmetry removed), not a re-baseline.
+
+21. **What is the ambient default, given that 0.05 makes SSAO invisible in
+    eight-bit output?** **Resolved 2026-11-06 (milestone 6d): 0.2 linear.**
+    Measured candidates on the corner scene (probe, post on, ssao on,
+    ambient-only) and in a lit scene (direct 0.5 + ambient*occ):
+    A=0.05: ambient-only corner 59 -> 33 (occ 0.5), but in a lit scene one
+    1/8 occlusion step moves the pixel 210 -> 210 (0 levels; the whole
+    occ 1 -> 0.5 range is 2 levels) — invisible. A=0.10: corner 99 -> 59,
+    lit step 1 level, lit range 8 levels, legacy occluded 26. A=0.15: corner
+    128 -> 81, lit step 1 level, lit range 11 levels, legacy occluded 38.
+    A=0.20 (chosen): corner 149 -> 99, lit step 1 level, lit range 14 levels
+    (220 -> 206), legacy occluded 51 — shadows stay readable (20% grey).
+    A=0.25: corner 165 -> 115, lit step 2 levels, legacy occluded 64 (25%
+    grey — starting to wash shadows out). Consequences, all recorded as
+    decision consequences rather than defect fixes: test_deferred occluded
+    parity 13,13,13,255 -> 51,51,51,255 (both paths, diff 0); parity lit
+    140 -> 178; test_post deferred+post 210 -> 220 (computed from config).
+    CLI pixels unchanged (30 legacy / 110 through the chain — the centre
+    sample is background).
+
+22. **Where do DOF and morphological AA sit in the post chain, and in what
+    domain?** **Resolved 2026-11-06 (milestone 6d).** Final order, one line:
+    `lighting -> HDR(2 att + scene depth) -> SSAO(depth -> R8) -> MLAA(linear
+    HDR) -> DOF(linear HDR, bokeh disc) -> bloom -> tonemap:
+    sRGB(aces(direct + amb*occ + bloom)) [DISPLAY BOUNDARY] -> default 8-bit
+    FB -> swapBuffers`. (a) DOF runs in linear HDR before the tonemap: a 4.0
+    highlight next to 0.0 blurs to linear 2.0 -> aces(2.0) = 245; after the
+    tonemap the same blur would average 252 and 0 -> 126. Linear is the
+    physically correct domain (blurring light, not display codes). (b) DOF
+    composes BEFORE bloom, so the bright pass thresholds the DOF-spread linear
+    energy and an out-of-focus highlight blooms correctly. (c) MLAA runs on
+    the LINEAR HDR, not the display-encoded output: the default framebuffer
+    is not a sampleable target through the contract, the HDR target supplies
+    exactly what edge detection needs (colour neighbours + scene depth), and
+    linear thresholds are resolution- and gamma-stable. DOF specifics: CoC =
+    clamp(aperture*|d-focus|/d / worldPerPixel, 0, maxCocPixels), d the view
+    distance from the scene depth (camera near/far in world units supply the
+    depth mapping); blur = 16 fixed disc taps, one gather pass, NOT separable
+    (a separable blur is a Gaussian cross; a disc costs the full 2D tap count,
+    bounded by the CoC clamp); silhouette measure: taps closer to the eye than
+    the centre pixel are rejected, so a blurred foreground cannot bleed over
+    a sharp background, while taps behind the centre are accepted (that is the
+    bokeh spread); memory = one extra 2x Rgba16F full-res ping-pong target
+    (~16.6 MB at 1280x720); no temporal or physically-based accumulation.
+    MLAA specifics: a simple morphological pass in the shape of MLAA's edge
+    detection — NOT SMAA (no pattern search, no reprojection); edges are
+    Rec709 luminance contrast > 0.08 (linear) or NDC depth contrast > 0.02;
+    one pass, 4-neighbour gather; a single-pixel edge blends to about half
+    intensity, and a high-contrast interior boundary (bright HUD edge) is
+    blended too — the stated cost of the simple morphology. Both techniques
+    default OFF and leave every pixel unchanged when off (test_dof_mlaa:
+    flat ambient-1.0 surface reads 232 with both off, matching the pre-6d
+    tree).
 ## Verification commands
 
 ```sh

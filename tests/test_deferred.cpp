@@ -313,9 +313,10 @@ int main()
                     static_cast<int>(defShadow.b), static_cast<int>(defShadow.a),
                     std::abs(static_cast<int>(fwdShadow.r) - static_cast<int>(defShadow.r)));
         // Defect fix (6b): occluded surfaces now read the ambient contribution
-        // (0.05 linear * albedo 1 -> 13 in legacy 8-bit), not black, in BOTH
-        // paths — before this change both read 0,0,0,255.
-        const ClearColor ambientPixel{13, 13, 13, 255};
+        // (ambient 0.2 linear * albedo 1 -> 51 in legacy 8-bit), not black, in
+        // BOTH paths — before 6b both read 0,0,0,255; at the 6b default 0.05
+        // they read 13. The 51 is the decision-20 default (0.2), not a re-baseline.
+        const ClearColor ambientPixel{51, 51, 51, 255};
         GRACE_CHECK(withinTol(fwdShadow, ambientPixel, 2));
         GRACE_CHECK(withinTol(defShadow, ambientPixel, 2));
     }

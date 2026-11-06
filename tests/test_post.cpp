@@ -260,10 +260,12 @@ int main()
         sun.color = vec3{0.5f, 0.5f, 0.5f};
         sunSub.sun = sun;
         const ClearColor p = runScene(*backend, renderer, sunSub);
-        // deferred+post now includes the scene ambient (0.05) on top of the sun
+        // deferred+post now includes the scene ambient on top of the sun
+        // (default 0.2 since decision 20; 0.05 before milestone 6d)
         const std::uint8_t expected = expectedTonemap(0.5f + cfg.ambient);
-        std::printf("deferred + post: linear 0.5 (sun) + ambient 0.05 -> pixel %d (expected %d)\n",
-                    static_cast<int>(p.r), static_cast<int>(expected));
+        std::printf("deferred + post: linear 0.5 (sun) + ambient %.2f -> pixel %d (expected %d)\n",
+                    static_cast<double>(cfg.ambient), static_cast<int>(p.r),
+                    static_cast<int>(expected));
         GRACE_CHECK(withinTol(p, ClearColor{expected, expected, expected, 255}, 3));
     }
 

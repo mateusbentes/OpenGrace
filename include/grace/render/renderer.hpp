@@ -45,6 +45,34 @@ struct SSAOConfig
     void validate() const;
 };
 
+/// Morphological anti-aliasing configuration (milestone 6d). A simple
+/// morphological pass on the linear HDR — NOT SMAA (no pattern search, no
+/// reprojection). Edges: Rec709 luminance contrast (linear) or NDC depth
+/// contrast. Defaults leave every pixel unchanged when off.
+struct MlaaConfig
+{
+    bool enabled = false;              ///< off by default (6d A4)
+    float luminanceThreshold = 0.08f;  ///< linear luminance delta marking an edge
+    float depthThreshold = 0.02f;      ///< NDC depth delta marking an edge
+
+    void validate() const;
+};
+
+/// Depth-of-field configuration (milestone 6d). Circle of confusion:
+/// coc = clamp(aperture * |d - focusDistance| / d, 0, maxCocPixels), d the
+/// view distance from the scene depth; focusDistance/aperture in world
+/// units, maxCocPixels in pixels. Blur: 16-tap bokeh disc, single gather
+/// pass in linear HDR. Off by default.
+struct DofConfig
+{
+    bool enabled = false;          ///< off by default (6d A4)
+    float focusDistance = 1.0f;    ///< world units: the sharp plane
+    float aperture = 0.5f;         ///< world units: CoC scale
+    float maxCocPixels = 12.0f;    ///< CoC clamp, pixels
+
+    void validate() const;
+};
+
 struct PostConfig
 {
     bool enabled = false;             ///< post-processing off by default
@@ -53,6 +81,8 @@ struct PostConfig
     std::uint32_t bloomLevels = 4;    ///< downsample chain depth (half-res each)
     float bloomStrength = 1.0f;       ///< bloom compose weight
     SSAOConfig ssao;                  ///< SSAO (6c), darkens the ambient term only
+    MlaaConfig mlaa;                  ///< morphological AA (6d), linear HDR, off by default
+    DofConfig dof;                    ///< depth of field with bokeh (6d), off by default
 
     void validate() const;
 };
@@ -71,8 +101,13 @@ struct RendererConfig
     std::uint32_t deferredLightCap = kMaxDeferredLights;
     /// Scene-global ambient (indirect) term, linear, same units as light
     /// intensity (milestone 6b, decision 17 — a documented deviation from the
-    /// documented light types, which list no ambient). Default 0.05.
-    float ambient = 0.05f;
+    /// documented light types, which list no ambient). Default 0.2, chosen on
+    /// measured evidence in decision 20 (6d): at 0.05 one SSAO occlusion step
+    /// (1/8) moved a lit pixel by 0 eight-bit levels; at 0.2 the full occlusion
+    /// range moves a lit pixel by 14 levels (220->206) and an ambient-only
+    /// corner by 50 (149->99), while occluded surfaces still read 51/255
+    /// legacy — shadows stay readable.
+    float ambient = 0.2f;
     PostConfig post;                        ///< post-processing chain (6a, off by default)
 
     /// Throws std::invalid_argument on invalid values (out-of-range path,
@@ -123,6 +158,11 @@ public:
     /// attachments through the backend). nullptr in the forward path.
     RenderTarget* gbufferTarget() noexcept { return m_gbuffer; }
 
+    /// The HDR lighting target while the post chain is on, for inspection
+    /// only (readback of its attachments and scene depth through the backend).
+    /// nullptr when the post chain is off.
+    RenderTarget* hdrTarget() noexcept { return m_hdr; }
+
 
     std::uint64_t frameCount() const noexcept { return m_frame_count; }
 
@@ -160,6 +200,9 @@ private:
     std::unique_ptr<ShaderProgram> m_postTonemap;
     std::unique_ptr<ShaderProgram> m_postSSAO;
     RenderTarget* m_ssao = nullptr;  ///< R8 occlusion buffer, full framebuffer size
+    std::unique_ptr<ShaderProgram> m_postMLAA;  ///< 6d morphological AA pass
+    std::unique_ptr<ShaderProgram> m_postDOF;   ///< 6d depth-of-field pass
+    RenderTarget* m_postA = nullptr;  ///< 6d ping-pong target: 2x Rgba16F, full framebuffer size
     std::unique_ptr<ShaderProgram> m_gbuffer_program;
     std::unique_ptr<ShaderProgram> m_deferred_program;
     std::unique_ptr<GpuMesh> m_fullscreen_quad;

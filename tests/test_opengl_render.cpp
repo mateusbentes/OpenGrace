@@ -128,6 +128,11 @@ int main()
         "renderTargetTexture", "renderTargetTexture", "renderTargetTexture",
         "renderTargetTexture", "renderTargetTexture", "renderTargetTexture",
         "releaseRenderTarget",
+        "createRenderTarget(32x32,color=0,depth=1)",
+        "createRenderTarget(32x32,color=0,depth=1)",
+        "setDepthTestEnabled(0)", "setDepthTestEnabled(1)",
+        "copyDepthAttachment", "copyDepthAttachment",
+        "releaseRenderTarget", "copyDepthAttachment", "releaseRenderTarget",
         "beginRenderPass(64x64)", "clear(1,2,3,4)", "draw", "use", "drawIndexed",
         "renderTargetTexture", "endRenderPass", "renderTargetTexture", "releaseRenderTarget",
         "beginRenderPass(unknown)", "renderTargetTexture", "beginRenderPass(unknown)",
@@ -179,7 +184,8 @@ int main()
         return 77;
     }
     grace::test::runContractChecks(*gl_backend, contract_color, 3);
-    GRACE_CHECK_EQ(gl_backend->violationCount(), 11u);  // 1 MRT + 5 misuse/over-budget + 5 post-shutdown
+    // 1 MRT + 5 misuse/over-budget + 2 depth-copy + 5 post-shutdown
+    GRACE_CHECK_EQ(gl_backend->violationCount(), 13u);
     GRACE_CHECK_EQ(gl_backend->glErrorCount(), 0u);
 
     return grace::test::summary("opengl_render");
