@@ -6,24 +6,24 @@
 #include "grace/core/fixed_step_clock.hpp"
 #include "grace/render/render_backend.hpp"
 
-namespace grace::core {
+namespace grace::app {
 
 /// Configuration of an Application run.
 struct ApplicationConfig
 {
     std::int64_t frame_ns = 0;  ///< Simulated wall-clock time per frame; must be > 0.
-    FixedStepConfig step{};     ///< Fixed-step clock configuration.
+    core::FixedStepConfig step{};  ///< Fixed-step clock configuration.
     /// Colour applied to the backend at initialise and used by every frame.
     render::ClearColor clear_color{0, 0, 0, 255};
 };
 
-/// Application lifecycle driver.
+/// Application lifecycle driver (App module).
 ///
 /// Phases: initialise() applies the clear colour to the backend; each frame
 /// advances the fixed-step clock by frame_ns, executes the due fixed steps
 /// through the step callback and renders exactly one frame (one backend
 /// clear); shutdown() shuts the backend down. The driver depends only on a
-/// FixedStepClock and a reference to a render::RenderBackend.
+/// core::FixedStepClock and a reference to a render::RenderBackend.
 class Application
 {
 public:
@@ -52,7 +52,7 @@ public:
     /// Shuts the backend down. Requires initialise(), at most once.
     void shutdown();
 
-    const FixedStepClock& clock() const noexcept { return m_clock; }
+    const core::FixedStepClock& clock() const noexcept { return m_clock; }
 
 private:
     enum class State
@@ -63,10 +63,10 @@ private:
     };
 
     ApplicationConfig m_config;
-    FixedStepClock m_clock;
+    core::FixedStepClock m_clock;
     render::RenderBackend& m_backend;
     StepCallback m_on_step;
     State m_state = State::Created;
 };
 
-}  // namespace grace::core
+}  // namespace grace::app

@@ -3,12 +3,16 @@
 #include <cstdint>
 #include <cstdio>
 #include <exception>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <system_error>
 
-#include "grace/core/application.hpp"
+#include "grace/app/application.hpp"
 #include "grace/render/null_render_backend.hpp"
+#ifdef GRACE_HAVE_OPENGL
+#include "grace/render/opengl_render_backend.hpp"
+#endif
 
 namespace {
 
@@ -16,10 +20,14 @@ struct Options
 {
     bool headless = false;
     bool help = false;
+    bool hidden = false;
+    bool readback = false;
+    bool verbose = false;
     std::uint64_t frames = 10;
     std::int64_t frame_time_ns = 33'333'333;  // ~30 fps
     std::int64_t step_ns = 16'666'666;         // ~60 Hz
     std::int64_t max_steps = 5;
+    int swap_interval = 1;
     std::uint32_t width = 1280;
     std::uint32_t height = 720;
 };
@@ -27,12 +35,15 @@ struct Options
 void printUsage(std::FILE* out)
 {
     std::fprintf(out,
-                 "grace_app - OpenGrace headless application driver\n"
+                 "grace - OpenGrace application driver\n"
                  "\n"
-                 "Usage: grace_app --headless [options]\n"
+                 "Usage: grace [options]\n"
+                 "\n"
+                 "Backend selection:\n"
+                 "  (default)           OpenGL backend, when built with GRACE_ENABLE_OPENGL=ON.\n"
+                 "  --headless          Null (headless) render backend.\n"
                  "\n"
                  "Options:\n"
-                 "  --headless            Use the null (headless) render backend.\n"
                  "  --frames <n>          Number of frames to run (default: 10).\n"
                  "  --frame-time-ns <ns>  Simulated frame time in nanoseconds\n"
                  "                        (default: 33333333).\n"
@@ -41,6 +52,11 @@ void printUsage(std::FILE* out)
                  "  --max-steps <n>       Step cap per frame (default: 5).\n"
                  "  --width <px>          Frame width in pixels (default: 1280).\n"
                  "  --height <px>         Frame height in pixels (default: 720).\n"
+                 "  --hidden              Create the window hidden (OpenGL backend; Xvfb runs).\n"
+                 "  --readback            Read back the centre pixel before the buffer swap\n"
+                 "                        (OpenGL backend).\n"
+                 "  --swap-interval <n>   Buffer swap interval (OpenGL backend, default: 1).\n"
+                 "  -v, --verbose         Print backend details (GL version, vendor, renderer).\n"
                  "  -h, --help            Print this help and exit.\n"
                  "\n"
                  "Exit codes: 0 success, 1 runtime failure, 2 usage error.\n");
@@ -57,7 +73,7 @@ bool parseNumber(std::string_view text, T& out)
 
 int usageError(const std::string& message)
 {
-    std::fprintf(stderr, "grace_app: usage error: %s\n", message.c_str());
+    std::fprintf(stderr, "grace: usage error: %s\n", message.c_str());
     printUsage(stderr);
     return 2;
 }
@@ -79,6 +95,18 @@ int main(int argc, char** argv)
         else if (arg == "--headless")
         {
             options.headless = true;
+        }
+        else if (arg == "--hidden")
+        {
+            options.hidden = true;
+        }
+        else if (arg == "--readback")
+        {
+            options.readback = true;
+        }
+        else if (arg == "--verbose" || arg == "-v")
+        {
+            options.verbose = true;
         }
         else if (arg == "--frames")
         {
@@ -122,6 +150,13 @@ int main(int argc, char** argv)
             if (!parseNumber(std::string_view{argv[++i]}, options.height))
                 return usageError("--height expects an unsigned integer");
         }
+        else if (arg == "--swap-interval")
+        {
+            if (i + 1 >= argc)
+                return usageError("--swap-interval requires a value");
+            if (!parseNumber(std::string_view{argv[++i]}, options.swap_interval))
+                return usageError("--swap-interval expects an integer");
+        }
         else
         {
             return usageError("unknown option '" + std::string{arg} + "'");
@@ -134,34 +169,87 @@ int main(int argc, char** argv)
         return 0;
     }
 
+#ifndef GRACE_HAVE_OPENGL
     if (!options.headless)
-        return usageError("no render backend selected; this build provides --headless only");
+        return usageError("no render backend selected; this build provides --headless only "
+                          "(configure with -DGRACE_ENABLE_OPENGL=ON for the OpenGL backend)");
+#endif
 
-    // Deterministic clear colour for headless runs.
+    // Deterministic clear colour for every run.
     constexpr grace::render::ClearColor kClearColor{0x1E, 0x1E, 0x1E, 0xFF};
 
-    grace::core::ApplicationConfig config;
+    grace::app::ApplicationConfig config;
     config.frame_ns = options.frame_time_ns;
     config.step = grace::core::FixedStepConfig{options.step_ns, options.max_steps};
     config.clear_color = kClearColor;
 
     try
     {
-        grace::render::NullRenderBackend backend(options.width, options.height);
-        grace::core::Application app(config, backend);
+        std::unique_ptr<grace::render::RenderBackend> backend;
+        grace::render::NullRenderBackend* null_backend = nullptr;
+#ifdef GRACE_HAVE_OPENGL
+        grace::render::OpenGLRenderBackend* gl_backend = nullptr;
+        if (!options.headless)
+        {
+            grace::render::OpenGLBackendConfig gl_config;
+            gl_config.width = options.width;
+            gl_config.height = options.height;
+            gl_config.hidden = options.hidden;
+            gl_config.readback_center = options.readback;
+            gl_config.swap_interval = options.swap_interval;
+            auto concrete = std::make_unique<grace::render::OpenGLRenderBackend>(gl_config);
+            concrete->initialise();
+            gl_backend = concrete.get();
+            backend = std::move(concrete);
+        }
+        else
+#endif
+        {
+            auto concrete =
+                std::make_unique<grace::render::NullRenderBackend>(options.width, options.height);
+            null_backend = concrete.get();
+            backend = std::move(concrete);
+        }
 
+        grace::app::Application app(config, *backend);
         const std::uint64_t total_steps = app.run(options.frames);
 
-        std::printf("grace_app: backend=%s frame=%" PRIu32 "x%" PRIu32 "\n",
-                    backend.describe().c_str(), backend.width(), backend.height());
-        std::printf("grace_app: frames=%" PRIu64 " steps=%" PRIu64 " clamps=%" PRIu64
-                    " violations=%" PRIu64 "\n",
-                    options.frames, total_steps, app.clock().clampCount(),
-                    backend.violationCount());
+        std::printf("grace: backend=%s frame=%" PRIu32 "x%" PRIu32 "\n",
+                    backend->describe().c_str(), backend->width(), backend->height());
+        std::printf("grace: frames=%" PRIu64 " steps=%" PRIu64 " clamps=%" PRIu64 "\n",
+                    options.frames, total_steps, app.clock().clampCount());
+#ifdef GRACE_HAVE_OPENGL
+        if (gl_backend != nullptr)
+        {
+            std::printf("grace: violations=%" PRIu64 " gl_errors=%" PRIu64 "\n",
+                        gl_backend->violationCount(), gl_backend->glErrorCount());
+            if (options.verbose)
+            {
+                std::printf("grace: detail: %s\n", gl_backend->describe().c_str());
+                std::printf("grace: hidden=%d swap_interval=%d readback=%d\n",
+                            static_cast<int>(options.hidden),
+                            static_cast<int>(options.swap_interval),
+                            static_cast<int>(options.readback));
+            }
+            if (options.readback && gl_backend->hasCenterPixel())
+            {
+                const grace::render::ClearColor pixel = gl_backend->centerPixel();
+                std::printf("grace: center_pixel=%d,%d,%d,%d depth=%.6f stencil=%d\n",
+                            static_cast<int>(pixel.r), static_cast<int>(pixel.g),
+                            static_cast<int>(pixel.b), static_cast<int>(pixel.a),
+                            static_cast<double>(gl_backend->centerDepth()),
+                            static_cast<int>(gl_backend->centerStencil()));
+            }
+        }
+        else
+#endif
+        {
+            std::printf("grace: violations=%" PRIu64 "\n", null_backend->violationCount());
+        }
     }
     catch (const std::exception& error)
     {
-        std::fprintf(stderr, "grace_app: runtime failure: %s\n", error.what());
+        std::fprintf(stderr, "grace: runtime failure: %s\n", error.what());
         return 1;
     }
 

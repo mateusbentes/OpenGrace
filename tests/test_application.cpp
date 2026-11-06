@@ -1,4 +1,4 @@
-#include "grace/core/application.hpp"
+#include "grace/app/application.hpp"
 #include "grace/render/null_render_backend.hpp"
 
 #include <cstddef>
@@ -11,8 +11,8 @@
 
 namespace {
 
-using grace::core::Application;
-using grace::core::ApplicationConfig;
+using grace::app::Application;
+using grace::app::ApplicationConfig;
 using grace::core::FixedStepConfig;
 using grace::render::ClearColor;
 using grace::render::NullRenderBackend;

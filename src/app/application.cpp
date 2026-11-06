@@ -1,9 +1,9 @@
-#include "grace/core/application.hpp"
+#include "grace/app/application.hpp"
 
 #include <stdexcept>
 #include <utility>
 
-namespace grace::core {
+namespace grace::app {
 
 Application::Application(ApplicationConfig config, render::RenderBackend& backend,
                          StepCallback on_step)
@@ -18,7 +18,7 @@ Application::Application(ApplicationConfig config, render::RenderBackend& backen
 
 bool Application::isValid(const ApplicationConfig& config) noexcept
 {
-    return config.frame_ns > 0 && FixedStepClock::isValid(config.step);
+    return config.frame_ns > 0 && core::FixedStepClock::isValid(config.step);
 }
 
 void Application::initialise()
@@ -66,4 +66,4 @@ void Application::shutdown()
     m_state = State::Shutdown;
 }
 
-}  // namespace grace::core
+}  // namespace grace::app

@@ -83,36 +83,102 @@ add_library(grace_null_render STATIC
 target_link_libraries(grace_null_render PUBLIC grace_render PRIVATE grace_warnings)
 
 # ---------------------------------------------------------------------------
+# OpenGL render backend (Linux only)
+#
+# SDL2 provides window/context/input; OpenGL comes from GLVND (OpenGL::OpenGL,
+# never the legacy libGL). Entry points beyond GL 1.1 are resolved at runtime
+# through SDL_GL_GetProcAddress by the internal loader in this module.
+# ---------------------------------------------------------------------------
+
+if(GRACE_ENABLE_OPENGL)
+    if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        message(FATAL_ERROR
+            "GRACE_ENABLE_OPENGL=ON is supported on Linux only "
+            "(target platform: native Linux x86_64, OpenGL)")
+    endif()
+
+    # SDL2 discovery: config-mode find_package(SDL2) first, pkg-config fallback.
+    find_package(SDL2 QUIET)
+    if(NOT TARGET SDL2::SDL2)
+        find_package(PkgConfig QUIET)
+        if(PKG_CONFIG_FOUND)
+            pkg_check_modules(SDL2_PC QUIET sdl2)
+        endif()
+        if(SDL2_PC_FOUND)
+            add_library(SDL2::SDL2 INTERFACE IMPORTED)
+            target_include_directories(SDL2::SDL2 SYSTEM INTERFACE ${SDL2_PC_INCLUDE_DIRS})
+            target_link_libraries(SDL2::SDL2 INTERFACE ${SDL2_PC_LIBRARIES})
+            target_link_directories(SDL2::SDL2 INTERFACE ${SDL2_PC_LIBRARY_DIRS})
+        endif()
+    endif()
+    if(NOT TARGET SDL2::SDL2)
+        message(FATAL_ERROR
+            "GRACE_ENABLE_OPENGL=ON requires SDL2: neither find_package(SDL2) nor "
+            "pkg-config sdl2 located it. Install libsdl2-dev or configure with "
+            "-DGRACE_ENABLE_OPENGL=OFF.")
+    endif()
+
+    set(OpenGL_GL_PREFERENCE GLVND)
+    find_package(OpenGL REQUIRED)
+
+    add_library(grace_render_opengl STATIC
+        src/render/opengl/gl_loader.cpp
+        src/render/opengl/opengl_render_backend.cpp)
+
+    target_link_libraries(grace_render_opengl
+        PUBLIC grace_render
+        PRIVATE grace_warnings SDL2::SDL2 OpenGL::OpenGL)
+endif()
+
+# ---------------------------------------------------------------------------
 # grace_core
 #
 # The core module owns the object model, resource manager, threading, math,
 # curves and the profiler. It must stay free of any graphics, audio or
-# platform dependency so that every other module can build on it. The
-# application lifecycle drives a render backend through the platform-neutral
-# contract, so the contract header is part of grace_core's public interface.
+# platform dependency so that every other module can build on it.
 # ---------------------------------------------------------------------------
 
 add_library(grace_core STATIC
     src/core/version.cpp
-    src/core/fixed_step_clock.cpp
-    src/core/application.cpp)
+    src/core/fixed_step_clock.cpp)
 
 target_include_directories(grace_core PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
 
-target_link_libraries(grace_core PUBLIC grace_render PRIVATE grace_warnings)
+target_link_libraries(grace_core PRIVATE grace_warnings)
 
 # ---------------------------------------------------------------------------
 # grace_app
 #
-# Command-line driver for the application lifecycle. Headless (null backend)
-# in this milestone; the OpenGL backend is a separate module.
+# The App module (docs/grace-architecture.md section 2): application lifecycle
+# and platform entry points. Depends on grace_core and the render contract,
+# never the other way around.
 # ---------------------------------------------------------------------------
 
-add_executable(grace_app
+add_library(grace_app STATIC
+    src/app/application.cpp)
+
+target_include_directories(grace_app PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
+
+target_link_libraries(grace_app PUBLIC grace_core grace_render PRIVATE grace_warnings)
+
+# ---------------------------------------------------------------------------
+# grace
+#
+# CLI executable for the App module. Headless (null backend) in this
+# milestone; the OpenGL backend is a separate module.
+# ---------------------------------------------------------------------------
+
+add_executable(grace
     src/app/main.cpp)
 
-target_link_libraries(grace_app PRIVATE grace_core grace_null_render grace_warnings)
+target_link_libraries(grace PRIVATE grace_app grace_null_render grace_warnings)
+
+if(GRACE_ENABLE_OPENGL)
+    target_link_libraries(grace PRIVATE grace_render_opengl)
+    target_compile_definitions(grace PRIVATE GRACE_HAVE_OPENGL=1)
+endif()
 
 # ---------------------------------------------------------------------------
 # Tests
