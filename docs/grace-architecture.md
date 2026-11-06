@@ -15,12 +15,11 @@ non-public software. See "Sources" at the end for the full provenance list.
 GRACE 2 was the in-house game engine of Reality Pump Studios, a division of
 TopWare Interactive, based in Kraków, Poland. It succeeded the original GRACE
 engine. *Two Worlds II* (2010) ran on that original GRACE, and the official
-site for that game
-credits "the all-new GRACE game engine", which is the clearest statement of
-the relationship that exists. The GRACE2 site draws the same distinction in
-its own words, though less precisely: "its previous versions have powered ...
-games from the Two Worlds franchise", which the franchise's later titles and
-expansions satisfy without naming the first game.
+site for that game credits "the all-new GRACE game engine", which is the
+clearest statement of the relationship that exists. The GRACE2 site draws the
+same distinction in its own words, though less precisely: "its previous
+versions have powered ... games from the Two Worlds franchise", which the
+franchise's later titles and expansions satisfy without naming the first game.
 
 The engine behind the original *Two Worlds* (2007) is not publicly documented.
 Community discussion sometimes calls it "Antalor", after the name of the
