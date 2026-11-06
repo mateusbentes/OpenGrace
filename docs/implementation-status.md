@@ -154,6 +154,7 @@ not exist before GL 3.2, so "3.0 core" is not a valid request.
 ---
 
 ## Open decisions
+
 1. **Forward or deferred rendering as the primary path?** **Resolved
    2026-11-06: forward is the primary path.** The original supported both
    (forward with up to four dynamic lights per object plus sunlight, deferred
@@ -163,24 +164,30 @@ not exist before GL 3.2, so "3.0 core" is not a valid request.
    testable. The per-object dynamic light limit is enforced at exactly four
    (`kMaxDynamicLightsPerObject`), matching the documented behaviour. The
    deferred path is **not** cancelled: it remains planned as milestone 5.
+
 2. **Readback inside the contract or OpenGL-only?** It currently lives in the
    OpenGL backend, so the shared contract checks cannot verify framebuffer
    contents through the null backend. Promoting it to an optional capability
    would let both backends be verified identically.
+
 3. **Fidelity of the visual scripting block set.** The original block vocabulary
    is not publicly documented. A functionally equivalent set may be acceptable,
    but the decision affects the AngelScript type registration interface.
+
 4. **Save format and script state.** AngelScript has no built-in object
    serialisation. Game state should live in engine-owned structures wherever
    practical, with scripts holding behaviour rather than authoritative state.
+
 5. **Physics backend order.** The original was explicitly plugin-based over
    PhysX, Bullet and Box2D. Bullet is the natural first backend on licence and
    platform grounds; PhysX 3.4 is the second candidate if CPU cloth and soft
    body fidelity is required. PhysX 5 is not a candidate, because its
    deformable features depend on GPU execution.
+
 6. **Engine name.** OpenGrace follows the convention of OpenMW, OpenRCT2,
    OpenTTD and OpenSAGE, all of which take their name from the original product.
    The closest precedent is OpenSAGE, which reimplements an internal EA engine.
+
 7. **Shadow-pass contract shape: technique-named method or generic render-pass
    composition?** The 4b contract method `renderShadowMap(target, sun, bounds,
    submissions)` could not carry several cascades without becoming a different
@@ -200,6 +207,7 @@ not exist before GL 3.2, so "3.0 core" is not a valid request.
    correct: the second shadow technique needed zero contract changes.
 
 ---
+
 8. **Is the fitted cascade a sufficient substitute for the trapezoidal
    transform?** **Resolved 2026-11-06 (milestone 4e): the fitted cascade stays
    the default; the trapezoidal transform is implemented behind
@@ -279,10 +287,12 @@ not exist before GL 3.2, so "3.0 core" is not a valid request.
     The `grace` binary now selects the path with `--path forward|deferred`
     (default forward, invalid value = usage error exit 2) and both paths run
     to completion, exit 0.
+
 13. **Renderer vs backend layering.** Recorded with decision 12: the renderer
     owns frame composition and all path/shadow/light configuration; the backend
     is a device. The renderer is not a god object — resource management, scene
     storage, culling and asset loading are explicitly out of its scope.
+
 14. **Where do shader sources live?** **Resolved 2026-11-06 (milestone 5c): only
     in the OpenGL backend's shader library** (`src/render/opengl/shader_library.hpp`).
     The contract's shader factory takes a closed, API-neutral `ShaderProgramId`
@@ -292,6 +302,33 @@ not exist before GL 3.2, so "3.0 core" is not a valid request.
     entry in the backend library; the API-neutral render module must never
     contain shading-language source (enforced by the `shader_source_rule` test,
     which scans the tree and fails on any hit outside `src/render/opengl/`).
+
+15. **Where is the linear-to-display boundary?** **Resolved 2026-11-06
+    (milestone 6a).** Before 6a the pipeline wrote linear values straight into
+    an 8-bit non-sRGB framebuffer — the output was missing a display encoding
+    (0.5 linear measured as 128, where sRGB would give ~188). The boundary now
+    sits at the end of the post chain: the HDR target (Rgba16F) holds linear,
+    and the final 8-bit target receives sRGB(filmic tonemap(linear)). With the
+    chain OFF every existing pixel value is bit-identical (legacy linear->8-bit,
+    documented); with it ON the same scene measures 0.5 -> 206. Measured
+    tonemap response (exposure 1): 0.0->0, 0.18->141, 0.5->206, 1.0->232,
+    2.0->245, 4.0->252. Bloom halo measured at 4 px from a 4.0-bright source:
+    61 with bloom on, 0 with it off.
+    The default remains the legacy path in this increment, so that no existing pixel value changes. Flipping the default is a separate change at the end of the chain, once the remaining techniques land, and it must re-baseline every measured value with before and after figures.
+
+16. **Is presentation a device operation or a side effect of clearing?** It was
+    a side effect. `clear()` read back queued pixels and swapped the buffer, so
+    when the post chain cleared the default framebuffer part-way through itself
+    the backend presented half a frame and captured the pixel before the
+    tonemap ran. The command line showed it and no suite did: `clear()` in
+    forward mode read 30,30,30,255 with the chain enabled and disabled alike,
+    while the same scene through the renderer measured 206 for a 0.5 linear
+    input. `swapBuffers()` now exists as a device capability, called once at
+    the end of a frame by the renderer; `clear()` only clears. This is decision
+    12 one level down: there the technique was hidden in a neutral name, here
+    the frame lifecycle was hidden in a device operation. The null backend had
+    mirrored the old behaviour and now mirrors the new one, which is what the
+    shared contract checks caught.
 
 17. **Is a constant ambient term acceptable, given that section 3.3 lists no
     ambient light type?** **Resolved 2026-11-06 (milestone 6b): yes, as a
@@ -349,32 +386,21 @@ not exist before GL 3.2, so "3.0 core" is not a valid request.
     Path agreement (A4): forward and deferred read the same scene depth and
     run the same pass; measured near-corner pixel forward 206 = deferred 206
     (diff 0), open-area 232 = 232.
-15. **Where is the linear-to-display boundary?** **Resolved 2026-11-06
-    (milestone 6a).** Before 6a the pipeline wrote linear values straight into
-    an 8-bit non-sRGB framebuffer — the output was missing a display encoding
-    (0.5 linear measured as 128, where sRGB would give ~188). The boundary now
-    sits at the end of the post chain: the HDR target (Rgba16F) holds linear,
-    and the final 8-bit target receives sRGB(filmic tonemap(linear)). With the
-    chain OFF every existing pixel value is bit-identical (legacy linear->8-bit,
-    documented); with it ON the same scene measures 0.5 -> 206. Measured
-    tonemap response (exposure 1): 0.0->0, 0.18->141, 0.5->206, 1.0->232,
-    2.0->245, 4.0->252. Bloom halo measured at 4 px from a 4.0-bright source:
-    61 with bloom on, 0 with it off.
-    The default remains the legacy path in this increment, so that no existing pixel value changes. Flipping the default is a separate change at the end of the chain, once the remaining techniques land, and it must re-baseline every measured value with before and after figures.
 
-16. **Is presentation a device operation or a side effect of clearing?** It was
-    a side effect. `clear()` read back queued pixels and swapped the buffer, so
-    when the post chain cleared the default framebuffer part-way through itself
-    the backend presented half a frame and captured the pixel before the
-    tonemap ran. The command line showed it and no suite did: `clear()` in
-    forward mode read 30,30,30,255 with the chain enabled and disabled alike,
-    while the same scene through the renderer measured 206 for a 0.5 linear
-    input. `swapBuffers()` now exists as a device capability, called once at
-    the end of a frame by the renderer; `clear()` only clears. This is decision
-    12 one level down: there the technique was hidden in a neutral name, here
-    the frame lifecycle was hidden in a device operation. The null backend had
-    mirrored the old behaviour and now mirrors the new one, which is what the
-    shared contract checks caught.
+19. **Volumetric light types are documented and not implemented.** Section 3.3
+    lists the supported light types as point, spot, directional and volumetric.
+    The first three exist as `DirectionalLight`, `PointLight` and `SpotLight` with
+    documented units and validation; nothing in `light.hpp` or the lighting
+    shaders represents a volumetric light, and no shader in this tree scatters
+    through a medium. This is a deviation from a documented capability and is
+    recorded as one, per the rule section 3 now states.
+
+    Deferring it is defensible on sequencing: a volumetric light is a scattering
+    integral along a view ray, which needs shadowed space to march through, and
+    that depends on the global illumination work rather than on the lighting
+    path that exists. It is not deferred because it is unimportant. It is
+    deferred because implementing it before the light-volume milestone would mean
+    writing the same sampling twice.
 ## Verification commands
 
 ```sh
