@@ -269,8 +269,11 @@ buildable.
 
 ## 7. Open questions
 
-- Which rendering path is primary: forward, deferred, or both selectable at
-  runtime as in the original?
+- ~~Which rendering path is primary: forward, deferred, or both selectable at
+  runtime as in the original?~~ Resolved: forward rendering is the primary
+  path, matching the documented per-object model of four dynamic lights plus
+  sunlight. The deferred path stays planned as a later milestone rather than
+  a runtime alternative. See docs/implementation-status.md.
 - Does the Tetragramaton block set need to be reproduced faithfully, or is a
   functionally equivalent block vocabulary acceptable?
 - What is the save format's relationship to script state, given that AngelScript

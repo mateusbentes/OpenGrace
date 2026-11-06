@@ -69,6 +69,23 @@ Build options:
 | `GRACE_ENABLE_OPENGL` | `OFF` | Build the Linux OpenGL backend. Requires SDL2 and OpenGL. |
 | `GRACE_ENABLE_PHYSX` | `OFF` | Build the PhysX 3.4 physics backend from a local SDK clone. |
 
+## Dependencies
+
+Nothing is vendored. Optional dependencies are cloned into local, git-ignored
+directories and linked as external libraries. [NOTICE](NOTICE) holds the full
+attribution entries and their licence terms.
+
+| Dependency | Licence | Used for | Status |
+| --- | --- | --- | --- |
+| SDL2 | zlib | Window, context and input | linked when `GRACE_ENABLE_OPENGL=ON` |
+| OpenGL and GLVND | MIT-style | Graphics API, resolved at runtime | linked when `GRACE_ENABLE_OPENGL=ON` |
+| NVIDIA PhysX SDK 3.4 | 3-Clause BSD | Physics backend | planned, `GRACE_ENABLE_PHYSX` |
+| Bullet Physics SDK | zlib | Physics backend | planned |
+| Box2D | MIT | 2D physics backend | planned |
+| AngelScript | zlib | Text scripting host | planned |
+| OpenAL Soft | LGPL-2.0-or-later | Audio backend, linked dynamically | planned |
+| FreeType | FreeType License | Font rendering in the UI module | planned |
+
 ## Repository layout
 
 ```

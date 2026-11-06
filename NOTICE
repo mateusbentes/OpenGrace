@@ -5,10 +5,11 @@ This product includes software developed by third parties. Each component
 listed below remains under its own licence; the Apache License 2.0 that covers
 this project's original source code does not alter those terms.
 
-At the time of writing the build links no third-party library. Entries marked
-"planned" are recorded here so that attribution is in place before the
-dependency is integrated; their licence texts will be added to third_party/
-when the corresponding backend is actually built.
+The build links SDL2 and OpenGL/GLVND when GRACE_ENABLE_OPENGL is enabled.
+No other third-party library is linked yet. Entries marked "planned" are
+recorded here so that attribution is in place before the dependency is
+integrated; their licence texts will be added to third_party/ when the
+corresponding backend is actually built.
 
 ===============================================================================
 
@@ -20,9 +21,17 @@ AngelScript (AngelCode Scripting Library)
 ===============================================================================
 
 NVIDIA PhysX SDK 3.4
-  Copyright (c) 2018 NVIDIA Corporation
+  https://github.com/NVIDIAGameWorks/PhysX-3.4
+  Copyright (c) 2018 NVIDIA Corporation. All rights reserved.
   Licence: 3-Clause BSD
   Status: planned, as a physics backend.
+
+  Not vendored. The SDK is cloned into a local, git-ignored directory and
+  linked as an external dependency; no part of it is redistributed from this
+  repository. A binary distribution that links it must reproduce the
+  copyright notice, the list of conditions and the disclaimer, as clause 2
+  requires. The APEX SDK shipped in the same depot is deprecated and is not
+  used.
 
 ===============================================================================
 
@@ -33,10 +42,27 @@ Bullet Physics SDK
 
 ===============================================================================
 
+Box2D
+  Copyright (c) Erin Catto and contributors
+  Licence: MIT
+  Status: planned, as the 2D physics backend.
+
+===============================================================================
+
 SDL2
   Copyright (c) 1997-2026 Sam Lantinga
   Licence: zlib
-  Status: planned, for windowing and input on the OpenGL backend.
+  Status: linked when GRACE_ENABLE_OPENGL=ON, for windowing, context
+  creation and input.
+
+===============================================================================
+
+OpenGL and GLVND
+  Copyright (c) NVIDIA Corporation and The Khronos Group Inc.
+  Licence: MIT-style (libglvnd and the Khronos headers)
+  Status: linked when GRACE_ENABLE_OPENGL=ON, as the graphics API. The
+  entry points are resolved at runtime, so no OpenGL library is a link-time
+  dependency of the core modules.
 
 ===============================================================================
 
