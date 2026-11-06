@@ -291,7 +291,7 @@ void main()
         result += (albedo * lightColor[i] * atten * ndl
                  + specular * lightColor[i] * atten * spec * ndl) * lshadow;
     }
-    fragment = vec4(clamp(result, 0.0, 1.0), 1.0);
+    fragment = vec4(result, 1.0);  // unclamped: HDR targets keep the range; 8-bit targets saturate on write
 }
 )";
 
@@ -631,7 +631,7 @@ void main()
         result += (albedo * lightColor[i] * atten * ndl
                  + vec3(specLum) * lightColor[i] * atten * spec * ndl) * lshadow;
     }
-    fragment = vec4(clamp(result, 0.0, 1.0), 1.0);
+    fragment = vec4(result, 1.0);  // unclamped: HDR targets keep the range; 8-bit targets saturate on write
 }
 )";
 
@@ -656,6 +656,75 @@ void main() { gl_Position = vec4(broken_identifier_xyz, 1.0); }
 constexpr const char* kBrokenFragmentShader = R"(#version 330 core
 out vec4 fragment;
 void main() { fragment = color_uniform_that_does_not_exist; }
+)";
+
+// Post-processing chain (milestone 6a), all fullscreen passes reusing the
+// deferred fullscreen vertex stage. HDR values are linear; the tonemap stage
+// is the linear->display boundary: filmic ACES approximation, then sRGB encode.
+constexpr const char* kPostBrightFragmentShader = R"(#version 330 core
+uniform sampler2D srcTex;
+uniform vec2 outSize;   // current render target size; uv must map over it
+uniform float threshold;
+out vec4 fragment;
+void main()
+{
+    vec2 uv = gl_FragCoord.xy / outSize;
+    vec3 c = texture(srcTex, uv).rgb;
+    fragment = vec4(max(c - vec3(threshold), vec3(0.0)), 1.0);
+}
+)";
+
+constexpr const char* kPostBlurFragmentShader = R"(#version 330 core
+uniform sampler2D srcTex;
+uniform vec2 outSize;     // current render target size
+uniform vec2 direction;   // (1,0) or (0,1) in texels of the source level
+out vec4 fragment;
+void main()
+{
+    vec2 uv = gl_FragCoord.xy / outSize;
+    vec2 step = direction / vec2(textureSize(srcTex, 0));
+    // 9-tap Gaussian weights (1 2 1 / 2 4 2 / 1 2 1) normalized by 16, with the
+    // two outer taps folded in: 0.227027 + 2*0.194594 + 2*0.121621 + 2*0.054054
+    vec3 sum = texture(srcTex, uv).rgb * 0.227027;
+    sum += texture(srcTex, uv + step * 1.3846153846).rgb * 0.3162162162;
+    sum += texture(srcTex, uv - step * 1.3846153846).rgb * 0.3162162162;
+    sum += texture(srcTex, uv + step * 3.2307692308).rgb * 0.0702702703;
+    sum += texture(srcTex, uv - step * 3.2307692308).rgb * 0.0702702703;
+    fragment = vec4(sum, 1.0);
+}
+)";
+
+constexpr const char* kPostTonemapFragmentShader = R"(#version 330 core
+uniform sampler2D hdrTex;     // linear HDR lighting result
+uniform sampler2D bloomTex;   // linear bloom (already blurred)
+uniform vec2 outSize;         // default framebuffer size
+uniform float exposure;
+out vec4 fragment;
+
+// Filmic tonemap (architecture 3.2 "filmic curve"): ACES approximation
+// (Narkowicz). Low end: near-linear, keeps shadow detail. Middle: gentle
+// shoulder. Above 1: rolls off to 1, compressing highlights at the cost of
+// some highlight saturation.
+vec3 aces(vec3 x)
+{
+    return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0);
+}
+
+// Linear -> sRGB display encode: this is the linear-to-display boundary (H0).
+vec3 srgbEncode(vec3 c)
+{
+    return mix(1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, c * 12.92,
+               step(c, vec3(0.0031308)));
+}
+
+void main()
+{
+    vec2 uv = gl_FragCoord.xy / outSize;
+    vec3 hdr = texture(hdrTex, uv).rgb;
+    vec3 bloom = texture(bloomTex, uv).rgb;
+    vec3 tonemapped = aces((hdr + bloom) * exposure);
+    fragment = vec4(srgbEncode(tonemapped), 1.0);
+}
 )";
 
 }  // namespace grace::render::opengl

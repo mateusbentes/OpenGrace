@@ -20,6 +20,7 @@ namespace {
 struct Options
 {
     bool headless = false;
+    bool post = false;
     std::string path = "forward";
     bool help = false;
     bool hidden = false;
@@ -97,6 +98,10 @@ int main(int argc, char** argv)
         else if (arg == "--headless")
         {
             options.headless = true;
+        }
+        else if (arg == "--post")
+        {
+            options.post = true;
         }
         else if (arg == "--path")
         {
@@ -194,6 +199,7 @@ int main(int argc, char** argv)
     else
         return usageError("--path expects 'forward' or 'deferred'");
     rendererConfig.clear_color = kClearColor;
+    rendererConfig.post.enabled = options.post;
 
     grace::app::ApplicationConfig config;
     config.frame_ns = options.frame_time_ns;

@@ -318,13 +318,23 @@ void OpenGLRenderBackend::clear()
         drawTriangle();
 
     impl.drainGlErrors("clear");
+}
 
-    // Readback happens before the swap: the back buffer contents are
-    // undefined after SDL_GL_SwapWindow.
+void OpenGLRenderBackend::swapBuffers()
+{
+    Impl& impl = *m_impl;
+    if (!impl.ready())
+    {
+        ++impl.violations;
+        return;
+    }
+    // Readback happens before the swap: the back buffer contents are undefined
+    // after SDL_GL_SwapWindow.
     if (impl.config.readback_center || !impl.readback_queue.empty())
         readback();
 
     SDL_GL_SwapWindow(impl.window);
+    impl.drainGlErrors("swapBuffers");
 }
 
 std::uint32_t OpenGLRenderBackend::width() const

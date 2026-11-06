@@ -26,6 +26,9 @@ enum class ShaderProgramId : std::uint8_t
     ParaboloidDepth,    ///< paraboloid point-light depth pass
     GBuffer,            ///< deferred G-buffer write pass (MRT)
     DeferredLighting,   ///< deferred fullscreen lighting pass
+    PostBright,         ///< post: bloom bright pass (HDR threshold)
+    PostBlur,           ///< post: separable Gaussian blur
+    PostTonemap,        ///< post: filmic tonemap + bloom compose + sRGB display encode
 };
 
 /// Caches uniform locations by name so repeated sets do not re-query the

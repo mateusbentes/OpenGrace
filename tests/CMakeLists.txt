@@ -133,6 +133,10 @@ if(GRACE_ENABLE_OPENGL)
     target_link_libraries(test_deferred PRIVATE grace_render grace_render_opengl grace_warnings)
     target_include_directories(test_deferred PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
+    add_executable(test_post test_post.cpp)
+    target_link_libraries(test_post PRIVATE grace_render grace_render_opengl grace_warnings)
+    target_include_directories(test_post PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
     find_program(GRACE_XVFB_RUN NAMES xvfb-run)
     if(GRACE_XVFB_RUN)
         set(GRACE_OPENGL_LAUNCHER "${GRACE_XVFB_RUN};-a")
@@ -140,7 +144,7 @@ if(GRACE_ENABLE_OPENGL)
         set(GRACE_OPENGL_LAUNCHER "")
     endif()
 
-    foreach(test_name test_opengl_context test_opengl_render test_mesh test_shader test_lighting test_shadows test_point_shadows test_tsm test_deferred)
+    foreach(test_name test_opengl_context test_opengl_render test_mesh test_shader test_lighting test_shadows test_point_shadows test_tsm test_deferred test_post)
         add_test(NAME ${test_name}
             COMMAND ${GRACE_OPENGL_LAUNCHER} $<TARGET_FILE:${test_name}>)
         set_tests_properties(${test_name} PROPERTIES

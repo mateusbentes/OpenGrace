@@ -81,14 +81,17 @@ void runContractChecks(Backend& backend, grace::render::ClearColor color,
 
     // Readback returns the documented value in every backend: the value
     // clear() writes (null: exactly the clear colour; OpenGL: the framebuffer
-    // contents, within one unit per channel). The queued pixel is captured
-    // with the next clear, before any buffer swap on real backends.
+    // contents, within one unit per channel). Capture is explicit since 6a:
+    // clear() neither reads back nor presents.
     backend.queueReadback(1, 1);
     backend.clear();
+    backend.readback();  // 6a: capture is explicit; clear() neither reads back nor presents
     GRACE_CHECK(backend.hasCenterPixel());
     GRACE_CHECK(detail::withinOne(backend.centerPixel(), color));
-    GRACE_CHECK_EQ(backend.lastReadback().size(), 1u);
-    GRACE_CHECK(detail::withinOne(backend.lastReadback()[0].color, color));
+    const std::vector<grace::render::ReadbackSample> samples = backend.lastReadback();
+    GRACE_CHECK_EQ(samples.size(), 1u);
+    if (!samples.empty())
+        GRACE_CHECK(detail::withinOne(samples[0].color, color));
 
     // Mesh + shader + draw are part of the shared contract.
     auto program = backend.createShaderProgram(grace::render::ShaderProgramId::FlatUnlit);
@@ -168,6 +171,24 @@ void runContractChecks(Backend& backend, grace::render::ClearColor color,
             threw = true;
         }
         GRACE_CHECK(threw);
+    }
+
+    // HDR float format (milestone 6a): Rgba16F target with a sampleable depth.
+    {
+        grace::render::RenderTargetDesc hdr;
+        hdr.width = 32;
+        hdr.height = 32;
+        hdr.colorAttachmentCount = 1;
+        hdr.colorFormats[0] = grace::render::PixelFormat::Rgba16F;
+        hdr.depthAttachment = true;
+        grace::render::RenderTarget* hdrTarget = backend.createRenderTarget(hdr);
+        GRACE_CHECK(hdrTarget != nullptr);
+        grace::render::TextureView* view = backend.renderTargetTexture(hdrTarget, 0);
+        GRACE_CHECK(view != nullptr);
+        GRACE_CHECK(view->format() == grace::render::PixelFormat::Rgba16F);
+        GRACE_CHECK(backend.renderTargetTexture(hdrTarget, grace::render::kDepthAttachment)
+                        ->isDepth());
+        backend.releaseRenderTarget(hdrTarget);
     }
 
     // MRT descriptor (milestone 5, decision 9): two colour attachments + depth,
@@ -265,13 +286,14 @@ void runContractChecks(Backend& backend, grace::render::ClearColor color,
 
     backend.shutdown();
 
-    // Post-shutdown misuse: draw, readback, clear and submit are each a
-    // violation.
+    // Post-shutdown misuse: draw, readback, clear, submit and present are each
+    // a violation.
     backend.draw(*mesh, *program);
     backend.readback();
     backend.clear();
     backend.submit(submission);
-    GRACE_CHECK_EQ(backend.violationCount(), baseViolations + 9u);
+    backend.swapBuffers();
+    GRACE_CHECK_EQ(backend.violationCount(), baseViolations + 10u);
 
     GRACE_CHECK(!backend.describe().empty());
 }

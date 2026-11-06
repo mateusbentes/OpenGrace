@@ -98,6 +98,7 @@ public:
     /// buffer immediately (valid until the next swap). clear() calls this
     /// automatically when readback_center is set or pixels are queued.
     void readback() override;
+    void swapBuffers() override;
 
     const std::vector<ReadbackSample>& lastReadback() const noexcept override;
     bool hasCenterPixel() const noexcept override;

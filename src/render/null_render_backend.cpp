@@ -145,9 +145,6 @@ void NullRenderBackend::clear()
         ++m_violations;
         return;
     }
-    // Mirror the real backends: a queued readback is captured with the clear.
-    if (!m_readback_queue.empty())
-        readback();
 }
 
 void NullRenderBackend::shutdown()
@@ -174,6 +171,9 @@ std::unique_ptr<ShaderProgram> NullRenderBackend::createShaderProgram(ShaderProg
     case ShaderProgramId::ParaboloidDepth: name = "ParaboloidDepth"; break;
     case ShaderProgramId::GBuffer: name = "GBuffer"; break;
     case ShaderProgramId::DeferredLighting: name = "DeferredLighting"; break;
+    case ShaderProgramId::PostBright: name = "PostBright"; break;
+    case ShaderProgramId::PostBlur: name = "PostBlur"; break;
+    case ShaderProgramId::PostTonemap: name = "PostTonemap"; break;
     }
     record(std::string("createShaderProgram(") + name + ")");
     if (m_shutdown)
@@ -380,6 +380,18 @@ void NullRenderBackend::queueReadback(std::uint32_t x, std::uint32_t y)
         return;
     }
     m_readback_queue.emplace_back(x, y);
+}
+
+void NullRenderBackend::swapBuffers()
+{
+    if (m_shutdown)
+    {
+        ++m_violations;
+        return;
+    }
+    // No event recorded: the event log is the frame-assembly trace that the
+    // application and renderer suites assert on, and presenting is not part of
+    // the assembly this backend observes.
 }
 
 void NullRenderBackend::readback()

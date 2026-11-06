@@ -28,6 +28,21 @@ enum class RenderPath : std::uint8_t
 /// std::invalid_argument, never truncated.
 inline constexpr std::uint32_t kMaxDeferredLights = 16;
 
+/// Post-processing chain configuration (milestone 6a). Off by default; with it
+/// off, every pixel value is bit-identical to before the chain existed (H4).
+/// The chain runs after lighting and before frame completion, owned by the
+/// renderer, and is path-independent (forward and deferred feed it).
+struct PostConfig
+{
+    bool enabled = false;             ///< post-processing off by default
+    float exposure = 1.0f;            ///< tonemap exposure, linear multiplier
+    float bloomThreshold = 1.0f;      ///< linear HDR threshold for the bright pass
+    std::uint32_t bloomLevels = 4;    ///< downsample chain depth (half-res each)
+    float bloomStrength = 1.0f;       ///< bloom compose weight
+
+    void validate() const;
+};
+
 /// Renderer configuration. Configuration reaches the renderer, never the
 /// backend (the backend only receives device-level state such as the camera
 /// and the clear colour, forwarded at frame begin).
@@ -40,6 +55,7 @@ struct RendererConfig
     PointShadowConfig pointShadows;         ///< paraboloid point shadows (forward)
     bool shadows = true;                    ///< run the shadow passes in forward
     std::uint32_t deferredLightCap = kMaxDeferredLights;
+    PostConfig post;                        ///< post-processing chain (6a, off by default)
 
     /// Throws std::invalid_argument on invalid values (out-of-range path,
     /// invalid camera/cascade/point-shadow config, zero deferredLightCap).
@@ -88,7 +104,7 @@ public:
     /// The deferred G-buffer target, for inspection only (readback of its
     /// attachments through the backend). nullptr in the forward path.
     RenderTarget* gbufferTarget() noexcept { return m_gbuffer; }
-    const ShadowMap& shadowMapDebug() const noexcept { return m_shadow_map; }
+
 
     std::uint64_t frameCount() const noexcept { return m_frame_count; }
 
@@ -96,6 +112,11 @@ private:
     void renderForwardFrame();
     void renderDeferredFrame();
     void renderShadowMapsIfNeeded();
+    void runPostChain();
+    RenderTarget* ensureHdrTarget();
+    void ensureFullscreenQuad();
+    void releasePostResources();
+    RenderTarget* lightingTarget();
     void ensureDeferredResources();
     void releaseShadowMaps();
 
@@ -112,6 +133,13 @@ private:
 
     // Deferred resources (created through the contract, cached per size).
     RenderTarget* m_gbuffer = nullptr;
+    // Post chain resources (6a): HDR target + bloom chain, created on the
+    // first post-enabled frame, released on disable or size change (documented).
+    RenderTarget* m_hdr = nullptr;
+    std::vector<RenderTarget*> m_bloom;
+    std::unique_ptr<ShaderProgram> m_postBright;
+    std::unique_ptr<ShaderProgram> m_postBlur;
+    std::unique_ptr<ShaderProgram> m_postTonemap;
     std::unique_ptr<ShaderProgram> m_gbuffer_program;
     std::unique_ptr<ShaderProgram> m_deferred_program;
     std::unique_ptr<GpuMesh> m_fullscreen_quad;

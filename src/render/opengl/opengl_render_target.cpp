@@ -10,17 +10,35 @@ namespace {
 
 GLint toInternalFormat(PixelFormat format)
 {
-    return format == PixelFormat::Rgba8 ? GL_RGBA8 : GL_DEPTH24_STENCIL8;
+    switch (format)
+    {
+    case PixelFormat::Rgba8:
+        return GL_RGBA8;
+    case PixelFormat::Rgba16F:
+        return GL_RGBA16F;
+    case PixelFormat::Depth24Stencil8:
+        return GL_DEPTH24_STENCIL8;
+    }
+    return GL_RGBA8;
 }
 
 GLenum toPixelFormat(PixelFormat format)
 {
-    return format == PixelFormat::Rgba8 ? GL_RGBA : GL_DEPTH_STENCIL;
+    return format == PixelFormat::Depth24Stencil8 ? GL_DEPTH_STENCIL : GL_RGBA;
 }
 
 GLenum toPixelType(PixelFormat format)
 {
-    return format == PixelFormat::Rgba8 ? GL_UNSIGNED_BYTE : GL_UNSIGNED_INT_24_8;
+    switch (format)
+    {
+    case PixelFormat::Rgba8:
+        return GL_UNSIGNED_BYTE;
+    case PixelFormat::Rgba16F:
+        return GL_HALF_FLOAT;
+    case PixelFormat::Depth24Stencil8:
+        return GL_UNSIGNED_INT_24_8;
+    }
+    return GL_UNSIGNED_BYTE;
 }
 
 GLenum toColorAttachment(std::uint32_t index)

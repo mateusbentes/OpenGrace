@@ -9,8 +9,9 @@ namespace grace::render {
 /// constants, and the contract never exposes GL/other-API identifiers.
 enum class PixelFormat : std::uint8_t
 {
-    Rgba8,             ///< 8 bits per channel, RGBA colour attachment
-    Depth24Stencil8    ///< 24-bit depth + 8-bit stencil attachment
+    Rgba8,             ///< 8 bits per channel, RGBA colour attachment (linear values, no display encoding)
+    Rgba16F,           ///< 16-bit float per channel, RGBA HDR colour attachment (milestone 6a): linear range ~[0, 65504], ~8 bytes/pixel
+    Depth24Stencil8    ///< 24-bit depth + 8-bit stencil attachment (sampleable as a texture)
 };
 
 /// Hard cap on colour attachments per render target (milestone 5, decision 9).

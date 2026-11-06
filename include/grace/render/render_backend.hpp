@@ -171,6 +171,13 @@ public:
     virtual CameraParams camera() const = 0;
 
 
+    /// Presents the completed frame: captures any queued readback and swaps
+    /// the back buffer. Called once at the end of a frame, after all drawing.
+    /// A device capability, not a technique: it does not depend on the render
+    /// path. clear() no longer presents; before milestone 6a it swapped as a
+    /// side effect, which meant a mid-frame clear presented half a frame.
+    virtual void swapBuffers() = 0;
+
     /// Queues a pixel to be captured by the next readback(). For backends with
     /// a buffer swap, readback captures before the swap (the back buffer is
     /// undefined afterwards).

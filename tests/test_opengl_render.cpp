@@ -65,12 +65,14 @@ int main()
     backend->setClearColor(clear_color);
     backend->queueReadback(288, 180);
     backend->clear();
+    backend->readback();  // 6a: clear() no longer captures; capture is explicit
 
     GRACE_CHECK(backend->hasCenterPixel());
     GRACE_CHECK(withinOne(backend->centerPixel(), triangle_color));
     const std::vector<ReadbackSample> samples = backend->lastReadback();
-    GRACE_CHECK(samples.size() == 1u);
-    GRACE_CHECK(withinOne(samples[0].color, clear_color));
+    GRACE_CHECK_EQ(samples.size(), 1u);
+    if (!samples.empty())
+        GRACE_CHECK(withinOne(samples[0].color, clear_color));
 
     // Depth and stencil clear values reach the framebuffer.
     backend->setClearBuffers(
@@ -79,6 +81,7 @@ int main()
     backend->setClearStencil(7);
     backend->queueReadback(288, 180);
     backend->clear();
+    backend->readback();  // 6a: clear() no longer captures; capture is explicit
     GRACE_CHECK(std::fabs(backend->centerDepth() - 0.25f) < 0.001f);
     GRACE_CHECK_EQ(backend->centerStencil(), 7);
     const std::vector<ReadbackSample> depth_samples = backend->lastReadback();
@@ -93,6 +96,7 @@ int main()
     backend->setClearColor(clear_color2);
     backend->queueReadback(288, 180);
     backend->clear();
+    backend->readback();  // 6a: clear() no longer captures; capture is explicit
     GRACE_CHECK(std::fabs(backend->centerDepth() - 0.25f) < 0.001f);
     const std::vector<ReadbackSample> color_only_samples = backend->lastReadback();
     GRACE_CHECK(color_only_samples.size() == 1u);
@@ -116,6 +120,10 @@ int main()
         "submit(lights=1,sun=0,shadow=0,pointShadows=0)",
         "createRenderTarget(64x64,color=0,depth=1)",
         "setCamera",
+        "createRenderTarget(32x32,color=1,depth=1)",
+        "renderTargetTexture",
+        "renderTargetTexture",
+        "releaseRenderTarget",
         "createRenderTarget(64x64,color=2,depth=1)",
         "renderTargetTexture", "renderTargetTexture", "renderTargetTexture",
         "renderTargetTexture", "renderTargetTexture", "renderTargetTexture",
@@ -136,7 +144,24 @@ int main()
         "shutdown",
         "draw", "readback", "clear(1,2,3,4)",
         "submit(lights=1,sun=0,shadow=0,pointShadows=0)"};  // post-shutdown: violation
-    GRACE_CHECK(null_backend.events() == expected_events);
+    {   // Report the first divergence instead of comparing two vectors
+        // wholesale: equal-or-not says nothing about which event differs.
+        const std::vector<std::string>& actual = null_backend.events();
+        const std::size_t common = std::min(actual.size(), expected_events.size());
+        std::size_t diverged = common;
+        for (std::size_t i = 0; i < common; ++i)
+            if (actual[i] != expected_events[i]) { diverged = i; break; }
+        if (diverged != common || actual.size() != expected_events.size())
+        {
+            std::printf("event divergence at index %zu of %zu expected / %zu actual\n",
+                        diverged, expected_events.size(), actual.size());
+            if (diverged < expected_events.size())
+                std::printf("  expected: %s\n", expected_events[diverged].c_str());
+            if (diverged < actual.size())
+                std::printf("  actual:   %s\n", actual[diverged].c_str());
+        }
+        GRACE_CHECK(actual == expected_events);
+    }
 
     OpenGLBackendConfig parity_config;
     parity_config.width = 64;
@@ -154,7 +179,7 @@ int main()
         return 77;
     }
     grace::test::runContractChecks(*gl_backend, contract_color, 3);
-    GRACE_CHECK_EQ(gl_backend->violationCount(), 10u);  // 1 MRT + 5 misuse/over-budget + 4 post-shutdown
+    GRACE_CHECK_EQ(gl_backend->violationCount(), 11u);  // 1 MRT + 5 misuse/over-budget + 5 post-shutdown
     GRACE_CHECK_EQ(gl_backend->glErrorCount(), 0u);
 
     return grace::test::summary("opengl_render");

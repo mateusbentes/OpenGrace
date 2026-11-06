@@ -147,6 +147,7 @@ public:
 
     void queueReadback(std::uint32_t x, std::uint32_t y) override;
     void readback() override;
+    void swapBuffers() override;
     const std::vector<ReadbackSample>& lastReadback() const noexcept override
     {
         return m_last_readback;

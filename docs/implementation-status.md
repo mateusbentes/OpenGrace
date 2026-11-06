@@ -25,7 +25,8 @@ regenerate: `pandoc docs/implementation-status.md -o docs/implementation-status.
 | 5 | Deferred lighting alongside forward: MRT G-buffer, lighting pass. Light-volume GI remains milestone 7 | Done |
 | 5b | Move frame composition out of the render contract into a renderer layer (`grace::render::Renderer`); the backend is a device again. Closes decision 12 | Done |
 | 5c | Shader sources leave the API-neutral module (decision 14); deferred path consumes the existing shadow maps (G1) | Done |
-| 6 | Post-processing: HDR, bloom, filmic tonemap, DOF, AA, SSAO-STF | Planned |
+| 6a | HDR pipeline: float HDR target, bloom, filmic tonemap + sRGB display encode, owned by the renderer, off by default. DOF, morphological AA and SSAO-STF remain planned (6b/6c) | Done |
+| 6 | Post-processing: HDR, bloom, filmic tonemap (6a done); DOF, AA, SSAO-STF remain planned | Partially done |
 | 7 | Global illumination by light volume propagation | Planned |
 | 8 | Physics contract and the first backend | Planned |
 | 9 | Script host: AngelScript integration and type registration | Planned |
@@ -84,7 +85,9 @@ All results below are real runs, on the tree at the stated commit.
 | 2026-11-06 | same, milestone 5 | OpenGL off: 11/11 Debug; OpenGL on: 20/20 Debug and Release; `-L opengl` 9/9; zero warnings under `-Werror`. Forward stays the default path and passes unchanged; `application.cpp` untouched (still only setClearColor/clear/shutdown) |
 | 2026-11-06 | same, milestone 5 | Deferred measurements (tests/test_deferred.cpp): G-buffer attachment 0 centre readback `255,255,255,16` (albedo white, a = shininess/1024); parity forward `128,128,128,255` vs deferred `127,127,127,255` (diff 1); 6 dynamic lights (over the forward limit of 4, rejected there) — **corrected in 5b: this measurement was wrong**. The observed value, `127,127,127,255`, is the sun alone (`0.5` at a normal-light dot of one gives `127`); the expectation, `~124`, modelled six point lights and omitted the sun. The two landed within the tolerance of three of each other, so the check passed without the dynamic lights contributing anything, and the multi-light capability this milestone claimed was not demonstrated. The corrected measurement is in the 5b row. Shadow maps are NOT consumed by the deferred path in this increment (documented); the deferred light cap is kMaxDeferredLights = 16 (shader uniform array), over-cap submissions rejected, not truncated. G-buffer: 2x RGBA8 + depth24, normals 8-bit mapped, scalar specular — ~11.1 MB at 1280×720, documented |
 | 2026-11-06 | same, milestone 5b | OpenGL off: 12/12 Debug; OpenGL on: 21/21 Debug and Release; `-L opengl` 9/9; zero warnings under `-Werror`. Contract shrank by exactly the path concept (`RenderPath`/`setRenderPath`/`renderPath`/`present`); nothing a device must do was lost. `application.cpp` diff is the 4-hunk renderer switch (recorded in decision 12) |
+| 2026-11-06 | same, milestone 6a | OpenGL off: 13/13 Debug; OpenGL on: 23/23 Debug and Release; `-L opengl` 10/10; zero warnings under `-Werror`. Post off: all existing pixel values unchanged (e.g. 0.5 linear -> 128 legacy). Post on: tonemap response 0.0->0, 0.18->141, 0.5->206, 1.0->232, 2.0->245, 4.0->252; bloom halo 61 @4px (0 when off); deferred+post 0.5 -> 206 (same as forward). CLI four combinations (forward/deferred x post off/on) all exit 0, centre pixel 30,30,30,255. shader_source_rule: 0 hits outside the backend library. HDR target: Rgba16F + sampleable depth texture, ~7.4 MB colour at 1280x720 |
 | 2026-11-06 | same, milestone 5c | OpenGL off: 13/13 Debug; OpenGL on: 22/22 Debug and Release; `-L opengl` 9/9; zero warnings under `-Werror`. `shader_source_rule` test: scanned 41 files, 0 hits outside src/render/opengl/ and tests/ |
+| 2026-11-06 | same, milestone 6a | OpenGL off: 13/13 Debug; OpenGL on: 23/23 Debug and Release; `-L opengl` 10/10; zero warnings under `-Werror`. Post off: all existing pixel values unchanged (e.g. 0.5 linear -> 128 legacy). Post on: tonemap response 0.0->0, 0.18->141, 0.5->206, 1.0->232, 2.0->245, 4.0->252; bloom halo 61 @4px (0 when off); deferred+post 0.5 -> 206 (same as forward). CLI four combinations (forward/deferred x post off/on) all exit 0, centre pixel 30,30,30,255. shader_source_rule: 0 hits outside the backend library. HDR target: Rgba16F + sampleable depth texture, ~7.4 MB colour at 1280x720 |
 | 2026-11-06 | same, milestone 5c | G1 implemented (option a): the deferred path now renders and consumes the existing cascade + paraboloid shadow maps via the renderer; all shadow code (free functions, matrices, configs) reused unchanged. Shadow parity with a castOnly occluder: forward centre `0,0,0,255` vs deferred centre `0,0,0,255` (diff 0). Plain parity unchanged: forward `128,128,128,255` vs deferred `127,127,127,255` (diff 1) |
 | 2026-11-06 | same, milestone 5b | Deferred via the renderer after 5b: centre pixel `127,127,127,255` — identical to the direct-contract value before the move. Parity forward `128,128,128,255` vs deferred `127,127,127,255` (diff 1). G-buffer attachment 0 readback `255,255,255,16`. CLI: `--path forward` and `--path deferred` both exit 0 with centre pixel `30,30,30,255` (deferred matches forward via the cleared-depth background rule); `--path bogus` exits 2. Check counts: version 4, fixed_step_clock 42, application 26, math 38, lights 36, cascades 133, paraboloid 27, trapezoid 80, renderer 19 (new), opengl_context 20, opengl_render 107, mesh 13, shader 16, lighting 10, shadows 8, point_shadows 7, tsm 11, deferred 21 — all zero failures; no existing suite decreased (opengl_render 113→107 because the shared checks lost the contract's path block; application unchanged at 26 with the updated event log) |
 | 2026-11-05 | same, contract extension | OpenGL off: 7/7 Debug; OpenGL on: 11/11 Debug and Release; `-L opengl` 4/4; zero warnings under `-Werror`; check counts: opengl_context 20, opengl_render 47 |
@@ -284,6 +287,32 @@ not exist before GL 3.2, so "3.0 core" is not a valid request.
     contain shading-language source (enforced by the `shader_source_rule` test,
     which scans the tree and fails on any hit outside `src/render/opengl/`).
 
+15. **Where is the linear-to-display boundary?** **Resolved 2026-11-06
+    (milestone 6a).** Before 6a the pipeline wrote linear values straight into
+    an 8-bit non-sRGB framebuffer — the output was missing a display encoding
+    (0.5 linear measured as 128, where sRGB would give ~188). The boundary now
+    sits at the end of the post chain: the HDR target (Rgba16F) holds linear,
+    and the final 8-bit target receives sRGB(filmic tonemap(linear)). With the
+    chain OFF every existing pixel value is bit-identical (legacy linear->8-bit,
+    documented); with it ON the same scene measures 0.5 -> 206. Measured
+    tonemap response (exposure 1): 0.0->0, 0.18->141, 0.5->206, 1.0->232,
+    2.0->245, 4.0->252. Bloom halo measured at 4 px from a 4.0-bright source:
+    61 with bloom on, 0 with it off.
+    The default remains the legacy path in this increment, so that no existing pixel value changes. Flipping the default is a separate change at the end of the chain, once the remaining techniques land, and it must re-baseline every measured value with before and after figures.
+
+16. **Is presentation a device operation or a side effect of clearing?** It was
+    a side effect. `clear()` read back queued pixels and swapped the buffer, so
+    when the post chain cleared the default framebuffer part-way through itself
+    the backend presented half a frame and captured the pixel before the
+    tonemap ran. The command line showed it and no suite did: `clear()` in
+    forward mode read 30,30,30,255 with the chain enabled and disabled alike,
+    while the same scene through the renderer measured 206 for a 0.5 linear
+    input. `swapBuffers()` now exists as a device capability, called once at
+    the end of a frame by the renderer; `clear()` only clears. This is decision
+    12 one level down: there the technique was hidden in a neutral name, here
+    the frame lifecycle was hidden in a device operation. The null backend had
+    mirrored the old behaviour and now mirrors the new one, which is what the
+    shared contract checks caught.
 ## Verification commands
 
 ```sh
