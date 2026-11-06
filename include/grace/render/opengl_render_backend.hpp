@@ -38,6 +38,17 @@ struct OpenGLBackendConfig
     float clear_depth = 1.0f;
     std::int32_t clear_stencil = 0;
     int swap_interval = 1;
+    /// Fixed, documented shadow map resolution (milestone 4b: a single
+    /// cascade covering the whole scene; the depth target for it is created
+    /// with this size).
+    std::uint32_t shadow_map_size = 1024;
+    /// Constant depth bias in light-space [0,1] depth units, applied to the
+    /// sun's shadow comparison. Needed because the stored depth and the
+    /// shading depth are rasterized from different points of view: without a
+    /// bias the surface shadows itself (acne). A constant bias trades some
+    /// peter-panning at grazing angles; a slope-scaled bias is a 4c
+    /// refinement. Documented decision, not a magic number.
+    float shadow_bias = 0.005f;
 };
 
 /// OpenGL render backend behind the platform-neutral RenderBackend contract.
@@ -79,6 +90,14 @@ public:
     void draw(GpuMesh& mesh, ShaderProgram& program) override;
     void submit(const DrawSubmission& submission) override;
 
+    RenderTarget* createRenderTarget(const RenderTargetDesc& desc) override;
+    void bindRenderTarget(RenderTarget* target) override;
+    void releaseRenderTarget(RenderTarget* target) override;
+    TextureView* renderTargetTexture(RenderTarget* target) override;
+    void renderShadowMap(RenderTarget* target, const DirectionalLight& sun,
+                         const SceneBounds& bounds,
+                         const std::vector<DrawSubmission>& submissions) override;
+
     /// Queues a pixel to be read back before the next buffer swap. The back
     /// buffer contents are undefined after a swap, so all readback happens
     /// pre-swap.
@@ -118,7 +137,9 @@ private:
     void ensureTriangle();
     void drawTriangle();
     void ensureLightingProgram();
+    void ensureShadowProgram();
     void submitImpl(const DrawSubmission& submission);
+    void applyViewport();
     void readCenter();
     void captureQueuedReadbacks();
     ClearColor readPixel(std::uint32_t x, std::uint32_t y);

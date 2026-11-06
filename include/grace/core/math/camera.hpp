@@ -37,6 +37,24 @@ inline mat4 lookAt(const vec3& eye, const vec3& target, const vec3& up)
     return m;
 }
 
+/// Orthographic projection matrix in the OpenGL clip convention: after the
+/// perspective divide (w = 1 here), x/y are in [-1, 1] and z (depth) is in
+/// [-1, 1], with -1 at the near plane and +1 at the far plane. Used for the
+/// sun's light-space shadow matrix.
+inline mat4 orthographic(float left, float right, float bottom, float top, float near,
+                         float far)
+{
+    mat4 m{};
+    m(0, 0) = 2.0f / (right - left);
+    m(1, 1) = 2.0f / (top - bottom);
+    m(2, 2) = -2.0f / (far - near);
+    m(3, 0) = -(right + left) / (right - left);
+    m(3, 1) = -(top + bottom) / (top - bottom);
+    m(3, 2) = -(far + near) / (far - near);
+    m(3, 3) = 1.0f;
+    return m;
+}
+
 /// Perspective projection matrix in the OpenGL clip convention: after the
 /// perspective divide, x/y are in [-1, 1] and z (depth) is in [-1, 1], with
 /// -1 at the near plane and +1 at the far plane.

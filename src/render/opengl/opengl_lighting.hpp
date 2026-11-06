@@ -50,6 +50,12 @@ uniform float lightIntensity[4];
 uniform float lightRange[4];
 uniform float lightInner[4];
 uniform float lightOuter[4];
+// Single-cascade sun shadow map (milestone 4b). The shadow factor applies to
+// the sun's contribution only; dynamic lights stay unshadowed (documented).
+uniform sampler2D shadowMap;
+uniform int hasShadowMap;
+uniform mat4 lightSpaceMatrix;
+uniform float shadowBias;
 out vec4 fragment;
 
 float rangeAtten(float intensity, float range, float d)
@@ -70,8 +76,23 @@ void main()
         float ndl = max(dot(N, L), 0.0);
         vec3 H = normalize(L + V);
         float spec = pow(max(dot(N, H), 0.0), shininess);
-        result += albedo * sunColor * sunIntensity * ndl
-                + specular * sunColor * sunIntensity * spec * ndl;
+        // Shadow lookup: world position -> light space -> [0,1] uv/depth,
+        // compared against the stored depth with a constant bias.
+        float shadow = 1.0;
+        if (hasShadowMap == 1)
+        {
+            vec4 lp = lightSpaceMatrix * vec4(vWorldPos, 1.0);
+            vec3 proj = lp.xyz / lp.w;
+            vec2 uv = proj.xy * 0.5 + 0.5;
+            float depth = proj.z * 0.5 + 0.5;
+            if (uv.x >= 0.0 && uv.x <= 1.0 && uv.y >= 0.0 && uv.y <= 1.0 && depth <= 1.0)
+            {
+                float stored = texture(shadowMap, uv).r;
+                shadow = (depth <= stored + shadowBias) ? 1.0 : 0.0;
+            }
+        }
+        result += (albedo * sunColor * sunIntensity * ndl
+                 + specular * sunColor * sunIntensity * spec * ndl) * shadow;
     }
     for (int i = 0; i < lightCount && i < 4; ++i)
     {
@@ -95,6 +116,24 @@ void main()
                 + specular * lightColor[i] * atten * spec * ndl;
     }
     fragment = vec4(clamp(result, 0.0, 1.0), 1.0);
+}
+)";
+
+// Depth-only shadow pass (milestone 4b): vertex stage transforms by the
+// light-space MVP; the fragment stage writes no colour (depth is written by
+// the rasterizer into the depth-only target).
+constexpr const char* kShadowVertexShader = R"(#version 330 core
+layout(location = 0) in vec3 position;
+uniform mat4 lightMVP;
+void main()
+{
+    gl_Position = lightMVP * vec4(position, 1.0);
+}
+)";
+
+constexpr const char* kShadowFragmentShader = R"(#version 330 core
+void main()
+{
 }
 )";
 

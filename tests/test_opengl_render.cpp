@@ -123,6 +123,19 @@ int main()
         "use",
         "drawIndexed",
         "submit(lights=1,sun=0)",
+        "createRenderTarget(64x64,color=0,depth=1)",
+        "bindRenderTarget(64x64)",
+        "clear(1,2,3,4)",
+        "renderTargetTexture",  // bound for rendering: violation
+        "bindRenderTarget(default)",
+        "renderTargetTexture",
+        "releaseRenderTarget",
+        "bindRenderTarget(unknown)",  // after release: violation
+        "renderTargetTexture",         // after release: violation
+        "bindRenderTarget(unknown)",  // never created: violation
+        "createRenderTarget(64x64,color=0,depth=1)",
+        "renderShadowMap(submissions=1,cascades=1)",
+        "releaseRenderTarget",
         "shutdown",
         "draw",    // post-shutdown: violation
         "readback",  // post-shutdown: violation
@@ -146,7 +159,7 @@ int main()
         return 77;
     }
     grace::test::runContractChecks(*gl_backend, contract_color, 3);
-    GRACE_CHECK_EQ(gl_backend->violationCount(), 4u);  // draw + readback + clear + submit after shutdown
+    GRACE_CHECK_EQ(gl_backend->violationCount(), 8u);  // 4 RT misuse + 4 post-shutdown calls
     GRACE_CHECK_EQ(gl_backend->glErrorCount(), 0u);
 
     return grace::test::summary("opengl_render");

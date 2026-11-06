@@ -2,6 +2,7 @@
 #include "grace/render/light.hpp"
 #include "grace/render/material.hpp"
 #include "grace/render/null_render_backend.hpp"
+#include "grace/render/shadow.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -179,6 +180,59 @@ int main()
         null_backend.shutdown();
         null_backend.submit(submission);  // after shutdown: recorded + violation
         GRACE_CHECK_EQ(null_backend.violationCount(), 1u);
+    }
+
+    // Orthographic sun light-space matrix: the bounds center maps to the
+    // centre of the shadow map, and invalid inputs are rejected.
+    {
+        using grace::render::SceneBounds;
+        using grace::render::sunLightSpaceMatrix;
+        DirectionalLight sun;
+        sun.direction = vec3{0.0f, 0.0f, -1.0f};
+        SceneBounds bounds;
+        bounds.center = vec3{1.0f, 2.0f, 3.0f};
+        bounds.radius = 2.0f;
+        const grace::core::mat4 m = sunLightSpaceMatrix(sun, bounds, 0.1f, 4.1f);
+        const grace::core::vec4 clip =
+            m * grace::core::vec4{bounds.center.x, bounds.center.y, bounds.center.z, 1.0f};
+        GRACE_CHECK(near(clip.x / clip.w, 0.0f, 1e-4f));
+        GRACE_CHECK(near(clip.y / clip.w, 0.0f, 1e-4f));
+        GRACE_CHECK(clip.z / clip.w > -1.0f && clip.z / clip.w < 1.0f);
+
+        bool threw = false;
+        try
+        {
+            static_cast<void>(sunLightSpaceMatrix(sun, bounds, 4.1f, 0.1f));  // far <= near
+        }
+        catch (const std::invalid_argument&)
+        {
+            threw = true;
+        }
+        GRACE_CHECK(threw);
+        SceneBounds bad_bounds;
+        bad_bounds.radius = 0.0f;
+        threw = false;
+        try
+        {
+            static_cast<void>(sunLightSpaceMatrix(sun, bad_bounds, 0.1f, 4.1f));
+        }
+        catch (const std::invalid_argument&)
+        {
+            threw = true;
+        }
+        GRACE_CHECK(threw);
+        DirectionalLight bad_sun;
+        bad_sun.direction = vec3{0.0f, 0.0f, 0.0f};
+        threw = false;
+        try
+        {
+            static_cast<void>(sunLightSpaceMatrix(bad_sun, bounds, 0.1f, 4.1f));
+        }
+        catch (const std::invalid_argument&)
+        {
+            threw = true;
+        }
+        GRACE_CHECK(threw);
     }
 
     return grace::test::summary("lights");

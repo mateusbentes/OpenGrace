@@ -18,7 +18,7 @@ regenerate: `pandoc docs/implementation-status.md -o docs/implementation-status.
 | 2 | OpenGL backend, function loader, diagnostic triangle | Done |
 | 3 | Render foundation: math, mesh, shader, material | Done |
 | 4a | Forward lighting: light types, surface parameters, submission, lighting shader | Done |
-| 4b | Shadow maps: dual paraboloid with bilateral filtering, trapezoidal cascades for sunlight | Next |
+| 4b | Shadow maps: render target infrastructure, single-cascade sun shadow map (this increment). Dual paraboloid and trapezoidal cascades are 4c, out of scope | Done |
 | 5 | Deferred lighting: G-buffer, unlimited lights, light volumes | Planned |
 | 6 | Post-processing: HDR, bloom, filmic tonemap, DOF, AA, SSAO-STF | Planned |
 | 7 | Global illumination by light volume propagation | Planned |
@@ -65,6 +65,9 @@ All results below are real runs, on the tree at the stated commit.
 | 2026-11-06 | same, forward-lighting increment | OpenGL off: 8/8 Debug; OpenGL on: 13/13 Debug and Release; `-L opengl` 5/5; zero warnings under `-Werror` |
 | 2026-11-06 | same | Check counts: version 4, fixed_step_clock 42, application 26, math 31 (Debug) / 28 (Release), lights 30, opengl_context 20, opengl_render 49, mesh 13, shader 16, lighting 10 — all zero failures. Open decision 1 resolved: forward primary, deferred stays planned as milestone 5. Debug math contract violations abort (exit 134) with a named message; Release keeps the documented silent behaviour |
 | 2026-11-06 | same | Visible run: `opengl 4.6 core` Iris Xe, pixel `30,30,30,255`, exit 0; hidden `xvfb-run` run: llvmpipe `4.5 core`, same pixel, exit 0. Lighting readback checks pass: sun-only, point falloff at known distance, spot inside/outside cone, emissive-only; 5-light submission rejected with "exceeds the per-object limit of 4" |
+| 2026-11-06 | same, milestone 4b | OpenGL off: 8/8 Debug; OpenGL on: 14/14 Debug and Release; `-L opengl` 6/6; zero warnings under `-Werror` |
+| 2026-11-06 | same, milestone 4b | Check counts: version 4, fixed_step_clock 42, application 26, math 35, lights 36, opengl_context 20, opengl_render 75, mesh 13, shader 16, lighting 10, shadows 9 — all zero failures. Shadow readback pixels: lit `128,128,128,255`, occluded `0,0,0,255`, no-sun emissive-only `64,128,191,255` |
+| 2026-11-06 | same, milestone 4b | Scope note: the sun shadow map is a **single orthographic cascade covering the whole scene bounds** (fixed 1024 resolution by config, constant documented depth bias, applied to the sun term only; dynamic lights unshadowed). Trapezoidal cascaded shadow mapping and dual paraboloid point-light shadow maps from architecture §3.4 are **4c and not implemented**; the original engine's shadow behaviour is not reproduced |
 | 2026-11-05 | same, contract extension | OpenGL off: 7/7 Debug; OpenGL on: 11/11 Debug and Release; `-L opengl` 4/4; zero warnings under `-Werror`; check counts: opengl_context 20, opengl_render 47 |
 
 | Published tree did not build with `GRACE_ENABLE_OPENGL=ON` | The lighting commit left the shader header unstaged and published half of a `const` change, so `drawIndexed() const` in the null backend had no matching override | Complete the change set and verify by building a fresh clone |

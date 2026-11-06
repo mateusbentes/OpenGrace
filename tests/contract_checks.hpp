@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <stdexcept>
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -126,6 +127,79 @@ void runContractChecks(Backend& backend, grace::render::ClearColor color,
     backend.submit(submission);
     GRACE_CHECK_EQ(backend.violationCount(), 0u);
 
+    // Render target lifecycle: a depth-only target (what a shadow pass
+    // needs), bind, clear into it, texture view, release.
+    grace::render::RenderTargetDesc target_desc;
+    target_desc.width = 64;
+    target_desc.height = 64;
+    target_desc.colorAttachment = false;
+    target_desc.depthAttachment = true;
+    target_desc.depthFormat = grace::render::PixelFormat::Depth24Stencil8;
+    grace::render::RenderTarget* target = backend.createRenderTarget(target_desc);
+    GRACE_CHECK(target != nullptr);
+    GRACE_CHECK(!target->hasColorAttachment());
+    GRACE_CHECK(target->hasDepthAttachment());
+    GRACE_CHECK_EQ(target->width(), 64u);
+
+    // An incomplete target (no attachments) is rejected at creation.
+    {
+        grace::render::RenderTargetDesc bad;
+        bad.width = 64;
+        bad.height = 64;
+        bad.colorAttachment = false;
+        bad.depthAttachment = false;
+        bool threw = false;
+        try
+        {
+            static_cast<void>(backend.createRenderTarget(bad));
+        }
+        catch (const std::invalid_argument&)
+        {
+            threw = true;
+        }
+        GRACE_CHECK(threw);
+    }
+
+    backend.bindRenderTarget(target);
+    backend.clear();
+    // Texture view while bound for rendering is a feedback loop: violation.
+    GRACE_CHECK(backend.renderTargetTexture(target) == nullptr);
+    GRACE_CHECK_EQ(backend.violationCount(), 1u);
+    backend.bindRenderTarget(nullptr);
+    grace::render::TextureView* view = backend.renderTargetTexture(target);
+    GRACE_CHECK(view != nullptr);
+    GRACE_CHECK(view->isDepth());
+    GRACE_CHECK_EQ(view->width(), 64u);
+    backend.releaseRenderTarget(target);
+
+    // Misuse: bind after release, texture after release, never-created target.
+    backend.bindRenderTarget(target);
+    GRACE_CHECK(backend.renderTargetTexture(target) == nullptr);
+    grace::render::RenderTarget* bogus = reinterpret_cast<grace::render::RenderTarget*>(
+        static_cast<std::uintptr_t>(0x1));
+    backend.bindRenderTarget(bogus);
+    GRACE_CHECK_EQ(backend.violationCount(), 4u);
+
+    // Shadow pass: the same submission list through a depth target.
+    {
+        grace::render::SceneBounds bounds;
+        bounds.center = grace::core::vec3{0.0f, 0.0f, 0.0f};
+        bounds.radius = 2.0f;
+        grace::render::DirectionalLight sun;
+        sun.direction = grace::core::vec3{0.0f, 0.0f, -1.0f};
+        std::vector<grace::render::DrawSubmission> list;
+        list.push_back(submission);
+        grace::render::RenderTargetDesc shadow_desc;
+        shadow_desc.width = 64;
+        shadow_desc.height = 64;
+        shadow_desc.colorAttachment = false;
+        shadow_desc.depthAttachment = true;
+        grace::render::RenderTarget* shadow_target = backend.createRenderTarget(shadow_desc);
+        backend.renderShadowMap(shadow_target, sun, bounds, list);
+        GRACE_CHECK_EQ(backend.violationCount(), 4u);  // no new violations
+        backend.releaseRenderTarget(shadow_target);
+    }
+
     backend.shutdown();
 
     // Post-shutdown misuse: draw, readback, clear and submit are each a
@@ -134,7 +208,7 @@ void runContractChecks(Backend& backend, grace::render::ClearColor color,
     backend.readback();
     backend.clear();
     backend.submit(submission);
-    GRACE_CHECK_EQ(backend.violationCount(), 4u);
+    GRACE_CHECK_EQ(backend.violationCount(), 8u);
 
     GRACE_CHECK(!backend.describe().empty());
 }

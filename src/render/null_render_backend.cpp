@@ -208,6 +208,126 @@ void NullRenderBackend::submit(const DrawSubmission& submission)
         ++m_violations;
 }
 
+NullRenderTarget* NullRenderBackend::findTarget(RenderTarget* target) const
+{
+    for (const auto& candidate : m_targets)
+        if (candidate.get() == target)
+            return candidate.get();
+    return nullptr;
+}
+
+RenderTarget* NullRenderBackend::createRenderTarget(const RenderTargetDesc& desc)
+{
+    if (desc.width == 0 || desc.height == 0)
+        throw std::invalid_argument("render target: width and height must be positive");
+    if (!desc.colorAttachment && !desc.depthAttachment)
+        throw std::invalid_argument(
+            "render target: incomplete (neither a colour nor a depth attachment)");
+    char buffer[96];
+    std::snprintf(buffer, sizeof(buffer), "createRenderTarget(%ux%u,color=%d,depth=%d)",
+                  static_cast<unsigned int>(desc.width), static_cast<unsigned int>(desc.height),
+                  desc.colorAttachment ? 1 : 0, desc.depthAttachment ? 1 : 0);
+    record(std::string(buffer));
+    if (m_shutdown)
+    {
+        ++m_violations;
+        throw std::logic_error("NullRenderBackend::createRenderTarget: backend is shut down");
+    }
+    auto target = std::make_unique<NullRenderTarget>(desc);
+    target->colorView = NullTextureView(desc.width, desc.height, desc.colorFormat, false);
+    target->depthView = NullTextureView(desc.width, desc.height, desc.depthFormat, true);
+    NullRenderTarget* raw = target.get();
+    m_targets.push_back(std::move(target));
+    return raw;
+}
+
+void NullRenderBackend::bindRenderTarget(RenderTarget* target)
+{
+    if (target == nullptr)
+    {
+        record("bindRenderTarget(default)");
+        if (m_shutdown)
+            ++m_violations;
+        else
+            m_bound_target = nullptr;
+        return;
+    }
+    NullRenderTarget* known = findTarget(target);
+    if (known == nullptr || known->released)
+    {
+        record("bindRenderTarget(unknown)");
+        ++m_violations;
+        return;
+    }
+    char buffer[64];
+    std::snprintf(buffer, sizeof(buffer), "bindRenderTarget(%ux%u)",
+                  static_cast<unsigned int>(known->width()),
+                  static_cast<unsigned int>(known->height()));
+    record(std::string(buffer));
+    if (m_shutdown)
+    {
+        ++m_violations;
+        return;
+    }
+    m_bound_target = known;  // binding while another is bound replaces the binding
+}
+
+void NullRenderBackend::releaseRenderTarget(RenderTarget* target)
+{
+    record("releaseRenderTarget");
+    NullRenderTarget* known = findTarget(target);
+    if (known == nullptr || known->released || m_shutdown)
+    {
+        ++m_violations;
+        return;
+    }
+    known->released = true;
+    if (m_bound_target == known)
+        m_bound_target = nullptr;
+}
+
+TextureView* NullRenderBackend::renderTargetTexture(RenderTarget* target)
+{
+    record("renderTargetTexture");
+    NullRenderTarget* known = findTarget(target);
+    if (known == nullptr || known->released || m_shutdown || m_bound_target == known)
+    {
+        // Unknown, released, shut down, or bound for rendering (feedback loop).
+        ++m_violations;
+        return nullptr;
+    }
+    if (known->hasColorAttachment())
+        return &known->colorView;
+    if (known->hasDepthAttachment())
+        return &known->depthView;
+    ++m_violations;
+    return nullptr;
+}
+
+void NullRenderBackend::renderShadowMap(RenderTarget* target, const DirectionalLight& sun,
+                                        const SceneBounds& bounds,
+                                        const std::vector<DrawSubmission>& submissions)
+{
+    sun.validate();
+    if (!(bounds.radius > 0.0f))
+        throw std::invalid_argument("renderShadowMap: scene bounds radius must be > 0");
+    for (const DrawSubmission& submission : submissions)
+        submission.validate();
+
+    char buffer[96];
+    std::snprintf(buffer, sizeof(buffer), "renderShadowMap(submissions=%u,cascades=1)",
+                  static_cast<unsigned int>(submissions.size()));
+    record(std::string(buffer));
+
+    NullRenderTarget* known = target != nullptr ? findTarget(target) : nullptr;
+    if (known == nullptr || known->released || m_shutdown || m_bound_target == known ||
+        !known->hasDepthAttachment())
+    {
+        ++m_violations;
+        return;
+    }
+}
+
 void NullRenderBackend::queueReadback(std::uint32_t x, std::uint32_t y)
 {
     record("queueReadback(" + pointText(x, y) + ")");

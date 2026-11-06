@@ -12,6 +12,49 @@ namespace grace::render {
 
 class NullRenderBackend;
 
+/// Attachment view of a null render target (plain data, no graphics API).
+class NullTextureView final : public TextureView
+{
+public:
+    NullTextureView() = default;
+    NullTextureView(std::uint32_t w, std::uint32_t h, PixelFormat format, bool depth)
+        : m_width(w), m_height(h), m_format(format), m_depth(depth)
+    {
+    }
+
+    std::uint32_t width() const noexcept override { return m_width; }
+    std::uint32_t height() const noexcept override { return m_height; }
+    PixelFormat format() const noexcept override { return m_format; }
+    bool isDepth() const noexcept override { return m_depth; }
+
+private:
+    std::uint32_t m_width = 0;
+    std::uint32_t m_height = 0;
+    PixelFormat m_format = PixelFormat::Rgba8;
+    bool m_depth = false;
+};
+
+/// Render target of the null backend: records its desc and release state.
+class NullRenderTarget final : public RenderTarget
+{
+public:
+    explicit NullRenderTarget(const RenderTargetDesc& desc) : m_desc(desc) {}
+
+    std::uint32_t width() const noexcept override { return m_desc.width; }
+    std::uint32_t height() const noexcept override { return m_desc.height; }
+    bool hasColorAttachment() const noexcept override { return m_desc.colorAttachment; }
+    bool hasDepthAttachment() const noexcept override { return m_desc.depthAttachment; }
+
+    const RenderTargetDesc& desc() const noexcept { return m_desc; }
+    bool released = false;
+
+    NullTextureView colorView;
+    NullTextureView depthView;
+
+private:
+    RenderTargetDesc m_desc;
+};
+
 /// GPU mesh handle of the null backend: validates and records upload/draw
 /// into the owning backend's event log and counts violations after shutdown.
 class NullGpuMesh final : public GpuMesh
@@ -81,6 +124,14 @@ public:
     void draw(GpuMesh& mesh, ShaderProgram& program) override;
     void submit(const DrawSubmission& submission) override;
 
+    RenderTarget* createRenderTarget(const RenderTargetDesc& desc) override;
+    void bindRenderTarget(RenderTarget* target) override;
+    void releaseRenderTarget(RenderTarget* target) override;
+    TextureView* renderTargetTexture(RenderTarget* target) override;
+    void renderShadowMap(RenderTarget* target, const DirectionalLight& sun,
+                         const SceneBounds& bounds,
+                         const std::vector<DrawSubmission>& submissions) override;
+
     void queueReadback(std::uint32_t x, std::uint32_t y) override;
     void readback() override;
     const std::vector<ReadbackSample>& lastReadback() const noexcept override
@@ -102,6 +153,10 @@ private:
     void record(std::string event);
     bool ready() const noexcept { return !m_shutdown; }
     void countViolation() noexcept { ++m_violations; }
+    NullRenderTarget* findTarget(RenderTarget* target) const;
+
+    std::vector<std::unique_ptr<NullRenderTarget>> m_targets;
+    RenderTarget* m_bound_target = nullptr;
 
     std::uint32_t m_width;
     std::uint32_t m_height;

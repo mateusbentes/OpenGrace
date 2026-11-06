@@ -201,5 +201,18 @@ int main()
         GRACE_CHECK((near(wideClip.x / wideClip.w, 0.5f, 1e-5f)));  // f / aspect = 1 / 2
     }
 
+    // Orthographic projection (light-space): known points map to known clip
+    // coordinates — near -> ndc z -1, far -> +1, corner -> ndc xy (1, 1).
+    {
+        const mat4 o = grace::core::orthographic(-1.0f, 1.0f, -1.0f, 1.0f, 0.1f, 10.0f);
+        const vec4 nearP = o * vec4{0.0f, 0.0f, -0.1f, 1.0f};
+        const vec4 farP = o * vec4{0.0f, 0.0f, -10.0f, 1.0f};
+        const vec4 corner = o * vec4{1.0f, 1.0f, -1.0f, 1.0f};
+        GRACE_CHECK((near(nearP.z / nearP.w, -1.0f, 1e-5f)));
+        GRACE_CHECK((near(farP.z / farP.w, 1.0f, 1e-4f)));
+        GRACE_CHECK((near(corner.x / corner.w, 1.0f, 1e-5f)));
+        GRACE_CHECK((near(corner.y / corner.w, 1.0f, 1e-5f)));
+    }
+
     return grace::test::summary("math");
 }

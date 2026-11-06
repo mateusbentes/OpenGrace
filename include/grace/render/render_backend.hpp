@@ -7,7 +7,9 @@
 
 #include "grace/render/draw_list.hpp"
 #include "grace/render/mesh.hpp"
+#include "grace/render/render_target.hpp"
 #include "grace/render/shader.hpp"
+#include "grace/render/shadow.hpp"
 
 namespace grace::render {
 
@@ -104,6 +106,53 @@ public:
     /// invalid submissions throw std::invalid_argument. Calls before
     /// initialisation or after shutdown are protocol violations.
     virtual void submit(const DrawSubmission& submission) = 0;
+
+    // -- Render targets ------------------------------------------------------
+    //
+    // Semantics (documented):
+    // - createRenderTarget validates the desc and throws std::invalid_argument
+    //   on an invalid one (zero size, or neither a colour nor a depth
+    //   attachment: an "incomplete" target). The backend owns the handle.
+    // - bindRenderTarget(nullptr) binds the default framebuffer. Binding a
+    //   target while another is already bound simply replaces the binding
+    //   (not a violation). clear()/draw()/submit()/readback() operate on the
+    //   currently bound target.
+    // - releaseRenderTarget invalidates the handle. Any later use of it
+    //   (bind, texture view, shadow pass) is a protocol violation counted by
+    //   violationCount(); the handle memory stays valid until shutdown so the
+    //   misuse is detected safely. Binding a pointer that was never created
+    //   is the same violation.
+    // - renderTargetTexture returns the colour attachment view when present,
+    //   otherwise the depth attachment view (depth-only shadow targets). It
+    //   returns nullptr and counts a violation when the target is unknown,
+    //   released, currently bound for rendering (feedback loop), or has no
+    //   attachment to return.
+
+    /// Creates a render target. Throws std::invalid_argument on an invalid
+    /// or incomplete desc.
+    virtual RenderTarget* createRenderTarget(const RenderTargetDesc& desc) = 0;
+
+    /// Binds a target for rendering; nullptr binds the default framebuffer.
+    virtual void bindRenderTarget(RenderTarget* target) = 0;
+
+    /// Releases a target. Use after release is a protocol violation.
+    virtual void releaseRenderTarget(RenderTarget* target) = 0;
+
+    /// Attachment texture of a target, for sampling. nullptr + violation on
+    /// unknown/released/feedback-bound targets.
+    virtual TextureView* renderTargetTexture(RenderTarget* target) = 0;
+
+    /// Depth-only shadow pass (milestone 4b): renders the submitted draw list
+    /// from the sun's point of view into the target's depth attachment, using
+    /// a single orthographic cascade covering `bounds`. Afterwards,
+    /// subsequent submit() calls apply the stored shadow map to the sun's
+    /// contribution only; dynamic lights stay unshadowed in this milestone.
+    /// Releasing the target disables the shadow lookup. Validates sun, bounds
+    /// and every submission (throws std::invalid_argument); a target that is
+    /// unknown, released, currently bound, or depth-less is a violation.
+    virtual void renderShadowMap(RenderTarget* target, const DirectionalLight& sun,
+                                 const SceneBounds& bounds,
+                                 const std::vector<DrawSubmission>& submissions) = 0;
 
     /// Queues a pixel to be captured by the next readback(). For backends with
     /// a buffer swap, readback captures before the swap (the back buffer is

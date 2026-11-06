@@ -43,6 +43,7 @@ bool GlLoader::load(ResolveFn resolve, std::string& missingSymbol)
     GRACE_GL_LOAD(glReadPixels, "glReadPixels");
     GRACE_GL_LOAD(glEnable, "glEnable");
     GRACE_GL_LOAD(glDisable, "glDisable");
+    GRACE_GL_LOAD(glDepthFunc, "glDepthFunc");
 
     GRACE_GL_LOAD(glGenVertexArrays, "glGenVertexArrays");
     GRACE_GL_LOAD(glBindVertexArray, "glBindVertexArray");
@@ -75,6 +76,17 @@ bool GlLoader::load(ResolveFn resolve, std::string& missingSymbol)
     GRACE_GL_LOAD(glEnableVertexAttribArray, "glEnableVertexAttribArray");
     GRACE_GL_LOAD(glDrawArrays, "glDrawArrays");
     GRACE_GL_LOAD(glDrawElements, "glDrawElements");
+    GRACE_GL_LOAD(glGenFramebuffers, "glGenFramebuffers");
+    GRACE_GL_LOAD(glBindFramebuffer, "glBindFramebuffer");
+    GRACE_GL_LOAD(glFramebufferTexture2D, "glFramebufferTexture2D");
+    GRACE_GL_LOAD(glCheckFramebufferStatus, "glCheckFramebufferStatus");
+    GRACE_GL_LOAD(glDeleteFramebuffers, "glDeleteFramebuffers");
+    GRACE_GL_LOAD(glGenTextures, "glGenTextures");
+    GRACE_GL_LOAD(glBindTexture, "glBindTexture");
+    GRACE_GL_LOAD(glTexImage2D, "glTexImage2D");
+    GRACE_GL_LOAD(glTexParameteri, "glTexParameteri");
+    GRACE_GL_LOAD(glDeleteTextures, "glDeleteTextures");
+    GRACE_GL_LOAD(glActiveTexture, "glActiveTexture");
 
 #undef GRACE_GL_LOAD
 

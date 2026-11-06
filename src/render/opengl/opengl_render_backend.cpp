@@ -18,6 +18,7 @@
 
 #include "opengl_lighting.hpp"
 #include "opengl_mesh.hpp"
+#include "opengl_render_target.hpp"
 #include "opengl_shader.hpp"
 
 namespace grace::render {
@@ -73,6 +74,15 @@ GLbitfield toGlMask(std::uint32_t mask)
     if ((mask & static_cast<std::uint32_t>(ClearBuffer::Stencil)) != 0u)
         gl_mask |= GL_STENCIL_BUFFER_BIT;
     return gl_mask;
+}
+
+opengl::GlRenderTarget* findGlTarget(
+    std::vector<std::unique_ptr<opengl::GlRenderTarget>>& targets, RenderTarget* target)
+{
+    for (auto& candidate : targets)
+        if (candidate.get() == target)
+            return candidate.get();
+    return nullptr;
 }
 
 void parseVersion(const std::string& version, int& major, int& minor)
@@ -150,6 +160,17 @@ struct OpenGLRenderBackend::Impl
 
     // Forward lighting pass program (built lazily on first submit).
     std::shared_ptr<ShaderProgram> lighting_program;
+
+    // Render targets: backend-owned registry. Handles stay alive until
+    // shutdown so use-after-release is detected safely.
+    std::vector<std::unique_ptr<opengl::GlRenderTarget>> targets;
+    opengl::GlRenderTarget* bound_target = nullptr;
+
+    // Shadow pass state (milestone 4b, single cascade).
+    std::shared_ptr<ShaderProgram> shadow_program;
+    opengl::GlRenderTarget* shadow_target = nullptr;
+    core::mat4 light_space{};
+    bool has_shadow = false;
 
     bool ready() const { return state == State::Initialised; }
 
@@ -362,6 +383,13 @@ void OpenGLRenderBackend::shutdownImpl(bool countViolation)
     impl.tri_material.reset();
     impl.triangle_ready = false;
     impl.lighting_program.reset();
+    impl.shadow_program.reset();
+    impl.has_shadow = false;
+    impl.shadow_target = nullptr;
+    impl.bound_target = nullptr;
+    for (auto& target : impl.targets)
+        target->release();
+    impl.targets.clear();
     impl.drainGlErrors("shutdown");
     if (impl.context != nullptr)
     {
@@ -578,6 +606,17 @@ std::unique_ptr<GpuMesh> OpenGLRenderBackend::createGpuMesh()
     return std::make_unique<opengl::GlMesh>(m_impl->gl);
 }
 
+void OpenGLRenderBackend::applyViewport()
+{
+    Impl& impl = *m_impl;
+    if (impl.bound_target != nullptr)
+        impl.gl.glViewport(0, 0, static_cast<GLsizei>(impl.bound_target->width()),
+                           static_cast<GLsizei>(impl.bound_target->height()));
+    else
+        impl.gl.glViewport(0, 0, static_cast<GLsizei>(impl.config.width),
+                           static_cast<GLsizei>(impl.config.height));
+}
+
 void OpenGLRenderBackend::draw(GpuMesh& mesh, ShaderProgram& program)
 {
     Impl& impl = *m_impl;
@@ -586,8 +625,7 @@ void OpenGLRenderBackend::draw(GpuMesh& mesh, ShaderProgram& program)
         ++impl.violations;
         return;
     }
-    impl.gl.glViewport(0, 0, static_cast<GLsizei>(impl.config.width),
-                       static_cast<GLsizei>(impl.config.height));
+    applyViewport();
     program.use();
     mesh.drawIndexed();
     impl.drainGlErrors("draw");
@@ -628,8 +666,9 @@ void OpenGLRenderBackend::submitImpl(const DrawSubmission& submission)
     const core::mat4 projection = core::perspective(kPi / 2.0f, aspect, 0.1f, 100.0f);
     const core::mat4 mvp = projection * view * submission.model;
 
-    impl.gl.glViewport(0, 0, static_cast<GLsizei>(impl.config.width),
-                       static_cast<GLsizei>(impl.config.height));
+    applyViewport();
+    impl.gl.glEnable(GL_DEPTH_TEST);
+    impl.gl.glDepthFunc(GL_LESS);
 
     ShaderProgram& program = *impl.lighting_program;
     program.use();
@@ -653,6 +692,26 @@ void OpenGLRenderBackend::submitImpl(const DrawSubmission& submission)
     else
     {
         program.setUniform("hasSun", 0);
+    }
+
+    // Single-cascade sun shadow map from the most recent renderShadowMap call
+    // (milestone 4b). The shadow factor applies to the sun term only; dynamic
+    // lights stay unshadowed (documented). A released shadow target disables
+    // the lookup.
+    if (impl.has_shadow && impl.shadow_target != nullptr && !impl.shadow_target->released)
+    {
+        auto* shadow_view =
+            static_cast<opengl::GlTextureView*>(impl.shadow_target->depthView());
+        impl.gl.glActiveTexture(GL_TEXTURE0);
+        impl.gl.glBindTexture(GL_TEXTURE_2D, shadow_view->textureId());
+        program.setUniform("shadowMap", 0);
+        program.setUniform("hasShadowMap", 1);
+        program.setUniform("lightSpaceMatrix", impl.light_space);
+        program.setUniform("shadowBias", impl.config.shadow_bias);
+    }
+    else
+    {
+        program.setUniform("hasShadowMap", 0);
     }
 
     const int light_count = static_cast<int>(submission.lights.size());
@@ -694,6 +753,177 @@ void OpenGLRenderBackend::submitImpl(const DrawSubmission& submission)
     impl.drainGlErrors("submit");
 }
 
+RenderTarget* OpenGLRenderBackend::createRenderTarget(const RenderTargetDesc& desc)
+{
+    validateRenderTargetDesc(desc);  // throws std::invalid_argument when invalid/incomplete
+    Impl& impl = *m_impl;
+    if (!impl.ready())
+    {
+        ++impl.violations;
+        throw std::logic_error("OpenGLRenderBackend::createRenderTarget: not initialised");
+    }
+    auto target =
+        std::make_unique<opengl::GlRenderTarget>(impl.gl, desc);  // throws when the FBO is incomplete
+    RenderTarget* raw = target.get();
+    impl.targets.push_back(std::move(target));
+    return raw;
+}
+
+void OpenGLRenderBackend::bindRenderTarget(RenderTarget* target)
+{
+    Impl& impl = *m_impl;
+    if (!impl.ready())
+    {
+        ++impl.violations;
+        return;
+    }
+    if (target == nullptr)
+    {
+        // Bind the default framebuffer.
+        impl.bound_target = nullptr;
+        impl.gl.glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        applyViewport();
+        impl.drainGlErrors("bindRenderTarget");
+        return;
+    }
+    opengl::GlRenderTarget* known = findGlTarget(impl.targets, target);
+    if (known == nullptr || known->released)
+    {
+        // Unknown or released handle: violation, never dereferenced.
+        ++impl.violations;
+        return;
+    }
+    // Binding while another target is bound simply replaces the binding.
+    impl.bound_target = known;
+    impl.gl.glBindFramebuffer(GL_FRAMEBUFFER, known->framebufferId());
+    applyViewport();
+    impl.drainGlErrors("bindRenderTarget");
+}
+
+void OpenGLRenderBackend::releaseRenderTarget(RenderTarget* target)
+{
+    Impl& impl = *m_impl;
+    if (!impl.ready())
+    {
+        ++impl.violations;
+        return;
+    }
+    opengl::GlRenderTarget* known = findGlTarget(impl.targets, target);
+    if (known == nullptr || known->released)
+    {
+        ++impl.violations;
+        return;
+    }
+    if (impl.bound_target == known)
+    {
+        impl.bound_target = nullptr;
+        impl.gl.glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        applyViewport();
+    }
+    if (impl.shadow_target == known)
+    {
+        // Documented: releasing the shadow target disables the shadow lookup.
+        impl.shadow_target = nullptr;
+        impl.has_shadow = false;
+    }
+    known->release();  // deletes GL objects; the handle stays in the registry
+}
+
+TextureView* OpenGLRenderBackend::renderTargetTexture(RenderTarget* target)
+{
+    Impl& impl = *m_impl;
+    if (!impl.ready())
+    {
+        ++impl.violations;
+        return nullptr;
+    }
+    opengl::GlRenderTarget* known = findGlTarget(impl.targets, target);
+    if (known == nullptr || known->released || impl.bound_target == known)
+    {
+        // Unknown, released, or bound for rendering (feedback loop).
+        ++impl.violations;
+        return nullptr;
+    }
+    if (known->hasColorAttachment())
+        return known->colorView();
+    if (known->hasDepthAttachment())
+        return known->depthView();
+    ++impl.violations;
+    return nullptr;
+}
+
+void OpenGLRenderBackend::ensureShadowProgram()
+{
+    Impl& impl = *m_impl;
+    if (!impl.shadow_program)
+        impl.shadow_program = std::shared_ptr<ShaderProgram>(
+            createShaderProgram(opengl::kShadowVertexShader, opengl::kShadowFragmentShader));
+}
+
+void OpenGLRenderBackend::renderShadowMap(RenderTarget* target, const DirectionalLight& sun,
+                                          const SceneBounds& bounds,
+                                          const std::vector<DrawSubmission>& submissions)
+{
+    Impl& impl = *m_impl;
+    if (!impl.ready())
+    {
+        ++impl.violations;
+        return;
+    }
+    sun.validate();
+    if (!(bounds.radius > 0.0f))
+        throw std::invalid_argument("renderShadowMap: scene bounds radius must be > 0");
+    for (const DrawSubmission& submission : submissions)
+        submission.validate();
+
+    opengl::GlRenderTarget* known =
+        target != nullptr ? findGlTarget(impl.targets, target) : nullptr;
+    if (known == nullptr || known->released || impl.bound_target == known ||
+        !known->hasDepthAttachment())
+    {
+        ++impl.violations;
+        return;
+    }
+
+    // Single orthographic cascade covering the scene bounds (milestone 4b).
+    // near is fixed at 0.1; far = near + 2 * radius covers the whole bounding
+    // sphere (documented rule in grace/render/shadow.hpp).
+    constexpr float kShadowNear = 0.1f;
+    const float shadow_far = kShadowNear + 2.0f * bounds.radius;
+    const core::mat4 light_space = sunLightSpaceMatrix(sun, bounds, kShadowNear, shadow_far);
+
+    ensureShadowProgram();
+
+    // Render the draw list from the sun's point of view into the depth target.
+    impl.bound_target = known;
+    impl.gl.glBindFramebuffer(GL_FRAMEBUFFER, known->framebufferId());
+    applyViewport();
+    impl.gl.glEnable(GL_DEPTH_TEST);
+    impl.gl.glDepthFunc(GL_LESS);
+    impl.gl.glClearDepth(1.0);
+    impl.gl.glClear(GL_DEPTH_BUFFER_BIT);
+    impl.drainGlErrors("renderShadowMap clear");
+
+    ShaderProgram& program = *impl.shadow_program;
+    program.use();
+    for (const DrawSubmission& submission : submissions)
+    {
+        const core::mat4 light_mvp = light_space * submission.model;
+        program.setUniform("lightMVP", light_mvp);
+        submission.mesh->drawIndexed();
+    }
+    impl.drainGlErrors("renderShadowMap");
+
+    // Back to the default framebuffer; remember the shadow map for submit().
+    impl.bound_target = nullptr;
+    impl.gl.glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    applyViewport();
+    impl.shadow_target = known;
+    impl.light_space = light_space;
+    impl.has_shadow = true;
+    impl.drainGlErrors("renderShadowMap");
+}
+
 void OpenGLRenderBackend::ensureTriangle()
 {
     Impl& impl = *m_impl;
@@ -728,10 +958,9 @@ void OpenGLRenderBackend::drawTriangle()
     Impl& impl = *m_impl;
     ensureTriangle();
 
-    // Full-window viewport: NDC maps onto the whole framebuffer, so the
-    // result is correct for non-square window sizes.
-    impl.gl.glViewport(0, 0, static_cast<GLsizei>(impl.config.width),
-                       static_cast<GLsizei>(impl.config.height));
+    // Full-frame viewport: NDC maps onto the whole framebuffer/target, so
+    // the result is correct for non-square sizes.
+    applyViewport();
 
     const float aspect = static_cast<float>(impl.config.width) /
                          static_cast<float>(impl.config.height);

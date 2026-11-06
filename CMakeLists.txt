@@ -89,7 +89,9 @@ add_library(grace_render STATIC
     src/render/shader.cpp
     src/render/material.cpp
     src/render/light.cpp
-    src/render/draw_list.cpp)
+    src/render/draw_list.cpp
+    src/render/render_target.cpp
+    src/render/shadow.cpp)
 
 target_include_directories(grace_render PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
@@ -151,6 +153,7 @@ if(GRACE_ENABLE_OPENGL)
         src/render/opengl/gl_loader.cpp
         src/render/opengl/opengl_mesh.cpp
         src/render/opengl/opengl_shader.cpp
+        src/render/opengl/opengl_render_target.cpp
         src/render/opengl/opengl_render_backend.cpp)
 
     target_link_libraries(grace_render_opengl

@@ -22,6 +22,7 @@ using FnReadPixels = void (*)(GLint x, GLint y, GLsizei width, GLsizei height,
                               GLenum format, GLenum type, GLvoid* data);
 using FnEnable = void (*)(GLenum cap);
 using FnDisable = void (*)(GLenum cap);
+using FnDepthFunc = void (*)(GLenum func);
 using FnGenVertexArrays = void (*)(GLsizei n, GLuint* arrays);
 using FnBindVertexArray = void (*)(GLuint array);
 using FnDeleteVertexArrays = void (*)(GLsizei n, const GLuint* arrays);
@@ -59,6 +60,20 @@ using FnVertexAttribPointer = void (*)(GLuint index, GLint size, GLenum type,
 using FnEnableVertexAttribArray = void (*)(GLuint index);
 using FnDrawArrays = void (*)(GLenum mode, GLint first, GLsizei count);
 using FnDrawElements = void (*)(GLenum mode, GLsizei count, GLenum type, const GLvoid* indices);
+using FnGenFramebuffers = void (*)(GLsizei n, GLuint* ids);
+using FnBindFramebuffer = void (*)(GLenum target, GLuint framebuffer);
+using FnFramebufferTexture2D = void (*)(GLenum target, GLenum attachment, GLenum textarget,
+                                        GLuint texture, GLint level);
+using FnCheckFramebufferStatus = GLenum (*)(GLenum target);
+using FnDeleteFramebuffers = void (*)(GLsizei n, const GLuint* framebuffers);
+using FnGenTextures = void (*)(GLsizei n, GLuint* textures);
+using FnBindTexture = void (*)(GLenum target, GLuint texture);
+using FnTexImage2D = void (*)(GLenum target, GLint level, GLint internalformat, GLsizei width,
+                              GLsizei height, GLint border, GLenum format, GLenum type,
+                              const GLvoid* pixels);
+using FnTexParameteri = void (*)(GLenum target, GLenum pname, GLint param);
+using FnDeleteTextures = void (*)(GLsizei n, const GLuint* textures);
+using FnActiveTexture = void (*)(GLenum texture);
 
 /// Minimal runtime loader for the OpenGL entry points the engine uses.
 ///
@@ -87,6 +102,7 @@ public:
     FnReadPixels glReadPixels = nullptr;
     FnEnable glEnable = nullptr;
     FnDisable glDisable = nullptr;
+    FnDepthFunc glDepthFunc = nullptr;
 
     // OpenGL 3.x entry points (VAO/VBO/shader path).
     FnGenVertexArrays glGenVertexArrays = nullptr;
@@ -120,6 +136,17 @@ public:
     FnEnableVertexAttribArray glEnableVertexAttribArray = nullptr;
     FnDrawArrays glDrawArrays = nullptr;
     FnDrawElements glDrawElements = nullptr;
+    FnGenFramebuffers glGenFramebuffers = nullptr;
+    FnBindFramebuffer glBindFramebuffer = nullptr;
+    FnFramebufferTexture2D glFramebufferTexture2D = nullptr;
+    FnCheckFramebufferStatus glCheckFramebufferStatus = nullptr;
+    FnDeleteFramebuffers glDeleteFramebuffers = nullptr;
+    FnGenTextures glGenTextures = nullptr;
+    FnBindTexture glBindTexture = nullptr;
+    FnTexImage2D glTexImage2D = nullptr;
+    FnTexParameteri glTexParameteri = nullptr;
+    FnDeleteTextures glDeleteTextures = nullptr;
+    FnActiveTexture glActiveTexture = nullptr;
 };
 
 }  // namespace grace::render::opengl
