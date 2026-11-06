@@ -3,6 +3,10 @@
 Running record of milestone progress, validation results and open decisions.
 The architectural baseline is [grace-architecture.md](grace-architecture.md).
 
+The `.docx` files in this directory are generated from the `.md` sources
+with `pandoc` and are committed for convenience. Edit the Markdown, then
+regenerate: `pandoc docs/implementation-status.md -o docs/implementation-status.docx`.
+
 ---
 
 ## Milestones
@@ -57,6 +61,7 @@ All results below are real runs, on the tree at the stated commit.
 | 2026-11-05 | same, milestone 3 | OpenGL off: 7/7 Debug; OpenGL on: 11/11 Debug and Release; `-L opengl` 4/4; zero warnings under `-Werror` |
 | 2026-11-05 | same, milestone 3 | Check counts: version 4, fixed_step_clock 42, application 26, math 28, opengl_context 17, opengl_render 32, mesh 13, shader 16 — all zero failures |
 | 2026-11-05 | same, milestone 3 | Visible CLI run: `opengl 4.6 core` Iris Xe, centre pixel `30,30,30,255`, exit 0; hidden run under `xvfb-run`: llvmpipe `4.5 core`, same pixel, exit 0. Broken-shader failures surface the real info log, e.g. ``error: `broken_identifier_xyz' undeclared`` |
+| 2026-11-05 | same, contract extension | OpenGL off: 7/7 Debug; OpenGL on: 11/11 Debug and Release; `-L opengl` 4/4; zero warnings under `-Werror`; check counts: opengl_context 20, opengl_render 47 |
 
 ### Defects found by the tests, and fixed
 
@@ -64,6 +69,7 @@ All results below are real runs, on the tree at the stated commit.
 | --- | --- | --- |
 | `glClear` raised `GL_INVALID_VALUE` and cleared nothing | Contract clear-buffer flags are `1`, `2`, `4`; GL expects `0x4000`, `0x100`, `0x400` | Explicit mapping to the GL mask |
 | Off-centre readback returned undefined data | Readback happened after the buffer swap | Pre-swap `queueReadback()` and `lastReadback()` |
+| OpenGL readback returned alpha 255 while the null backend returned the clear colour's alpha | The context was created without an alpha channel | Request `SDL_GL_ALPHA_SIZE` 8 |
 | `describe()` reported "not running" after shutdown | Runtime state reported instead of historical fact | Version, vendor and renderer reported whenever a context was obtained |
 | Mesh/shader tests drew with a uniform set before the program was active (`GL_INVALID_OPERATION`) | `glUniform*` requires a current program | Documented precondition in `shader.hpp` (setUniform requires `use()`); tests activate the program first |
 

@@ -40,16 +40,6 @@ struct OpenGLBackendConfig
     int swap_interval = 1;
 };
 
-/// One pixel sample captured before a buffer swap.
-struct ReadbackSample
-{
-    std::uint32_t x;
-    std::uint32_t y;
-    ClearColor color;
-    float depth;
-    std::int32_t stencil;
-};
-
 /// OpenGL render backend behind the platform-neutral RenderBackend contract.
 ///
 /// SDL and OpenGL types are hidden behind a pimpl. Context creation happens in
@@ -81,28 +71,36 @@ public:
     std::uint32_t width() const override;
     std::uint32_t height() const override;
     void shutdown() override;
+    std::uint64_t violationCount() const noexcept override;
 
-    // -- Diagnostics (not part of the contract) ----------------------------
-    std::uint64_t violationCount() const noexcept;
-    std::uint64_t glErrorCount() const noexcept;
-    std::string lastError() const noexcept;
-
-    bool hasCenterPixel() const noexcept;
-    ClearColor centerPixel() const noexcept;
-    float centerDepth() const noexcept;
-    std::int32_t centerStencil() const noexcept;
+    std::unique_ptr<ShaderProgram> createShaderProgram(
+        const std::string& vertexSource, const std::string& fragmentSource) override;
+    std::unique_ptr<GpuMesh> createGpuMesh() override;
+    void draw(GpuMesh& mesh, ShaderProgram& program) override;
 
     /// Queues a pixel to be read back before the next buffer swap. The back
     /// buffer contents are undefined after a swap, so all readback happens
-    /// pre-swap. Requires initialise().
-    void queueReadback(std::uint32_t x, std::uint32_t y);
+    /// pre-swap.
+    void queueReadback(std::uint32_t x, std::uint32_t y) override;
 
-    /// Samples captured before the last swap, in queue order.
-    const std::vector<ReadbackSample>& lastReadback() const noexcept;
+    /// Reads the centre pixel and all queued pixels from the current read
+    /// buffer immediately (valid until the next swap). clear() calls this
+    /// automatically when readback_center is set or pixels are queued.
+    void readback() override;
 
+    const std::vector<ReadbackSample>& lastReadback() const noexcept override;
+    bool hasCenterPixel() const noexcept override;
+    ClearColor centerPixel() const noexcept override;
+    float centerDepth() const noexcept override;
+    std::int32_t centerStencil() const noexcept override;
+
+    // -- OpenGL-specific diagnostics and configuration (not in the contract)
     void setClearBuffers(std::uint32_t mask) noexcept;
     void setClearDepth(float depth) noexcept;
     void setClearStencil(std::int32_t stencil) noexcept;
+
+    std::uint64_t glErrorCount() const noexcept;
+    std::string lastError() const noexcept;
 
     int contextMajor() const noexcept;
     int contextMinor() const noexcept;
@@ -118,8 +116,6 @@ private:
     void shutdownImpl(bool countViolation);
     void ensureTriangle();
     void drawTriangle();
-    unsigned int compileShader(bool vertex, const char* source);
-    unsigned int linkProgram(unsigned int vertexShader, unsigned int fragmentShader);
     void readCenter();
     void captureQueuedReadbacks();
     ClearColor readPixel(std::uint32_t x, std::uint32_t y);

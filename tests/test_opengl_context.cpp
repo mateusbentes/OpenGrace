@@ -82,7 +82,30 @@ int main()
         early.clear();                                // before initialise
         early.setClearColor(ClearColor{9, 9, 9, 9});  // before initialise
         early.shutdown();                             // before initialise
-        GRACE_CHECK_EQ(early.violationCount(), 3u);
+        early.readback();                             // before initialise
+        GRACE_CHECK_EQ(early.violationCount(), 4u);
+        // Handle factories before initialise: violation + logic_error.
+        bool threw_mesh = false;
+        try
+        {
+            static_cast<void>(early.createGpuMesh());
+        }
+        catch (const std::logic_error&)
+        {
+            threw_mesh = true;
+        }
+        GRACE_CHECK(threw_mesh);
+        bool threw_shader = false;
+        try
+        {
+            static_cast<void>(early.createShaderProgram("vertex", "fragment"));
+        }
+        catch (const std::logic_error&)
+        {
+            threw_shader = true;
+        }
+        GRACE_CHECK(threw_shader);
+        GRACE_CHECK_EQ(early.violationCount(), 6u);
         try
         {
             early.initialise();
@@ -94,10 +117,10 @@ int main()
         }
         early.setClearColor(ClearColor{1, 2, 3, 4});
         early.clear();
-        GRACE_CHECK_EQ(early.violationCount(), 3u);  // no new violations
+        GRACE_CHECK_EQ(early.violationCount(), 6u);  // no new violations
         early.shutdown();
         early.shutdown();  // safe to call twice, but counted
-        GRACE_CHECK_EQ(early.violationCount(), 4u);
+        GRACE_CHECK_EQ(early.violationCount(), 7u);
     }
 
     // A clean contract sequence produces no violations and no GL errors.

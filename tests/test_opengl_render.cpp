@@ -108,12 +108,24 @@ int main()
     const ClearColor contract_color{1, 2, 3, 4};
     NullRenderBackend null_backend(64, 48);
     grace::test::runContractChecks(null_backend, contract_color, 3);
-    const std::vector<std::string> expected_events{"setClearColor(1,2,3,4)",
-                                                   "clear(1,2,3,4)",
-                                                   "clear(1,2,3,4)",
-                                                   "clear(1,2,3,4)",
-                                                   "shutdown",
-                                                   "clear(1,2,3,4)"};
+    const std::vector<std::string> expected_events{
+        "setClearColor(1,2,3,4)",
+        "clear(1,2,3,4)",
+        "clear(1,2,3,4)",
+        "clear(1,2,3,4)",
+        "queueReadback(1,1)",
+        "clear(1,2,3,4)",
+        "readback",
+        "createShaderProgram",
+        "createGpuMesh",
+        "upload",
+        "draw",
+        "use",
+        "drawIndexed",
+        "shutdown",
+        "draw",    // post-shutdown: violation
+        "readback",  // post-shutdown: violation
+        "clear(1,2,3,4)"};
     GRACE_CHECK(null_backend.events() == expected_events);
 
     OpenGLBackendConfig parity_config;
@@ -132,7 +144,7 @@ int main()
         return 77;
     }
     grace::test::runContractChecks(*gl_backend, contract_color, 3);
-    GRACE_CHECK_EQ(gl_backend->violationCount(), 1u);  // post-shutdown probe only
+    GRACE_CHECK_EQ(gl_backend->violationCount(), 3u);  // draw + readback + clear after shutdown
     GRACE_CHECK_EQ(gl_backend->glErrorCount(), 0u);
 
     return grace::test::summary("opengl_render");

@@ -47,6 +47,8 @@ The following are intentionally excluded:
 - [docs/grace-architecture.md](docs/grace-architecture.md) — the architectural
   reference, compiled from public sources, that defines the fidelity baseline
   for this project.
+- [docs/implementation-status.md](docs/implementation-status.md) — milestone
+  progress, validation records and the open decisions.
 
 ## Building
 

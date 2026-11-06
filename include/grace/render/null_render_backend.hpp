@@ -1,19 +1,65 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "grace/render/render_backend.hpp"
 
 namespace grace::render {
 
+class NullRenderBackend;
+
+/// GPU mesh handle of the null backend: validates and records upload/draw
+/// into the owning backend's event log and counts violations after shutdown.
+class NullGpuMesh final : public GpuMesh
+{
+public:
+    explicit NullGpuMesh(NullRenderBackend& owner) : m_owner(owner) {}
+
+    void upload(const Mesh& mesh) override;
+    void drawIndexed() override;
+
+private:
+    NullRenderBackend& m_owner;
+};
+
+/// Shader program of the null backend: records use/setUniform calls into the
+/// owning backend's event log. Uniform locations are stable fake values,
+/// cached per name.
+class NullShaderProgram final : public ShaderProgram
+{
+public:
+    explicit NullShaderProgram(NullRenderBackend& owner) : m_owner(owner) {}
+
+    void use() override;
+    void setUniform(const char* name, float value) override;
+    void setUniform(const char* name, int value) override;
+    void setUniform(const char* name, const core::vec2& value) override;
+    void setUniform(const char* name, const core::vec3& value) override;
+    void setUniform(const char* name, const core::vec4& value) override;
+    void setUniform(const char* name, const core::mat4& value) override;
+    void setUniformSampler(const char* name, std::int32_t textureUnit) override;
+    std::int32_t uniformLocation(const char* name) override;
+
+private:
+    NullRenderBackend& m_owner;
+    UniformCache m_cache;
+    std::int32_t m_next_location = 0;
+};
+
 /// Headless RenderBackend.
 ///
 /// Records every call in order (for example "setClearColor(1,2,3,4)",
-/// "clear(1,2,3,4)", "shutdown") and counts protocol violations: any
-/// setClearColor/clear/shutdown call after shutdown, including a repeated
-/// shutdown. Violating calls are recorded but do not change backend state.
+/// "clear(1,2,3,4)", "createGpuMesh", "upload", "draw", "readback",
+/// "shutdown") and counts protocol violations: any mutating call after
+/// shutdown, including a repeated shutdown. Violating calls are recorded but
+/// do not change backend state.
+///
+/// Documented readback values: every pixel reports exactly the current clear
+/// colour, depth 1.0 and stencil 0.
 class NullRenderBackend final : public RenderBackend
 {
 public:
@@ -27,15 +73,34 @@ public:
     std::uint32_t width() const override { return m_width; }
     std::uint32_t height() const override { return m_height; }
     void shutdown() override;
+    std::uint64_t violationCount() const noexcept override { return m_violations; }
+
+    std::unique_ptr<ShaderProgram> createShaderProgram(
+        const std::string& vertexSource, const std::string& fragmentSource) override;
+    std::unique_ptr<GpuMesh> createGpuMesh() override;
+    void draw(GpuMesh& mesh, ShaderProgram& program) override;
+
+    void queueReadback(std::uint32_t x, std::uint32_t y) override;
+    void readback() override;
+    const std::vector<ReadbackSample>& lastReadback() const noexcept override
+    {
+        return m_last_readback;
+    }
+    bool hasCenterPixel() const noexcept override { return m_has_center; }
+    ClearColor centerPixel() const noexcept override { return m_center_pixel; }
+    float centerDepth() const noexcept override { return 1.0f; }
+    std::int32_t centerStencil() const noexcept override { return 0; }
 
     /// Recorded call sequence, in order.
     const std::vector<std::string>& events() const noexcept { return m_events; }
 
-    /// Number of protocol violations observed so far.
-    std::uint64_t violationCount() const noexcept { return m_violations; }
-
 private:
+    friend class NullGpuMesh;
+    friend class NullShaderProgram;
+
     void record(std::string event);
+    bool ready() const noexcept { return !m_shutdown; }
+    void countViolation() noexcept { ++m_violations; }
 
     std::uint32_t m_width;
     std::uint32_t m_height;
@@ -43,6 +108,11 @@ private:
     bool m_shutdown = false;
     std::vector<std::string> m_events;
     std::uint64_t m_violations = 0;
+
+    bool m_has_center = false;
+    ClearColor m_center_pixel{0, 0, 0, 0};
+    std::vector<ReadbackSample> m_last_readback;
+    std::vector<std::pair<std::uint32_t, std::uint32_t>> m_readback_queue;
 };
 
 }  // namespace grace::render
