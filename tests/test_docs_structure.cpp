@@ -178,6 +178,82 @@ bool isSeparatorRow(const std::string& line)
     return dash;
 }
 
+// Splits a table row into its cells, trimmed. A pipe escaped as \| is a literal
+// character inside a cell, the same escape columnCount already accounts for, so
+// it does not start a new cell.
+std::vector<std::string> splitCells(const std::string& line)
+{
+    std::vector<std::string> cells;
+    std::string current;
+    for (std::size_t i = 0; i < line.size(); ++i)
+    {
+        if (line[i] == '\\' && i + 1 < line.size() && line[i + 1] == '|')
+        {
+            current.push_back('|');
+            ++i;
+            continue;
+        }
+        if (line[i] == '|')
+        {
+            cells.push_back(current);
+            current.clear();
+            continue;
+        }
+        current.push_back(line[i]);
+    }
+    cells.push_back(current);
+    // The row opens and closes with a pipe, so the first and last pieces lie
+    // outside the cells.
+    if (!cells.empty())
+        cells.erase(cells.begin());
+    if (!cells.empty())
+        cells.pop_back();
+    for (std::string& cell : cells)
+    {
+        const std::size_t first = cell.find_first_not_of(" \t");
+        if (first == std::string::npos)
+        {
+            cell.clear();
+            continue;
+        }
+        const std::size_t last = cell.find_last_not_of(" \t");
+        cell = cell.substr(first, last - first + 1);
+    }
+    return cells;
+}
+
+// True when the line is a three-column table header naming these cells.
+bool isHeaderOf(const std::string& line, const char* first, const char* second,
+                const char* third)
+{
+    if (!isTableRow(line))
+        return false;
+    const std::vector<std::string> cells = splitCells(line);
+    return cells.size() == 3 && cells[0] == first && cells[1] == second &&
+           cells[2] == third;
+}
+
+// The milestone label a validation record names, or an empty string. The scan is
+// limited to one cell on purpose: elsewhere in the document a token like "2x" or
+// "4c" is a size or a section number, and treating every one as a milestone was
+// measured to produce eight false positives.
+std::string milestoneInCell(const std::string& cell)
+{
+    const std::string marker = "milestone ";
+    const std::size_t at = cell.find(marker);
+    if (at == std::string::npos)
+        return std::string();
+    std::size_t j = at + marker.size();
+    const std::size_t begin = j;
+    while (j < cell.size() && cell[j] >= '0' && cell[j] <= '9')
+        ++j;
+    if (j == begin)
+        return std::string();
+    if (j < cell.size() && cell[j] >= 'a' && cell[j] <= 'z')
+        ++j;
+    return cell.substr(begin, j - begin);
+}
+
 std::vector<Failure> checkDocument(const std::string& text)
 {
     const std::vector<std::string> lines = splitLines(text);
@@ -559,6 +635,67 @@ std::vector<Failure> checkDocument(const std::string& text)
             }
         }
     }
+    // R12: every milestone a validation record names exists as a row in the
+    // milestone table. This is R6's shape applied to milestones, and it is
+    // deliberately narrow about where it looks.
+    //
+    // An earlier version of this rule scanned the whole document for tokens of
+    // the form <digits><letter> and required each to be a milestone. Measured on
+    // the status document, that produced eight false positives: "§3.4" is a
+    // section number and "2x Rgba16F" is a size, and both look exactly like a
+    // milestone label. The same shape is also used as a real milestone reference
+    // in thirty-five places that never say the word, so neither "the token always
+    // has the word" nor "the token is always a milestone" holds.
+    //
+    // The second cell of a validation row is the one place where the form is
+    // unambiguous, because the row's own convention is "same, milestone N" or
+    // "same, <description>". So the scan is limited to that cell, and a document
+    // with no milestone table has nothing for the rule to check.
+    {
+        std::vector<std::string> milestones;
+        for (std::size_t i = 0; i < lines.size(); ++i)
+        {
+            if (!isHeaderOf(lines[i], "#", "Scope", "Status"))
+                continue;
+            for (std::size_t j = i + 2; j < lines.size() && isTableRow(lines[j]);
+                 ++j)
+            {
+                const std::vector<std::string> cells = splitCells(lines[j]);
+                if (!cells.empty() && !cells[0].empty())
+                    milestones.push_back(cells[0]);
+            }
+            break;
+        }
+
+        if (!milestones.empty())
+        {
+            for (std::size_t i = 0; i < lines.size(); ++i)
+            {
+                if (!isHeaderOf(lines[i], "Date", "Environment", "Result"))
+                    continue;
+                for (std::size_t j = i + 2; j < lines.size() && isTableRow(lines[j]);
+                     ++j)
+                {
+                    const std::vector<std::string> cells = splitCells(lines[j]);
+                    if (cells.size() != 3)
+                        continue;
+                    const std::string label = milestoneInCell(cells[1]);
+                    if (label.empty())
+                        continue;
+                    if (std::find(milestones.begin(), milestones.end(), label) ==
+                        milestones.end())
+                    {
+                        failures.emplace_back(
+                            "R12", "line " + std::to_string(j + 1) +
+                                       " names milestone " + label +
+                                       ", which has no row in the milestone table");
+                    }
+                }
+                break;
+            }
+        }
+    }
+
     return failures;
 }
 
@@ -582,7 +719,23 @@ std::string readFile(const std::string& path)
 // it called a line of 79 columns 81. The first fixture could not catch that,
 // because it holds no non-ASCII character and bytes and code points were the
 // same number on every line of it.
+//
+// kGood carries a milestone table and a validation record naming a milestone
+// that the table holds. That is R12's accepting path: the rule is about the two
+// tables agreeing, and a document with only the record would be the defect.
 const std::string kGood = "# Status\n"
+                          "\n"
+                          "## Milestones\n"
+                          "\n"
+                          "| # | Scope | Status |\n"
+                          "| --- | --- | --- |\n"
+                          "| 1 | First | Done |\n"
+                          "\n"
+                          "## Validation records\n"
+                          "\n"
+                          "| Date | Environment | Result |\n"
+                          "| --- | --- | --- |\n"
+                          "| 2026-11-05 | same, milestone 1 | passed |\n"
                           "\n"
                           "## Open decisions\n"
                           "\n"
@@ -683,6 +836,17 @@ const Fixture kFixtures[] = {
      "Text.\n\n\n"
      "More text.\n\n"
      "## Verification commands\n\n```sh\ncmake -S . -B build\n```\n"},
+    {"R12", "a validation record naming a milestone with no row in the table",
+     "# Status\n\n"
+     "## Milestones\n\n"
+     "| # | Scope | Status |\n"
+     "| --- | --- | --- |\n"
+     "| 1 | First | Done |\n\n"
+     "## Validation records\n\n"
+     "| Date | Environment | Result |\n"
+     "| --- | --- | --- |\n"
+     "| 2026-11-05 | same, milestone 1 | passed |\n"
+     "| 2026-11-06 | same, milestone 9 | passed |\n"},
 };
 
 }  // namespace
