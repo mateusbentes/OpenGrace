@@ -448,12 +448,6 @@ std::vector<Failure> checkDocument(const std::string& text)
         }
     }
     // R10: no line of prose is wider than the document's own limit. Ten
-    // paragraphs had lost their line breaks, the worst at 688 columns, and
-    // no rule looked at width. A fenced block holds commands, where a long
-    // line is the point and wrapping it would break it, so fences are
-    // skipped. A table row is as wide as its cells and Markdown has no
-    // opinion, so rows are skipped too. The limit is 79 columns, which is
-    // R10: no line of prose is wider than the document's own limit. Ten
     // paragraphs had lost their line breaks, the worst at 688 columns, and no
     // rule looked at width. A fenced block holds commands, where a long line is
     // the point and wrapping it would break it, so fences are skipped. A table
