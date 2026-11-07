@@ -215,6 +215,7 @@ target.
 | PhysX / Bullet / Box2D | Plugin contract preserved; backends chosen by licence fit. |
 | OpenAL / OpenSL / XAudio2 / MultiStream | Plugin contract preserved; OpenAL Soft on Linux. |
 | AngelScript + Tetragramaton | Both reimplemented as engine services. |
+| Resource manager | Container of this project's own over DEFLATE payloads; see 4.4. |
 | Editors and network tools | Deferred; out of scope for the first milestones. |
 | Stereoscopic 3D | Deferred. |
 
@@ -304,6 +305,56 @@ The physics and scripting backends are not wired yet, so neither platform
 introduces a dependency that is currently unavailable there. The PhysX SDK 3.4
 upstream lists Windows, Linux, OSX, Android and iOS among its supported
 platforms, which is part of why Windows and Android are the two recorded here.
+
+### 4.4 Resource container
+
+The documented feature set lists a resource manager among the core components,
+so this project needs a container format. The original did not expose
+containers through its plugin architecture and its own format was never
+published, so there is nothing documented to reproduce: the container is this
+project's own, specified in [resource-container.md](resource-container.md)
+rather than inherited from any byte layout.
+
+Its payloads are DEFLATE streams (RFC 1951) produced and consumed through zlib,
+a published IETF standard under the zlib licence and already a transitive
+dependency through SDL2. The format is defined by eight properties, each
+derivable from what a runtime needs, and the encoding of those properties is
+the specification. Nothing in it names a graphics API or a host platform.
+
+### 4.5 Future rendering backends
+
+OpenGL is the only backend implemented, on Linux x86_64. The render contract is
+API-neutral by construction and the boundary is checked by grep in every
+milestone, so a second backend is a new implementation of the same contract
+rather than a rewrite. Two are planned and neither is started.
+
+**Vulkan** would cover Windows, Linux and Android with one backend. **Metal**
+would cover macOS and iOS with one backend, and on iOS it is the only option
+left: Apple removed OpenGL ES, while on macOS OpenGL is deprecated but still
+present. Both are recorded here as intent, not as work in progress.
+
+The contract was designed against OpenGL, and the second backend is what will
+test it. The parts expected to survive unchanged are the ones about resources
+and passes: mesh and texture creation, `beginRenderPass` and `endRenderPass`,
+which map almost directly onto Vulkan render passes and Metal render encoders,
+and `swapBuffers`, which maps onto swapchain presentation. The parts expected
+to need work are the ones that are about immediate state.
+
+`setDepthTestEnabled` is a global toggle in OpenGL and a pipeline state in
+Vulkan and Metal, so changing it part-way through a frame forces a pipeline or
+encoder change. `draw` executes immediately in OpenGL and is recorded in the
+other two, though `submit(DrawSubmission)` already has the record shape for
+exactly this reason. `readback` of the centre pixel is a synchronous copy in
+OpenGL and a copy to a host-visible buffer plus a fence elsewhere, and it has
+been explicit since the presentation change, so the contract does not assume
+the value is already there. The default framebuffer being unsampleable is an
+OpenGL fact rather than a general one: Vulkan and Metal both allow sampling the
+presented target, which would remove the reason the post chain ends in a
+separate display target.
+
+The honest position is that none of this is verified. It is a list of the
+places where a second backend is expected to press on the contract, written
+before the backend exists so that the prediction can be checked against it.
 
 ## 5. Licensing boundary
 

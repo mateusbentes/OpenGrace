@@ -482,6 +482,80 @@ not exist before GL 3.2, so "3.0 core" is not a valid request.
     default OFF and leave every pixel unchanged when off (test_dof_mlaa:
     flat ambient-1.0 surface reads 232 with both off, matching the pre-6d
     tree).
+24. **Resource container: define one, or adopt an existing format?** The engine
+    needs one: the documented feature set lists a resource manager among the
+    core components. Two ways to get one, adopt an existing format or define
+    one, and this project defines its own, specified in [resource-
+    container.md](resource-container.md). Its payloads are DEFLATE streams (RFC
+    1951) produced and consumed through zlib, which is a published IETF
+    standard under the zlib licence and already a transitive dependency through
+    SDL2, so the compression half of the problem is not invented here.
+
+    The alternatives were rejected for stated reasons. The ZIP container
+    (PKWARE APPNOTE) is published, well tooled and would have worked, but it is
+    a general-purpose archive: it has nowhere to express what a resource is, so
+    kind and dependency metadata would be smuggled into the comment field. Its
+    central directory sits at the end of the file and is duplicated by per-
+    entry local headers, so a random-access read seeks to the end and back and
+    parses the same information twice. That is a cost of one extra seek and one
+    redundant parse per read, not of heavy parsing, and it is stated precisely
+    because the loose version of the argument is wrong. Loose files were
+    rejected for having no index and no way to align an entry for a direct
+    upload. The archive container of the game whose engine this project does
+    not reimplement was rejected on provenance: its format is published
+    nowhere, and copying a layout discovered from a shipped product would put a
+    proprietary container at the centre of a project that reimplements a
+    different engine generation.
+
+    The format is specified by eight properties rather than by a byte layout,
+    and the properties are the deliverable because they are what a caller
+    depends on. Each one can be written without reference to any existing
+    container, which is the test that separates a requirement from a copied
+    structure. The encoding that satisfies them is in the specification
+    document.
+
+    - A stable identity per entry, so a name maps to exactly one resource.
+    - A resource kind and declared dependencies, so a loader can answer what a
+      resource needs before reading it, and can stream rather than load whole.
+    - A per-entry method, stored or deflated, chosen by the build. A payload
+      that is already compressed gains nothing from being deflated again and
+      pays for the attempt in build time.
+    - Alignment per entry, so a texture can be uploaded without an intermediate
+      copy.
+    - Random access without inflating the archive, so a level load reads only
+      what it needs.
+    - An index that permits appending, because a build adds resources rather
+      than rewriting the container.
+    - Overlay priority between containers, so a loose file or a later container
+      overrides an earlier one without rewriting anything. Without this there
+      is no modding story, and the alternative is the full directory rebuild
+      this design exists to avoid.
+    - An integrity check per entry, stored by the container rather than
+      inherited from the compression. RFC 1951 defines no checksum, and the
+      four-byte Adler-32 that makes zlib's RFC 1950 wrapper self-checking is
+      absent from a bare Deflate stream, so the check belongs in the
+      container's index and is not a free gift from zlib. This was stated the
+      other way round in an earlier draft and the correction is recorded rather
+      than quietly applied.
+
+    The freedom from inherited constraints is part of the point. A container
+    designed now answers to no console's 32-bit offset ceiling, no fixed-size
+    name field and no alignment chosen for hardware that no longer exists.
+
+    This is a deviation from the original in the same sense as the scalar math
+    library, and it is recorded as one for the same reason: the original's
+    choice is not available to be reproduced, so the honest position is to
+    state what replaced it and why. It is not a shortcut and it is not a claim
+    that the original's format was inadequate for its time. What is shared with
+    the original is the problem it solved, not its solution: a game runtime
+    needs a container with these properties, and that statement was true before
+    any particular container existed.
+
+    If interoperability with another container ever becomes a goal, the shape
+    is the one this project already uses for physics: a neutral resource
+    contract in the engine, and a format-specific backend outside the published
+    tree, cloned locally. The engine's vocabulary stays its own either way.
+
 ## Verification commands
     **Updated in 6e (decision 22 resolved): the chain now ends in an
     offscreen 8-bit display target, which IS sampleable through the contract,

@@ -30,6 +30,9 @@ or TopWare Interactive.
 ## Goals
 
 - Reimplement the documented GRACE 2 architecture as original source code.
+- Provide the resource container the documented feature set implies, designed
+  from the requirements a runtime has rather than copied from any product; see
+  the resource container specification.
 - Keep every subsystem behind a platform-neutral contract.
 - Target Linux x86_64 with OpenGL as the implemented platform. Windows and
   Android are planned and described in the Platforms section; neither is
