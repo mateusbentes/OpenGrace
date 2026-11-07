@@ -141,14 +141,54 @@ void GlRenderTarget::release()
     destroyGlObjects();
 }
 
+// Layer-target mode: the FBO's only colour attachment is layer z of an existing
+// volume. The texture is borrowed, so it is never added to m_color_textures and
+// destroyGlObjects() never deletes it: releasing this target must leave the
+// volume and its contents intact, which is what makes a per-layer loop safe.
+GlRenderTarget::GlRenderTarget(GlLoader& gl, GLuint volumeTexture, const VolumeLayerDesc& desc)
+    : m_gl(gl)
+{
+    validateVolumeLayerDesc(desc);  // throws on a bad volume or layer
+    borrows_volume = true;
+    m_desc.width = desc.volume.width;
+    m_desc.height = desc.volume.height;
+    m_desc.colorAttachmentCount = 1;
+    m_desc.colorFormats[0] = desc.volume.format;
+    m_desc.depthAttachment = false;
+
+    m_gl.glGenFramebuffers(1, &m_fbo);
+    m_gl.glBindFramebuffer(GL_FRAMEBUFFER, m_fbo);
+    m_gl.glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, volumeTexture, 0,
+                                   static_cast<GLint>(desc.layer));
+    m_gl.glDrawBuffer(GL_COLOR_ATTACHMENT0);
+    m_gl.glReadBuffer(GL_COLOR_ATTACHMENT0);
+    // The view exposes the borrowed layer for sampling. Its width and height are
+    // the volume's and its depth() stays 1, because this view is one layer of a
+    // volume and not the volume itself.
+    m_color_views.emplace_back(volumeTexture, desc.volume.width, desc.volume.height,
+                               desc.volume.format, false);
+
+    const GLenum status = m_gl.glCheckFramebufferStatus(GL_FRAMEBUFFER);
+    m_gl.glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    if (status != GL_FRAMEBUFFER_COMPLETE)
+    {
+        char buffer[64];
+        std::snprintf(buffer, sizeof(buffer), "0x%04X", static_cast<unsigned int>(status));
+        destroyGlObjects();
+        throw std::runtime_error(std::string("volume layer target incomplete, status ") + buffer);
+    }
+}
+
 void GlRenderTarget::destroyGlObjects()
 {
-    for (GLuint tex : m_color_textures)
-        if (tex != 0)
-        {
-            GLuint t = tex;
-            m_gl.glDeleteTextures(1, &t);
-        }
+    // A layer target's colour texture belongs to the volume, not to this target.
+    if (!borrows_volume)
+        for (GLuint tex : m_color_textures)
+            if (tex != 0)
+            {
+                GLuint t = tex;
+                m_gl.glDeleteTextures(1, &t);
+            }
     m_color_textures.clear();
     m_color_views.clear();
     if (m_depth_texture != 0)

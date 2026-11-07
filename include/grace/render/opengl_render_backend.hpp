@@ -95,6 +95,7 @@ public:
                        std::size_t sizeBytes) override;
     bool readTexture3D(const TextureView* view, std::uint32_t layer, void* data,
                        std::size_t sizeBytes) override;
+    RenderTarget* createVolumeLayerTarget(TextureView* volume, std::uint32_t layer) override;
     void copyDepthAttachment(RenderTarget* source, RenderTarget* destination) override;
 
     /// Queues a pixel to be read back before the next buffer swap. The back

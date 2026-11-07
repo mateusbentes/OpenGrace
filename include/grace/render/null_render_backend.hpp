@@ -35,37 +35,6 @@ private:
     bool m_depth = false;
 };
 
-/// Render target of the null backend: records its desc and release state.
-class NullRenderTarget final : public RenderTarget
-{
-public:
-    explicit NullRenderTarget(const RenderTargetDesc& desc) : m_desc(desc)
-    {
-        for (std::uint32_t i = 0; i < desc.colorAttachmentCount; ++i)
-            colorViews.emplace_back(desc.width, desc.height, desc.colorFormats[i], false);
-        if (desc.depthAttachment)
-            depthView = NullTextureView(desc.width, desc.height, desc.depthFormat, true);
-    }
-
-    std::uint32_t width() const noexcept override { return m_desc.width; }
-    std::uint32_t height() const noexcept override { return m_desc.height; }
-    std::uint32_t colorAttachmentCount() const noexcept override
-    {
-        return m_desc.colorAttachmentCount;
-    }
-    bool hasColorAttachment() const noexcept override { return m_desc.colorAttachmentCount > 0; }
-    bool hasDepthAttachment() const noexcept override { return m_desc.depthAttachment; }
-
-    const RenderTargetDesc& desc() const noexcept { return m_desc; }
-    bool released = false;
-
-    std::vector<NullTextureView> colorViews;
-    NullTextureView depthView;
-
-private:
-    RenderTargetDesc m_desc;
-};
-
 /// 3D texture of the null backend: plain data, one byte vector per slice, so a
 /// write and a read round-trip the same values with no graphics API involved.
 /// NullTextureView is final and describes a single 2D layer, so a volume needs
@@ -100,6 +69,63 @@ public:
 private:
     Texture3DDesc m_desc;
     std::vector<std::vector<std::byte>> m_slices;
+};
+
+/// Render target of the null backend: records its desc and release state.
+///
+/// A second mode exists since milestone 7's second increment: a target that
+/// writes one layer of an existing volume instead of owning 2D attachments.
+/// It borrows the volume, so releasing the target must leave the volume and its
+/// contents intact — the ownership rule the increment is built around.
+class NullRenderTarget final : public RenderTarget
+{
+public:
+    explicit NullRenderTarget(const RenderTargetDesc& desc) : m_desc(desc)
+    {
+        for (std::uint32_t i = 0; i < desc.colorAttachmentCount; ++i)
+            colorViews.emplace_back(desc.width, desc.height, desc.colorFormats[i], false);
+        if (desc.depthAttachment)
+            depthView = NullTextureView(desc.width, desc.height, desc.depthFormat, true);
+    }
+
+    /// Layer-target mode. m_desc is kept consistent with the volume (one colour
+    /// attachment of the volume's format, no depth) so every accessor below
+    /// answers the same way it does for a 2D target of that size.
+    NullRenderTarget(NullTexture3DView* volume, std::uint32_t layer)
+        : m_layer_volume(volume), m_layer(layer)
+    {
+        m_desc.width = volume->width();
+        m_desc.height = volume->height();
+        m_desc.colorAttachmentCount = 1;
+        m_desc.colorFormats[0] = volume->format();
+        m_desc.depthAttachment = false;
+    }
+
+    std::uint32_t width() const noexcept override { return m_desc.width; }
+    std::uint32_t height() const noexcept override { return m_desc.height; }
+    std::uint32_t colorAttachmentCount() const noexcept override
+    {
+        return m_desc.colorAttachmentCount;
+    }
+    bool hasColorAttachment() const noexcept override { return m_desc.colorAttachmentCount > 0; }
+    bool hasDepthAttachment() const noexcept override { return m_desc.depthAttachment; }
+
+    const RenderTargetDesc& desc() const noexcept { return m_desc; }
+    bool released = false;
+
+    /// Non-null only in layer-target mode: the volume this target writes into,
+    /// and which of its layers.
+    NullTexture3DView* layerVolume() const noexcept { return m_layer_volume; }
+    std::uint32_t layer() const noexcept { return m_layer; }
+    bool isLayerTarget() const noexcept { return m_layer_volume != nullptr; }
+
+    std::vector<NullTextureView> colorViews;
+    NullTextureView depthView;
+
+private:
+    RenderTargetDesc m_desc;
+    NullTexture3DView* m_layer_volume = nullptr;
+    std::uint32_t m_layer = 0;
 };
 
 /// GPU mesh handle of the null backend: validates and records upload/draw
@@ -188,6 +214,7 @@ public:
                        std::size_t sizeBytes) override;
     bool readTexture3D(const TextureView* view, std::uint32_t layer, void* data,
                        std::size_t sizeBytes) override;
+    RenderTarget* createVolumeLayerTarget(TextureView* volume, std::uint32_t layer) override;
     void copyDepthAttachment(RenderTarget* source, RenderTarget* destination) override;
 
     void queueReadback(std::uint32_t x, std::uint32_t y) override;

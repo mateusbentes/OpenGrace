@@ -154,6 +154,28 @@ void NullRenderBackend::clear()
         ++m_violations;
         return;
     }
+    // A pass on a volume layer writes that layer: the clear colour is modelled
+    // into it, the same way the readback path models the clear colour into the
+    // centre pixel. Without this the null backend could not tell a pass that
+    // wrote its layer from one that wrote nothing, and the ownership rule —
+    // releasing the target leaves the volume intact — would be untestable here.
+    NullRenderTarget* bound = findTarget(m_bound_target);
+    if (bound != nullptr && bound->isLayerTarget())
+    {
+        NullTexture3DView* volume = bound->layerVolume();
+        std::vector<std::byte>& slice = volume->slice(bound->layer());
+        const std::size_t texel = bytesPerPixel(volume->format());
+        for (std::size_t i = 0; i + texel <= slice.size(); i += texel)
+        {
+            slice[i] = static_cast<std::byte>(m_clear_color.r);
+            if (texel > 1u)
+                slice[i + 1u] = static_cast<std::byte>(m_clear_color.g);
+            if (texel > 2u)
+                slice[i + 2u] = static_cast<std::byte>(m_clear_color.b);
+            if (texel > 3u)
+                slice[i + 3u] = static_cast<std::byte>(m_clear_color.a);
+        }
+    }
 }
 
 void NullRenderBackend::shutdown()
@@ -488,6 +510,31 @@ bool NullRenderBackend::readTexture3D(const TextureView* view, std::uint32_t lay
     const std::vector<std::byte>& slice = volume->slice(layer);
     std::memcpy(data, slice.data(), sizeBytes);
     return true;
+}
+
+RenderTarget* NullRenderBackend::createVolumeLayerTarget(TextureView* volume, std::uint32_t layer)
+{
+    char buffer[96];
+    std::snprintf(buffer, sizeof(buffer), "createVolumeLayerTarget(layer=%u)",
+                  static_cast<unsigned int>(layer));
+    record(std::string(buffer));
+    if (m_shutdown)
+    {
+        ++m_violations;
+        throw std::logic_error("NullRenderBackend::createVolumeLayerTarget: backend is shut down");
+    }
+    NullTexture3DView* known = findVolume(volume);
+    if (known == nullptr)
+        throw std::invalid_argument(
+            "createVolumeLayerTarget: view is not a 3D texture of this backend");
+    VolumeLayerDesc desc;
+    desc.volume = known->desc();
+    desc.layer = layer;
+    validateVolumeLayerDesc(desc);  // throws, the same rule the OpenGL backend applies
+    auto target = std::make_unique<NullRenderTarget>(known, layer);
+    NullRenderTarget* raw = target.get();
+    m_targets.push_back(std::move(target));
+    return raw;
 }
 
 void NullRenderBackend::queueReadback(std::uint32_t x, std::uint32_t y)

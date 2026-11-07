@@ -27,4 +27,12 @@ void validateTexture3DDesc(const Texture3DDesc& desc)
             "volume; the driver rejects it with GL_INVALID_OPERATION");
 }
 
+void validateVolumeLayerDesc(const VolumeLayerDesc& desc)
+{
+    validateTexture3DDesc(desc.volume);
+    if (desc.layer >= desc.volume.depth)
+        throw std::invalid_argument(
+            "volume layer: the layer index is out of range for the volume's depth");
+}
+
 }  // namespace grace::render

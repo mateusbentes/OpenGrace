@@ -204,6 +204,26 @@ public:
     virtual bool readTexture3D(const TextureView* view, std::uint32_t layer, void* data,
                                std::size_t sizeBytes) = 0;
 
+    // -- Rendering into a volume (milestone 7, second increment) --------------
+    //
+    // A pass writes one layer of a volume. The result is a RenderTarget, so
+    // beginRenderPass, endRenderPass and releaseRenderTarget are the existing
+    // ones and no second pass protocol exists: what changes is only how the
+    // backend builds the framebuffer, attaching layer z of the volume instead
+    // of allocating a 2D texture.
+    //
+    // A layer target borrows the volume; it does not own it. Releasing the
+    // target must leave the volume and its contents intact, which is the
+    // ownership rule that makes this safe to iterate with.
+
+    /// Returns a render target that writes one layer of an existing volume.
+    /// The target's width and height are the volume's, it has exactly one
+    /// colour attachment and no depth attachment, and rendering into it changes
+    /// that layer and no other. Throws std::invalid_argument when the view is
+    /// not a volume created by this backend or the layer is out of range.
+    virtual RenderTarget* createVolumeLayerTarget(TextureView* volume,
+                                                  std::uint32_t layer) = 0;
+
     /// Copies the depth attachment of source onto destination (a generic
     /// pass primitive, milestone 6d decision 20: moves scene depth between
     /// targets, e.g. G-buffer -> HDR in the deferred path, so later passes

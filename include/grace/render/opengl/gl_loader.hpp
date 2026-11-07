@@ -67,6 +67,11 @@ using FnBlitFramebuffer = void (*)(GLint srcX0, GLint srcY0, GLint srcX1, GLint 
 using FnBindFramebuffer = void (*)(GLenum target, GLuint framebuffer);
 using FnFramebufferTexture2D = void (*)(GLenum target, GLenum attachment, GLenum textarget,
                                         GLuint texture, GLint level);
+// Attaches one layer of a 3D texture (milestone 7, second increment): the entry
+// point that lets a pass write a single slice of a volume. Resolved here for the
+// same reason glGetTexImage is: the system gl.h declares no 3.x FBO entry.
+using FnFramebufferTextureLayer = void (*)(GLenum target, GLenum attachment, GLuint texture,
+                                           GLint level, GLint layer);
 using FnCheckFramebufferStatus = GLenum (*)(GLenum target);
 using FnDeleteFramebuffers = void (*)(GLsizei n, const GLuint* framebuffers);
 using FnGenTextures = void (*)(GLsizei n, GLuint* textures);
@@ -160,6 +165,7 @@ public:
     FnBindFramebuffer glBindFramebuffer = nullptr;
     FnBlitFramebuffer glBlitFramebuffer = nullptr;
     FnFramebufferTexture2D glFramebufferTexture2D = nullptr;
+    FnFramebufferTextureLayer glFramebufferTextureLayer = nullptr;
     FnCheckFramebufferStatus glCheckFramebufferStatus = nullptr;
     FnDeleteFramebuffers glDeleteFramebuffers = nullptr;
     FnGenTextures glGenTextures = nullptr;

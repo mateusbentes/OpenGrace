@@ -120,4 +120,24 @@ struct Texture3DDesc
 /// front with a specific message instead of failing later and less clearly.
 void validateTexture3DDesc(const Texture3DDesc& desc);
 
+/// One layer of a volume, as a render target the pass path already understands
+/// (milestone 7, second increment). A backend attaches this layer instead of
+/// allocating a 2D texture, so no second pass protocol is needed: the existing
+/// beginRenderPass / endRenderPass / releaseRenderTarget apply unchanged.
+///
+/// Deliberately NOT a depth field on RenderTargetDesc. A 2D target owns its
+/// attachments and is sized by them; a volume layer borrows a resource that
+/// outlives the pass. Folding the second into the first would put a layer count
+/// that is always 1 on every 2D target, and would leave the ownership rule —
+/// releasing the target must not destroy the volume — with nowhere to live.
+struct VolumeLayerDesc
+{
+    Texture3DDesc volume;
+    std::uint32_t layer = 0;  ///< below volume.depth
+};
+
+/// Throws std::invalid_argument when the volume desc is invalid (the same
+/// rejection validateTexture3DDesc makes) or the layer is out of range.
+void validateVolumeLayerDesc(const VolumeLayerDesc& desc);
+
 }  // namespace grace::render

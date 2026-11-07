@@ -827,6 +827,33 @@ bool OpenGLRenderBackend::readTexture3D(const TextureView* view, std::uint32_t l
     return true;
 }
 
+RenderTarget* OpenGLRenderBackend::createVolumeLayerTarget(TextureView* volume,
+                                                          std::uint32_t layer)
+{
+    Impl& impl = *m_impl;
+    if (!impl.ready())
+    {
+        ++impl.violations;
+        throw std::logic_error("OpenGLRenderBackend::createVolumeLayerTarget: not initialised");
+    }
+    opengl::GlTexture3DView* known = findGlVolume(impl.volumes, volume);
+    if (known == nullptr)
+        throw std::invalid_argument(
+            "createVolumeLayerTarget: view is not a 3D texture of this backend");
+    VolumeLayerDesc desc;
+    desc.volume.width = known->width();
+    desc.volume.height = known->height();
+    desc.volume.depth = known->depth();
+    desc.volume.format = known->format();
+    desc.layer = layer;
+    // Throws on a bad layer, the same rule the null backend applies.
+    auto target = std::make_unique<opengl::GlRenderTarget>(impl.gl, known->textureId(), desc);
+    RenderTarget* raw = target.get();
+    impl.targets.push_back(std::move(target));
+    impl.drainGlErrors("createVolumeLayerTarget");
+    return raw;
+}
+
 void OpenGLRenderBackend::ensureLightingProgram()
 {
     Impl& impl = *m_impl;

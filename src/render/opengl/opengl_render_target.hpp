@@ -47,6 +47,12 @@ class GlRenderTarget final : public RenderTarget
 {
 public:
     GlRenderTarget(GlLoader& gl, const RenderTargetDesc& desc);
+    /// Layer-target mode (milestone 7, second increment): an FBO whose single
+    /// colour attachment is one layer of an existing 3D texture, attached with
+    /// glFramebufferTextureLayer. The target borrows the texture and never
+    /// deletes it, so releasing the target leaves the volume intact. Throws
+    /// std::runtime_error when the FBO is incomplete, like the 2D constructor.
+    GlRenderTarget(GlLoader& gl, GLuint volumeTexture, const VolumeLayerDesc& desc);
     ~GlRenderTarget() override { destroyGlObjects(); }
 
     GlRenderTarget(const GlRenderTarget&) = delete;
@@ -72,6 +78,9 @@ public:
     }
 
     bool released = false;
+    /// True in layer-target mode: the colour attachment is a borrowed volume
+    /// layer, so destroyGlObjects() must not delete that texture.
+    bool borrows_volume = false;
 
     /// Deletes the GL objects but keeps the handle object alive (the backend
     /// registry still owns it), so use-after-release is detectable.

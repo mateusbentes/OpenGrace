@@ -151,6 +151,23 @@ int main()
         "bindTexture(unit=0,depth=0)",      // a volume is not a 2D attachment
         "readTexture3D(layer=3,bytes=64)",  // layer out of range
         "readTexture3D(layer=0,bytes=63)",  // byte count does not match
+        // Rendering into a volume layer (milestone 7, second increment):
+        // create the volume, seed three layers, then a pass on layer 1, three
+        // reads, a read after release, and two rejected layer targets.
+        "createTexture3D(4x4x3)",
+        "fillTexture3D(layer=0,bytes=64)", "fillTexture3D(layer=1,bytes=64)",
+        "fillTexture3D(layer=2,bytes=64)",
+        "setClearColor(64,128,192,255)",
+        "createVolumeLayerTarget(layer=1)",
+        "beginRenderPass(4x4)", "clear(64,128,192,255)", "endRenderPass",
+        "readTexture3D(layer=0,bytes=64)", "readTexture3D(layer=1,bytes=64)",
+        "readTexture3D(layer=2,bytes=64)", "readTexture3D(layer=1,bytes=64)",
+        "releaseRenderTarget", "readTexture3D(layer=1,bytes=64)",
+        "createRenderTarget(8x8,color=1,depth=1)", "renderTargetTexture",
+        "createVolumeLayerTarget(layer=0)",  // a 2D attachment is not a volume
+        "releaseRenderTarget",
+        "createVolumeLayerTarget(layer=3)",  // layer out of range
+        "setClearColor(1,2,3,4)",            // restored: the check leaves no trace
         "beginRenderPass(64x64)", "clear(1,2,3,4)", "draw", "use", "drawIndexed",
         "renderTargetTexture", "endRenderPass", "renderTargetTexture", "releaseRenderTarget",
         "beginRenderPass(unknown)", "renderTargetTexture", "beginRenderPass(unknown)",

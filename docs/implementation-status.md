@@ -33,7 +33,7 @@ The `.docx` files in this directory are generated from the `.md` sources with
 | 6f | Volumetric lights as an analytic region — a sphere around a point light, a cone around a spot light, through a `volumeDensity` property defaulting to off (decision 25) | Done |
 | 6g | SSAO with selective temporal filtering (SSAO-STF). **Deferred, not started** — needs motion-vector reprojection, which needs motion this tree does not have (decision 18) | Planned |
 | 6 | Post-processing: HDR, bloom, filmic tonemap (6a), ambient term (6b), SSAO (6c), DOF + morphological AA (6d) — all documented in section 3.2 except SSAO-STF temporal filtering, which remains deferred to its own increment | Done (SSAO-STF deferred) |
-| 7 | Global illumination by light volume propagation. First increment done: the 3D texture exists in the contract and in both backends, proved by a write/read round trip. **Still blocked:** nothing renders into the volume, nothing feeds it from the scene, and no propagation exists (decision 30) | In progress |
+| 7 | Global illumination by light volume propagation. Two increments done: the 3D texture exists in the contract and in both backends, and a pass renders into one layer of a volume without touching the others. **Still blocked:** nothing feeds the volume from the scene, and no propagation exists (decision 30) | In progress |
 | 8 | Physics contract and the first backend | Planned |
 | 9 | Script host: AngelScript integration and type registration | Planned |
 | 10 | Visual scripting: block registry and graph evaluation | Planned |
@@ -108,6 +108,7 @@ All results below are real runs, on the tree at the stated commit.
 | 2026-11-07 | same, container specification | Index blocked and dictionary declined, both measured before being written. The index as one deflated stream against blocks of 256 records: a lookup is 0.4 ms at 10,000 entries and 32.9 ms at 400,000, against 12 us at every size in blocks; the block table is 12 bytes per block, a flat 0.5% of the index at every size measured, 18,756 bytes at 400,000 entries against the 3,513,508 it replaces. Header 28 -> 32 bytes for the block count. The dictionary's first measurement is retracted: its payloads differed in 1.0% of their bytes because the generator never read its seed, so the dictionary contained the payload it was measured against. Re-measured on payloads whose geometry differs, the dictionary makes them 1.8-1.9% larger, gains 0.0% over the filter, and gains 3.2% on an LOD chain, capped at 4.0% by the 32768-byte window. Also corrects a contradiction in section 4.6, whose prose described record transposition (43.1%) where its table measures byte transposition (34.9%). Tools: tools/measure-owd.py, tools/measure-dict.py |
 | 2026-11-07 | same, container specification | Payload blocked so requirement 2 holds in the middle of an entry, not only at its start. One deflate stream cannot be entered part way, so serving a 64 KB read in the middle of an 8.0 MiB vertex buffer inflates 8,400,000 bytes and takes 6.5 ms; with the payload blocked it is 131,072 bytes and 231 us, 64 and 28 times less, and on a 16 MB texture 14.4 ms against 223 us. The payload now uses the index's shape: a payload block table and independently deflated blocks of 256 KiB, reduced to a multiple of the element size. Filtering per block costs +21.55% on the vertex buffer and +91.60% on an index buffer, which is 2.6% of the payload in bytes. No record field was added: block size and count are derived. Sections 4.6.1 and 4.8. Measured by `tools/measure-stream.py` |
 | 2026-11-07 | same, both documents under the rules | OpenGL off: 14/14 Debug; OpenGL on: 27/27 Debug and Release; -L opengl 13/13; docs_structure 16 checks, 0 failures in both trees; zero warnings under -Werror |
+| 2026-11-07 | same, milestone 7 second increment | A pass renders into one layer of a volume, and only that layer. OpenGL off: 15/15 Debug; OpenGL on: 28/28 Debug and Release; -L opengl 13/13; docs_structure 17 checks, 0 failures; texture3d 23 -> 41 checks with no GL context; opengl_render 157 -> 193 checks; zero warnings under -Werror. Delta measured suite by suite against f5e84a8: +54 in total, +18 in texture3d and +36 in opengl_render, and no other suite changed. Measured on the driver before the code was written: attaching layer 1 of a 4x4x3 volume is GL_FRAMEBUFFER_COMPLETE for Rgba8, Rgba16F and R8 with no GL error on create, attach, clear or read; clearing through the target changes layer 1 and leaves layers 0 and 2 untouched |
 | 2026-11-07 | same, milestone 7 first increment | 3D texture in the contract, both backends and the null backend. OpenGL off: 15/15 Debug; OpenGL on: 28/28 Debug and Release; -L opengl 13/13; docs_structure 17 checks, 0 failures; texture3d 23 checks, 0 failures with no GL context; opengl_render 125 -> 157 checks; zero warnings under -Werror. Measured on the driver before the code was written: a Depth24Stencil8 volume is refused by glTexImage3D with GL_INVALID_OPERATION, and an R8 3x3 slice round-trips with row alignment 1 and not with 4 |
 
 ### Defects found by the tests, and fixed
@@ -811,6 +812,31 @@ grep -rn 'GLuint\|GLenum\|SDL_\|Window' include/grace/render/render_backend.hpp 
     code path inside `test_opengl_render` (157 checks). A volume is still a
     resource and not a pass target: nothing renders into one yet, which is the
     second increment.
+
+    The second increment closes that last sentence. A pass now renders into one
+    layer of a volume: `createVolumeLayerTarget(TextureView*, layer)` returns a
+    RenderTarget whose single colour attachment is that layer, attached with
+    `glFramebufferTextureLayer`, so `beginRenderPass`, `endRenderPass` and
+    `releaseRenderTarget` are the existing ones and no second pass protocol
+    exists. A layer target borrows the volume and never deletes it, which is
+    what makes a per-layer loop safe: releasing the target leaves the volume
+    and its contents intact, and both backends are checked for that.
+
+    Measured on this driver before the code was written, because the previous
+    increment shipped a silent defect by assuming exactly this: attaching layer
+    1 of a 4x4x3 volume is `GL_FRAMEBUFFER_COMPLETE` for Rgba8, Rgba16F and R8,
+    with no GL error on create, attach, clear or read; clearing through the
+    target changes layer 1 and leaves layers 0 and 2 untouched, which is the
+    property the increment is about.
+
+    The proof is on both sides. With no GL context at all, `test_texture3d`
+    runs the same shared function, 23 -> 41 checks. With OpenGL, both backends
+    run it inside `test_opengl_render`, 157 -> 193 checks: 36 more, which is 18
+    per backend (15 checks plus one inside a three-layer loop). No existing
+    count decreased. `gl_loader.cpp` loads 64 -> 65 functions, measured with
+    the same `grep -c 'GRACE_GL_LOAD('` the earlier entry names: the previous
+    increment took it from 59 to 64, and this one adds
+    `glFramebufferTextureLayer`.
 
 ## Verification commands
 

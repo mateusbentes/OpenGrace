@@ -151,6 +151,119 @@ void runTexture3DChecks(Backend& backend)
     GRACE_CHECK(threw);
 }
 
+/// Rendering into a volume (milestone 7, second increment): a pass writes one
+/// layer and changes no other, and releasing the target leaves the volume and
+/// its contents intact. Split out like runTexture3DChecks so the null backend
+/// proves it with no GL context at all, and so both backends run one function.
+template <typename Backend>
+void runVolumeLayerChecks(Backend& backend)
+{
+    grace::render::Texture3DDesc volume;
+    volume.width = 4;
+    volume.height = 4;
+    volume.depth = 3;
+    volume.format = grace::render::PixelFormat::Rgba8;
+    grace::render::TextureView* view = backend.createTexture3D(volume);
+    const std::size_t sliceBytes =
+        static_cast<std::size_t>(volume.width) * volume.height *
+        grace::render::bytesPerPixel(volume.format);
+
+    // Seed every layer with a distinct known pattern, so a pass that wrote the
+    // wrong layer is caught and not merely a pass that wrote nothing.
+    for (std::uint32_t layer = 0; layer < volume.depth; ++layer)
+    {
+        std::vector<std::uint8_t> seed(sliceBytes);
+        for (std::size_t i = 0; i < sliceBytes; ++i)
+            seed[i] = static_cast<std::uint8_t>((layer + 1u) * 0x11u + static_cast<unsigned>(i % 7u));
+        backend.fillTexture3D(view, layer, seed.data(), seed.size());
+    }
+
+    // A pass on layer 1 writes layer 1 and no other layer. The clear colour is
+    // restored at the end: a check must leave the backend as it found it, and a
+    // later check in this same run depends on the colour it was given.
+    const grace::render::ClearColor previous_color = backend.clearColor();
+    const grace::render::ClearColor pass_color{64, 128, 192, 255};
+    backend.setClearColor(pass_color);
+    grace::render::RenderTarget* layerTarget = backend.createVolumeLayerTarget(view, 1);
+    GRACE_CHECK(layerTarget != nullptr);
+    GRACE_CHECK_EQ(layerTarget->width(), volume.width);
+    GRACE_CHECK_EQ(layerTarget->height(), volume.height);
+    GRACE_CHECK_EQ(layerTarget->colorAttachmentCount(), 1u);
+    GRACE_CHECK(layerTarget->hasColorAttachment());
+    GRACE_CHECK(!layerTarget->hasDepthAttachment());
+
+    backend.beginRenderPass(layerTarget);
+    backend.clear();
+    backend.endRenderPass();
+
+    // Read all three layers back and check which ones changed.
+    bool layer1_written = false;
+    bool layer0_intact = true;
+    bool layer2_intact = true;
+    for (std::uint32_t layer = 0; layer < volume.depth; ++layer)
+    {
+        std::vector<std::uint8_t> seed(sliceBytes);
+        for (std::size_t i = 0; i < sliceBytes; ++i)
+            seed[i] = static_cast<std::uint8_t>((layer + 1u) * 0x11u + static_cast<unsigned>(i % 7u));
+        std::vector<std::uint8_t> read(sliceBytes, 0);
+        GRACE_CHECK(backend.readTexture3D(view, layer, read.data(), read.size()));
+        if (layer == 1u)
+            layer1_written = read != seed;
+        else if (layer == 0u)
+            layer0_intact = read == seed;
+        else
+            layer2_intact = read == seed;
+    }
+    GRACE_CHECK(layer1_written);
+    GRACE_CHECK(layer0_intact);
+    GRACE_CHECK(layer2_intact);
+
+    // The ownership rule: releasing the target leaves the volume and the values
+    // the pass wrote into it intact. This is what makes a per-layer loop safe.
+    std::vector<std::uint8_t> afterRelease(sliceBytes, 0);
+    GRACE_CHECK(backend.readTexture3D(view, 1, afterRelease.data(), afterRelease.size()));
+    bool still_written = false;
+    for (std::size_t i = 0; i < sliceBytes; ++i)
+        if (afterRelease[i] != 0)
+            still_written = true;
+    GRACE_CHECK(still_written);
+    backend.releaseRenderTarget(layerTarget);
+    std::vector<std::uint8_t> afterFree(sliceBytes, 0);
+    GRACE_CHECK(backend.readTexture3D(view, 1, afterFree.data(), afterFree.size()));
+    GRACE_CHECK(afterFree == afterRelease);
+
+    // Rejections: a view that is not a volume, and a layer out of range.
+    grace::render::RenderTargetDesc flat;
+    flat.width = 8;
+    flat.height = 8;
+    grace::render::RenderTarget* flatTarget = backend.createRenderTarget(flat);
+    grace::render::TextureView* flatView = backend.renderTargetTexture(flatTarget);
+    bool threw = false;
+    try
+    {
+        static_cast<void>(backend.createVolumeLayerTarget(flatView, 0));
+    }
+    catch (const std::invalid_argument&)
+    {
+        threw = true;
+    }
+    GRACE_CHECK(threw);
+    backend.releaseRenderTarget(flatTarget);
+
+    threw = false;
+    try
+    {
+        static_cast<void>(backend.createVolumeLayerTarget(view, volume.depth));
+    }
+    catch (const std::invalid_argument&)
+    {
+        threw = true;
+    }
+    GRACE_CHECK(threw);
+
+    backend.setClearColor(previous_color);
+}
+
 /// Shared RenderBackend contract checks, run unchanged against every backend
 /// implementation (null, OpenGL). Covers the full contract: clear lifecycle,
 /// mesh/shader/draw, readback with its documented per-backend value, and
@@ -346,6 +459,7 @@ void runContractChecks(Backend& backend, grace::render::ClearColor color,
     }
 
     runTexture3DChecks(backend);
+    runVolumeLayerChecks(backend);
 
     // Render-pass composition: begin, clear, draw into the target, end.
     const std::uint64_t baseViolations = backend.violationCount();

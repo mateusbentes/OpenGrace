@@ -203,5 +203,12 @@ int main()
     testUnalignedRowWidth();
     testRejections();
     testVolumeSurvivesARenderPass();
+    // The same function the OpenGL half runs inside test_opengl_render, on the
+    // null backend: the volume-layer capability is proved here with no GL
+    // context at all, so a machine without OpenGL still checks it.
+    {
+        NullRenderBackend backend(32, 32);
+        grace::test::runVolumeLayerChecks(backend);
+    }
     return grace::test::summary("texture3d");
 }
