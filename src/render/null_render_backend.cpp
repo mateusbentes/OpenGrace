@@ -184,6 +184,7 @@ std::unique_ptr<ShaderProgram> NullRenderBackend::createShaderProgram(ShaderProg
     case ShaderProgramId::PostSSAO: name = "PostSSAO"; break;
     case ShaderProgramId::PostMLAA: name = "PostMLAA"; break;
     case ShaderProgramId::PostDOF: name = "PostDOF"; break;
+    case ShaderProgramId::PostBlit: name = "PostBlit"; break;
     }
     record(std::string("createShaderProgram(") + name + ")");
     if (m_shutdown)

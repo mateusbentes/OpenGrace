@@ -107,18 +107,36 @@ int main()
         const std::vector<std::uint64_t> expected_indices{0, 1, 2, 3, 4, 5};
         GRACE_CHECK(step_indices == expected_indices);
 
-        // Each frame is beginRenderPass(default) + clear + endRenderPass, so
-        // frame f's steps run while the log has 1 + 3*f entries.
-        const std::vector<std::size_t> expected_events{1, 1, 5, 5, 9, 9};
+        // With the post chain ON by default (6e, decision 23) each frame is
+        // setCamera + HDR pass + the full chain + present pass (114 entries
+        // per frame after the initial setClearColor), so frame f's steps run
+        // while the log has 1 + 114*f entries.
+        const std::vector<std::size_t> expected_events{1, 1, 115, 115, 211, 211};
         GRACE_CHECK(events_at_step == expected_events);
 
-        const std::vector<std::string> expected_log{
-            "setClearColor(1,2,3,4)",
-            "setCamera", "beginRenderPass(default)", "clear(1,2,3,4)", "endRenderPass",
-            "setCamera", "beginRenderPass(default)", "clear(1,2,3,4)", "endRenderPass",
-            "setCamera", "beginRenderPass(default)", "clear(1,2,3,4)", "endRenderPass",
-            "shutdown"};
-        GRACE_CHECK(backend.events() == expected_log);
+        // Structural anchors of the per-frame shape: one setCamera per frame,
+        // two clears per frame (HDR target + display target), exactly one
+        // pass on the default framebuffer per frame (the present pass), and
+        // shutdown last. The exact sequence is pinned by test_renderer's
+        // forward-frame literal; the block below pins full-run determinism.
+        const std::vector<std::string>& log = backend.events();
+        GRACE_CHECK(!log.empty() && log.front() == "setClearColor(1,2,3,4)");
+        GRACE_CHECK(!log.empty() && log.back() == "shutdown");
+        int setCameraCount = 0;
+        int clearCount = 0;
+        int defaultPasses = 0;
+        for (const std::string& event : log)
+        {
+            if (event == "setCamera")
+                ++setCameraCount;
+            if (event == "clear(1,2,3,4)")
+                ++clearCount;
+            if (event == "beginRenderPass(default)")
+                ++defaultPasses;
+        }
+        GRACE_CHECK_EQ(setCameraCount, 3);
+        GRACE_CHECK_EQ(clearCount, 6);
+        GRACE_CHECK_EQ(defaultPasses, 3);
         GRACE_CHECK_EQ(backend.violationCount(), 0u);
 
         // A second run or shutdown is rejected.

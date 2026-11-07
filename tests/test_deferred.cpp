@@ -88,6 +88,23 @@ bool throwsInvalid(F&& fn)
 
 }  // namespace
 
+// Expected CHAIN output for a linear input L (exposure 1, no bloom):
+// sRGB(aces(L)), 8-bit — the equations from decision 15/22. With the chain on
+// by default (6e, decision 23) the renderer-driven checks below go through it.
+std::uint8_t expectedTonemap(float linear)
+{
+    const float x = linear;
+    float aces = (x * (2.51f * x + 0.03f)) / (x * (2.43f * x + 0.59f) + 0.14f);
+    if (aces < 0.0f)
+        aces = 0.0f;
+    if (aces > 1.0f)
+        aces = 1.0f;
+    const float srgb = aces <= 0.0031308f ? aces * 12.92f
+                                          : 1.055f * std::pow(aces, 1.0f / 2.4f) - 0.055f;
+    const float clamped = srgb < 0.0f ? 0.0f : (srgb > 1.0f ? 1.0f : srgb);
+    return static_cast<std::uint8_t>(clamped * 255.0f + 0.5f);
+}
+
 int main()
 {
     OpenGLBackendConfig config;
@@ -260,10 +277,10 @@ int main()
             const float dist = 1.0f + 0.2f * static_cast<float>(i);
             expected += pointAttenuation(std::get<PointLight>(six[static_cast<std::size_t>(i)]), dist) * 0.2f;
         }
-        const ClearColor expectedColor = ClearColor{
-            static_cast<std::uint8_t>(std::fmin(expected, 1.0f) * 255.0f + 0.5f),
-            static_cast<std::uint8_t>(std::fmin(expected, 1.0f) * 255.0f + 0.5f),
-            static_cast<std::uint8_t>(std::fmin(expected, 1.0f) * 255.0f + 0.5f), 255};
+        // 6e: the chain is the default, so the expectation goes through
+        // sRGB(aces(x)) instead of the legacy linear->8-bit multiply.
+        const std::uint8_t expected8 = expectedTonemap(std::fmin(expected, 1.0f));
+        const ClearColor expectedColor = ClearColor{expected8, expected8, expected8, 255};
         std::printf("deferred 6 lights: centre pixel=%d,%d,%d,%d (expected ~%d)\n",
                     static_cast<int>(p.r), static_cast<int>(p.g), static_cast<int>(p.b),
                     static_cast<int>(p.a), static_cast<int>(expectedColor.r));
@@ -312,11 +329,11 @@ int main()
                     static_cast<int>(defShadow.r), static_cast<int>(defShadow.g),
                     static_cast<int>(defShadow.b), static_cast<int>(defShadow.a),
                     std::abs(static_cast<int>(fwdShadow.r) - static_cast<int>(defShadow.r)));
-        // Defect fix (6b): occluded surfaces now read the ambient contribution
-        // (ambient 0.2 linear * albedo 1 -> 51 in legacy 8-bit), not black, in
-        // BOTH paths — before 6b both read 0,0,0,255; at the 6b default 0.05
-        // they read 13. The 51 is the decision-20 default (0.2), not a re-baseline.
-        const ClearColor ambientPixel{51, 51, 51, 255};
+        // Defect fix (6b): occluded surfaces read the ambient contribution, not
+        // black, in BOTH paths. Legacy 8-bit read 51 (ambient 0.2, decision 20);
+        // with the chain on by default (6e) the same 0.2 linear goes through
+        // sRGB(aces(0.2)) -> 149.
+        const ClearColor ambientPixel{149, 149, 149, 255};
         GRACE_CHECK(withinTol(fwdShadow, ambientPixel, 2));
         GRACE_CHECK(withinTol(defShadow, ambientPixel, 2));
     }

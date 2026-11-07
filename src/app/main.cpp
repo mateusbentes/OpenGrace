@@ -20,7 +20,7 @@ namespace {
 struct Options
 {
     bool headless = false;
-    bool post = false;
+    bool post = true;  // 6e: the post chain is the default (decision 23); --no-post opts out
     bool dof = false;   ///< enable the 6d depth-of-field post pass (with --post)
     bool mlaa = false;  ///< enable the 6d morphological AA post pass (with --post)
     std::string path = "forward";
@@ -47,6 +47,10 @@ void printUsage(std::FILE* out)
                  "Backend selection:\n"
                  "  (default)           OpenGL backend, when built with GRACE_ENABLE_OPENGL=ON.\n"
                  "  --headless          Null (headless) render backend.\n"
+                 "  --post              Post chain (HDR, bloom, tonemap, SSAO, MLAA) — DEFAULT.\n"
+                 "  --no-post           Legacy compatibility path: linear -> 8-bit, no chain.\n"
+                 "  --dof               With the chain: depth of field (off by default).\n"
+                 "  --mlaa              With the chain: morphological AA (on by default).\n"
                  "\n"
                  "Options:\n"
                  "  --frames <n>          Number of frames to run (default: 10).\n"
@@ -103,7 +107,11 @@ int main(int argc, char** argv)
         }
         else if (arg == "--post")
         {
-            options.post = true;
+            options.post = true;  // already the default; accepted for clarity
+        }
+        else if (arg == "--no-post")
+        {
+            options.post = false;  // legacy compatibility path (linear -> 8-bit)
         }
         else if (arg == "--dof")
         {
@@ -209,7 +217,7 @@ int main(int argc, char** argv)
     else
         return usageError("--path expects 'forward' or 'deferred'");
     rendererConfig.clear_color = kClearColor;
-    rendererConfig.post.enabled = options.post;
+    rendererConfig.post.enabled = options.post;  // default on (6e, decision 23)
     rendererConfig.post.dof.enabled = options.dof;   // 6d: off unless --dof
     rendererConfig.post.mlaa.enabled = options.mlaa; // 6d: off unless --mlaa
 

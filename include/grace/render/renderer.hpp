@@ -45,14 +45,16 @@ struct SSAOConfig
     void validate() const;
 };
 
-/// Morphological anti-aliasing configuration (milestone 6d). A simple
-/// morphological pass on the linear HDR — NOT SMAA (no pattern search, no
-/// reprojection). Edges: Rec709 luminance contrast (linear) or NDC depth
-/// contrast. Defaults leave every pixel unchanged when off.
+/// Morphological anti-aliasing configuration (milestone 6d; runs on the
+/// display-encoded image since 6e — the chain ends in a sampleable offscreen
+/// 8-bit target, decision 22 update). A simple morphological pass — NOT SMAA
+/// (no pattern search, no reprojection). Edges: Rec709 luminance contrast of
+/// the display codes, or NDC depth contrast. Default ON with the chain
+/// (decision 23): view-independent, part of the documented chain.
 struct MlaaConfig
 {
-    bool enabled = false;              ///< off by default (6d A4)
-    float luminanceThreshold = 0.08f;  ///< linear luminance delta marking an edge
+    bool enabled = true;               ///< on with the chain (decision 23, 6e)
+    float luminanceThreshold = 0.08f;  ///< display-code luminance delta marking an edge
     float depthThreshold = 0.02f;      ///< NDC depth delta marking an edge
 
     void validate() const;
@@ -62,10 +64,12 @@ struct MlaaConfig
 /// coc = clamp(aperture * |d - focusDistance| / d, 0, maxCocPixels), d the
 /// view distance from the scene depth; focusDistance/aperture in world
 /// units, maxCocPixels in pixels. Blur: 16-tap bokeh disc, single gather
-/// pass in linear HDR. Off by default.
+/// pass in linear HDR. Off by default: the focus distance is scene content,
+/// not a pipeline default (decision 23, 6e) — a default focus would blur
+/// every scene unless it happened to match.
 struct DofConfig
 {
-    bool enabled = false;          ///< off by default (6d A4)
+    bool enabled = false;          ///< off by default (decision 23: needs scene focus)
     float focusDistance = 1.0f;    ///< world units: the sharp plane
     float aperture = 0.5f;         ///< world units: CoC scale
     float maxCocPixels = 12.0f;    ///< CoC clamp, pixels
@@ -75,7 +79,11 @@ struct DofConfig
 
 struct PostConfig
 {
-    bool enabled = false;             ///< post-processing off by default
+    /// Post-processing ON by default (milestone 6e, decision 23 — the flip
+    /// decision 15 committed to once the techniques landed). The legacy
+    /// linear->8-bit path survives as an explicit opt-out (compatibility
+    /// path, e.g. CLI --no-post), not as the default.
+    bool enabled = true;
     float exposure = 1.0f;            ///< tonemap exposure, linear multiplier
     float bloomThreshold = 1.0f;      ///< linear HDR threshold for the bright pass
     std::uint32_t bloomLevels = 4;    ///< downsample chain depth (half-res each)
@@ -108,7 +116,7 @@ struct RendererConfig
     /// corner by 50 (149->99), while occluded surfaces still read 51/255
     /// legacy — shadows stay readable.
     float ambient = 0.2f;
-    PostConfig post;                        ///< post-processing chain (6a, off by default)
+    PostConfig post;                        ///< post-processing chain (on by default since 6e)
 
     /// Throws std::invalid_argument on invalid values (out-of-range path,
     /// invalid camera/cascade/point-shadow config, zero deferredLightCap).
@@ -163,6 +171,11 @@ public:
     /// nullptr when the post chain is off.
     RenderTarget* hdrTarget() noexcept { return m_hdr; }
 
+    /// The offscreen display target the last present pass copied from (the
+    /// chain's final 8-bit image), for inspection only. nullptr when the post
+    /// chain is off.
+    RenderTarget* displayTarget() noexcept { return m_displaySrc; }
+
 
     std::uint64_t frameCount() const noexcept { return m_frame_count; }
 
@@ -200,9 +213,13 @@ private:
     std::unique_ptr<ShaderProgram> m_postTonemap;
     std::unique_ptr<ShaderProgram> m_postSSAO;
     RenderTarget* m_ssao = nullptr;  ///< R8 occlusion buffer, full framebuffer size
-    std::unique_ptr<ShaderProgram> m_postMLAA;  ///< 6d morphological AA pass
+    std::unique_ptr<ShaderProgram> m_postMLAA;  ///< 6d morphological AA pass (display domain since 6e)
     std::unique_ptr<ShaderProgram> m_postDOF;   ///< 6d depth-of-field pass
+    std::unique_ptr<ShaderProgram> m_postBlit;  ///< 6e present pass (display target -> default FB)
     RenderTarget* m_postA = nullptr;  ///< 6d ping-pong target: 2x Rgba16F, full framebuffer size
+    RenderTarget* m_display = nullptr;   ///< 6e offscreen 8-bit display target (Rgba8, sampleable)
+    RenderTarget* m_displayB = nullptr;  ///< 6e MLAA ping-pong on the display image (Rgba8)
+    RenderTarget* m_displaySrc = nullptr;///< 6e the target the last present pass copied from
     std::unique_ptr<ShaderProgram> m_gbuffer_program;
     std::unique_ptr<ShaderProgram> m_deferred_program;
     std::unique_ptr<GpuMesh> m_fullscreen_quad;

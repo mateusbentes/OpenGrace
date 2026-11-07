@@ -73,6 +73,14 @@ int main()
         NullRenderBackend backend(128, 96);
         Renderer renderer(backend);
         GRACE_CHECK(renderer.config().path == RenderPath::Forward);  // default
+        // 6e A3: the default configuration as VALUES (decision 23) — the chain
+        // is on by default; SSAO and MLAA on, DOF off (focus is scene content).
+        GRACE_CHECK(renderer.config().post.enabled == true);
+        GRACE_CHECK(renderer.config().post.ssao.enabled == true);
+        GRACE_CHECK(renderer.config().post.mlaa.enabled == true);
+        GRACE_CHECK(renderer.config().post.dof.enabled == false);
+        GRACE_CHECK(renderer.config().post.bloomLevels == 4u);
+        GRACE_CHECK(renderer.config().ambient == 0.2f);
         GRACE_CHECK_EQ(renderer.frameCount(), 0u);
 
         auto mesh = backend.createGpuMesh();
@@ -90,10 +98,128 @@ int main()
         renderer.endFrame();
         GRACE_CHECK_EQ(renderer.frameCount(), 1u);
 
-        // Forward frame assembly: pass on default fb, clear, submit, end pass.
+        // Forward frame assembly with the post chain ON BY DEFAULT (6e,
+        // decision 23): HDR pass (clear + submit), then the chain — SSAO,
+        // bloom levels, tonemap into the offscreen display target, MLAA on
+        // the display image, present pass onto the default framebuffer.
         const std::vector<std::string> expected{
-            "createGpuMesh", "upload", "setCamera", "beginRenderPass(default)",
-            "clear(0,0,0,255)", "submit(lights=0,sun=0,shadow=0,pointShadows=0)", "endRenderPass"};
+            "createGpuMesh",
+            "upload",
+            "setCamera",
+            "createRenderTarget(128x96,color=2,depth=1)",
+            "createRenderTarget(128x96,color=1,depth=0)",
+            "createRenderTarget(128x96,color=2,depth=0)",
+            "createRenderTarget(128x96,color=1,depth=0)",
+            "createRenderTarget(128x96,color=1,depth=0)",
+            "createRenderTarget(64x48,color=1,depth=0)",
+            "createRenderTarget(32x24,color=1,depth=0)",
+            "createRenderTarget(16x12,color=1,depth=0)",
+            "createRenderTarget(8x6,color=1,depth=0)",
+            "createShaderProgram(PostBright)",
+            "createShaderProgram(PostBlur)",
+            "createShaderProgram(PostTonemap)",
+            "createShaderProgram(PostSSAO)",
+            "createShaderProgram(PostMLAA)",
+            "createShaderProgram(PostDOF)",
+            "createShaderProgram(PostBlit)",
+            "createGpuMesh",
+            "upload",
+            "beginRenderPass(128x96)",
+            "clear(0,0,0,255)",
+            "submit(lights=0,sun=0,shadow=0,pointShadows=0)",
+            "endRenderPass",
+            "setDepthTestEnabled(0)",
+            "beginRenderPass(128x96)",
+            "renderTargetTexture",
+            "bindTexture(unit=0,depth=1)",
+            "use",
+            "setUniform(depthTex)",
+            "setUniform(outSize)",
+            "setUniform(invProj)",
+            "setUniform(proj)",
+            "setUniform(radius)",
+            "setUniform(sampleCount)",
+            "setUniform(bias)",
+            "drawIndexed",
+            "endRenderPass",
+            "beginRenderPass(64x48)",
+            "renderTargetTexture",
+            "bindTexture(unit=0,depth=0)",
+            "use",
+            "setUniform(srcTex)",
+            "setUniform(outSize)",
+            "setUniform(threshold)",
+            "drawIndexed",
+            "endRenderPass",
+            "beginRenderPass(32x24)",
+            "renderTargetTexture",
+            "bindTexture(unit=0,depth=0)",
+            "use",
+            "setUniform(srcTex)",
+            "setUniform(outSize)",
+            "setUniform(direction)",
+            "drawIndexed",
+            "endRenderPass",
+            "beginRenderPass(16x12)",
+            "renderTargetTexture",
+            "bindTexture(unit=0,depth=0)",
+            "use",
+            "setUniform(srcTex)",
+            "setUniform(outSize)",
+            "setUniform(direction)",
+            "drawIndexed",
+            "endRenderPass",
+            "beginRenderPass(8x6)",
+            "renderTargetTexture",
+            "bindTexture(unit=0,depth=0)",
+            "use",
+            "setUniform(srcTex)",
+            "setUniform(outSize)",
+            "setUniform(direction)",
+            "drawIndexed",
+            "endRenderPass",
+            "beginRenderPass(128x96)",
+            "clear(0,0,0,255)",
+            "renderTargetTexture",
+            "bindTexture(unit=0,depth=0)",
+            "renderTargetTexture",
+            "bindTexture(unit=1,depth=0)",
+            "renderTargetTexture",
+            "bindTexture(unit=2,depth=0)",
+            "renderTargetTexture",
+            "bindTexture(unit=3,depth=0)",
+            "use",
+            "setUniform(hdrTex)",
+            "setUniform(hdrAmbient)",
+            "setUniform(bloomTex)",
+            "setUniform(ssaoTex)",
+            "setUniform(useSSAO)",
+            "setUniform(outSize)",
+            "setUniform(exposure)",
+            "drawIndexed",
+            "endRenderPass",
+            "beginRenderPass(128x96)",
+            "renderTargetTexture",
+            "bindTexture(unit=0,depth=0)",
+            "renderTargetTexture",
+            "bindTexture(unit=1,depth=1)",
+            "use",
+            "setUniform(srcTex)",
+            "setUniform(depthTex)",
+            "setUniform(outSize)",
+            "setUniform(lumThreshold)",
+            "setUniform(depthThreshold)",
+            "drawIndexed",
+            "endRenderPass",
+            "beginRenderPass(default)",
+            "renderTargetTexture",
+            "bindTexture(unit=0,depth=0)",
+            "use",
+            "setUniform(srcTex)",
+            "drawIndexed",
+            "endRenderPass",
+            "setDepthTestEnabled(1)",
+            "endRenderPass"};
         GRACE_CHECK(backend.events() == expected);
         GRACE_CHECK_EQ(backend.violationCount(), 0u);
         backend.shutdown();
@@ -134,12 +260,22 @@ int main()
                 sawLightingDraw = true;
         }
         GRACE_CHECK(sawGbufferCreate);
+        bool sawDepthCopy = false;
         int defaultPasses = 0;
         for (const std::string& event : backend.events())
+        {
             if (event == "beginRenderPass(default)")
                 ++defaultPasses;
-        GRACE_CHECK_EQ(beginPasses, 1);       // G-buffer pass
-        GRACE_CHECK_EQ(defaultPasses, 1);     // lighting pass on the default fb
+            if (event == "copyDepthAttachment")
+                sawDepthCopy = true;
+        }
+        // With the chain on by default (6e): the G-buffer pass, the HDR
+        // lighting pass, the display/MLAA passes, and the depth copy from the
+        // G-buffer to the HDR target (decision 19); the default framebuffer
+        // receives exactly one pass — the present pass.
+        GRACE_CHECK(beginPasses >= 2);        // G-buffer + HDR + display passes
+        GRACE_CHECK(sawDepthCopy);            // scene depth reaches the HDR target
+        GRACE_CHECK_EQ(defaultPasses, 1);     // the present pass
         GRACE_CHECK(sawLightingDraw);
         GRACE_CHECK_EQ(backend.violationCount(), 0u);
 

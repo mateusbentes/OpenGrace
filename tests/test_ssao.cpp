@@ -126,6 +126,7 @@ RendererConfig baseConfig(RenderPath path, float ambient)
     cfg.post.enabled = true;
     cfg.post.bloomThreshold = 1000.0f;  // bloom contributes nothing in these checks
     cfg.post.ssao.enabled = true;
+    cfg.post.mlaa.enabled = false;  // isolate: AA is covered by test_dof_mlaa
     cfg.camera.far = 20.0f;
     return cfg;
 }

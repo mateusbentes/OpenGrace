@@ -32,6 +32,8 @@ enum class ShaderProgramId : std::uint8_t
     PostSSAO,           ///< post: screen-space ambient occlusion from the HDR depth
     PostMLAA,           ///< post: morphological anti-aliasing on the linear HDR (6d)
     PostDOF,            ///< post: depth of field with a bokeh disc, linear HDR (6d)
+    PostBlit,           ///< post: present pass — textured fullscreen copy of the
+                        ///< display target onto the default framebuffer (6e)
 };
 
 /// Caches uniform locations by name so repeated sets do not re-query the

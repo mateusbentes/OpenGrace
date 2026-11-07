@@ -98,7 +98,9 @@ All results below are real runs, on the tree at the stated commit.
 | 2026-11-06 | same, milestone 6c | OpenGL off: 13/13 Debug; OpenGL on: 24/24 Debug and Release; `-L opengl` 11/11; zero warnings under `-Werror`. New suite test_ssao 9/9: flat surface ssao on 232 = off 232 (no self-occlusion); corner (ground + two walls at x/y=0.35) near-corner pixel 206 (occ 0.5, 4/8 samples) vs open-area 232; path agreement on the corner forward 206 = deferred 206 (diff 0); direct-only scene (ambient 0) ssao on 206 = off 206. Post off: all legacy pixel values bit-identical (CLI 30,30,30,255 both paths, exit 0); post on: CLI 110,110,110,255 both paths, exit 0, visible and xvfb hidden |
 | 2026-11-06 | same, milestone 6d | OpenGL off: 13/13 Debug; OpenGL on: 25/25 Debug and Release; `-L opengl` 12/12; zero warnings under `-Werror`. Base repair: contract +setDepthTestEnabled/+copyDepthAttachment (null events regenerated, opengl_render 125 checks; violation count 11 -> 13 for the 2 new depth-copy misuse checks). test_ssao 11/11 incl. the new HDR-depth proof: after a full frame, HDR depth readback forward 0.9045 = deferred 0.9045 (quad depth would be 0.5); occlusion values unmoved (corner 206 vs open 232, paths 206=206) — defect fix, not a re-baseline. Ambient default 0.05 -> 0.2 (decision 21): test_deferred occluded parity 13 -> 51,51,51,255 both paths (diff 0), lit parity 140 -> 178; test_post deferred+post 210 -> 220 |
 | 2026-11-06 | same, milestone 6d | New suite test_dof_mlaa 40/40: DOF edge row (ground split at x=0, sun 0.5 + ambient 0.2, hard edge 44/220 at column 64): off and focus=1.0 identical (sharp plane at focus); focus=0.5 (CoC clamped 12 px) blends the edge 220->195 at x=64, 44->82 at x=54 (10 px out), x=50 (14 px) and x=76 untouched — the disc cutoff at the 12 px CoC, not a Gaussian decay; deferred row matches forward within 1 (195 182 163 133 133 83 45 45 201 209 215 220). MLAA edge row (ambient-only, dark 12 / bright 149): off hard step, on the two straddling pixels blend to ~103, interiors unchanged. Both techniques off: flat ambient-1.0 pixel 232 = pre-6d tree. CLI 16 visible + 8 xvfb combos (paths x post off/on x technique flags) all exit 0: 30,30,30,255 post off, 110,110,110,255 post on (centre sample is background, so technique flags do not move it) |
-| 2026-11-06 | same, milestone 6c | Check counts (all zero failures): version 4, fixed_step_clock 42, application 26, math 38, lights 36, cascades 133, paraboloid 27, trapezoid 80, shader_source_rule 1, renderer 19, opengl_context 20, opengl_render 125, mesh 13, shader 15, lighting 11, shadows 8, point_shadows 7, tsm 11, deferred 23, post 12, ssao 11, dof_mlaa 40. No existing suite decreased (opengl_render grew 115 -> 125 for the new contract checks; ssao 9 -> 11 for the depth proof). shader_source_rule: `#version` only in `src/render/opengl/shader_library.hpp`. `application.cpp` unchanged (git diff empty). R8 occlusion buffer ~1 B/pixel; HDR target 2x Rgba16F + depth (~16.6 MB colour at 1280x720) |
+| 2026-11-06 | same, milestone 6e | OpenGL off: 13/13 Debug; OpenGL on: 25/25 Debug and Release; `-L opengl` 12/12; zero warnings under `-Werror`. Structural change (decision 22 update): the chain ends in an offscreen Rgba8 display target; MLAA runs after the tonemap on the display-encoded image (edge blend of codes 12/149 now 80, was 103 in the linear domain); present = new PostBlit pass onto the default framebuffer. test_post 16/16 adds: default-config frame reports centre 110 (derived sRGB(aces(30/255))*255 = 110.51, GL 110) and the present proof (default-FB captured pixel == displayTarget() pixel). CLI: no args -> 110,110,110,255 both paths, visible and xvfb, exit 0; --no-post -> 30,30,30,255 (the two paths differ) |
+| 2026-11-06 | same, milestone 6e | Re-baseline table (old legacy -> new chain, equation round(255*sRGB(aces(x)))): test_deferred D4 parity centre 178 -> 220 (x=0.7, relative check diff 0 unchanged in form); 6-lights centre 253 -> 231 (x~0.9922); shadow parity occluded 51 -> 149,149,149,255 both paths (diff 0; x=0.2 ambient); test_renderer forward-frame event log 7 -> 117 events (full chain, regenerated literal); test_application events_at_step {1,1,5,5,9,9} -> {1,1,115,115,211,211} with structural anchors (3 setCamera, 6 clears, 3 present passes, shutdown last, violations 0). Unchanged: all direct-backend suites (lighting/shadows/point_shadows/tsm/opengl_render — they never run the chain), test_post explicit on/off values, test_ssao 206/232/232 + HDR depth 0.9045, test_dof_mlaa DOF row. Category: default change (decision 23), NOT defect fixes and NOT re-baselines-for-convenience; no tolerance was widened. 6e also fixed a real defect the flip exposed: forward + shadows + chain drew lighting into the default FB because shadow passes end there (renderer now re-opens the lighting pass after shadow passes) — before the flip this was masked because post-off targeted the default FB anyway |
+| 2026-11-06 | same, milestone 6c | Check counts (all zero failures): version 4, fixed_step_clock 42, application 26, math 38, lights 36, cascades 133, paraboloid 27, trapezoid 80, shader_source_rule 1, renderer 26, opengl_context 20, opengl_render 125, mesh 13, shader 15, lighting 11, shadows 8, point_shadows 7, tsm 11, deferred 23, post 16, ssao 11, dof_mlaa 40, application 30. No existing suite decreased (opengl_render grew 115 -> 125 for the new contract checks; ssao 9 -> 11 for the depth proof). shader_source_rule: `#version` only in `src/render/opengl/shader_library.hpp`. `application.cpp` unchanged (git diff empty). R8 occlusion buffer ~1 B/pixel; HDR target 2x Rgba16F + depth (~16.6 MB colour at 1280x720) |
 | 2026-11-05 | same, contract extension | OpenGL off: 7/7 Debug; OpenGL on: 11/11 Debug and Release; `-L opengl` 4/4; zero warnings under `-Werror`; check counts: opengl_context 20, opengl_render 47 |
 
 | Published tree did not build with `GRACE_ENABLE_OPENGL=ON` | The lighting commit left the shader header unstaged and published half of a `const` change, so `drawIndexed() const` in the null backend had no matching override | Complete the change set and verify by building a fresh clone |
@@ -319,7 +321,7 @@ not exist before GL 3.2, so "3.0 core" is not a valid request.
     tonemap response (exposure 1): 0.0->0, 0.18->141, 0.5->206, 1.0->232,
     2.0->245, 4.0->252. Bloom halo measured at 4 px from a 4.0-bright source:
     61 with bloom on, 0 with it off.
-    The default remains the legacy path in this increment, so that no existing pixel value changes. Flipping the default is a separate change at the end of the chain, once the remaining techniques land, and it must re-baseline every measured value with before and after figures.
+    The default remained the legacy path through 6a-6d so that no existing pixel value changed. **The flip happened in 6e (2026-11-06, decision 23): the chain is now the default**, and every measured value was re-baselined with before/after figures (see the 6e validation records): chain pixel = round(255 * sRGB(aces(x))) with aces(x) = x(2.51x+0.03)/(x(2.43x+0.59)+0.14) and srgb(c) = 1.055*c^(1/2.4)-0.055 for c > 0.0031308; legacy was round(255*x). Example rows: 0.5 linear 128 -> 206, ambient 0.2 51 -> 149, clear colour 30 30 -> 110, 6-light centre 253 -> 231. The legacy linear->8-bit path survives only as an explicit opt-out (CLI `--no-post`), documented as a compatibility path.
 
 16. **Is presentation a device operation or a side effect of clearing?** It was
     a side effect. `clear()` read back queued pixels and swapped the buffer, so
@@ -481,6 +483,35 @@ not exist before GL 3.2, so "3.0 core" is not a valid request.
     flat ambient-1.0 surface reads 232 with both off, matching the pre-6d
     tree).
 ## Verification commands
+    **Updated in 6e (decision 22 resolved): the chain now ends in an
+    offscreen 8-bit display target, which IS sampleable through the contract,
+    so MLAA runs AFTER the tonemap on the display-encoded image — the
+    departure above is removed. The final order is now: lighting -> HDR ->
+    SSAO -> DOF(linear HDR) -> bloom -> tonemap+sRGB [DISPLAY BOUNDARY] ->
+    offscreen 8-bit display target -> MLAA(display-encoded) -> present
+    (PostBlit fullscreen copy) -> default framebuffer -> swapBuffers. The
+    MLAA luminance threshold now measures display-code contrast, uniform
+    across exposure (on linear HDR the same threshold was generous in the
+    dark and stingy in the light — edges in shadowed regions were missed).
+    Cost: +2 Rgba8 full-res targets (~7.4 MB at 1280x720), +1-2 fullscreen
+    passes, +1 shader (PostBlit); the contract needed no new method — present
+    composes from beginRenderPass(nullptr) + bindTexture + draw.
+
+23. **What does the engine do when nobody asks for anything (defaults)?**
+    **Resolved 2026-11-06 (milestone 6e).** Default render path: forward
+    (decision 1 unchanged — forward is the primary path). Default post state:
+    **ON** (decision 15's flip; the chain is the product now that its
+    techniques landed). Technique defaults inside the chain: SSAO ON
+    (view-independent, darkens the ambient term only), MLAA ON
+    (view-independent, part of the documented chain in section 3.2), bloom
+    ON within the chain (threshold 1.0 linear, strength 1.0), **DOF OFF** — the
+    focus distance is scene content, not a pipeline property, so a default
+    focus would blur every scene unless it happened to match; enabled via
+    config / CLI `--dof`. `grace` with no arguments renders through the chain
+    and reports center_pixel 110,110,110,255 for the default clear colour 30:
+    sRGB(aces(30/255))*255 = 110.51, GL conversion 110 (measured, both paths,
+    visible and xvfb). The legacy linear path survives as `--no-post`,
+    documented in the CLI help as a compatibility path (reports 30,30,30,255).
 
 ```sh
 # Default configuration, no graphics dependency

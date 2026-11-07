@@ -813,24 +813,25 @@ void main()
 }
 )";
 
-// Morphological anti-aliasing (milestone 6d, decision 21). A simple
-// morphological pass in the shape of MLAA's edge detection — NOT SMAA: no
-// pattern search, no reprojection, one pass. Edges are detected on Rec709
-// luminance contrast (linear units) OR NDC depth contrast; each pixel that
-// contrasts with the centre adds its colour (and its ambient-attachment
-// value, so the direct/ambient split stays consistent) to an equal-weight
-// average. A single-pixel-wide edge is blended to about half intensity; a
-// high-contrast interior boundary (e.g. a bright HUD edge) is blended too —
-// that is the stated cost of the simple morphology.
+// Morphological anti-aliasing (milestone 6d; moved to the display-encoded
+// image in 6e, decision 22 update). The post chain ends in an offscreen 8-bit
+// target (the display target), which IS sampleable, so MLAA runs here on the
+// display-encoded image where a luminance threshold means the same thing in
+// shadows and highlights (on linear HDR the same threshold is generous in the
+// dark and stingy in the light). A simple morphological pass in the shape of
+// MLAA's edge detection — NOT SMAA: no pattern search, no reprojection, one
+// pass. Edges: Rec709 luminance contrast of the DISPLAY codes (threshold in
+// [0,1] display units) or NDC depth contrast. Each contrasting neighbour adds
+// its colour to an equal-weight average. A single-pixel edge blends to about
+// half intensity; a high-contrast interior boundary (bright HUD edge) blends
+// too — the stated cost of the simple morphology.
 constexpr const char* kPostMLAAFragmentShader = R"(#version 330 core
-uniform sampler2D srcTex;       // linear HDR colour (direct + ambient)
-uniform sampler2D srcAmbient;   // linear ambient-only attachment
-uniform sampler2D depthTex;     // scene depth (NDC [0,1])
+uniform sampler2D srcTex;       // display-encoded colour (8-bit target, [0,1])
+uniform sampler2D depthTex;     // scene depth (NDC [0,1]), from the HDR target
 uniform vec2 outSize;
-uniform float lumThreshold;     // linear luminance delta that marks an edge
-uniform float depthThreshold;   // NDC depth delta that marks an edge
-layout(location = 0) out vec4 outColor;
-layout(location = 1) out vec4 outAmb;
+uniform float lumThreshold;     // display-code luminance delta marking an edge
+uniform float depthThreshold;   // NDC depth delta marking an edge
+out vec4 fragment;
 
 float luminance(vec3 c)
 {
@@ -842,7 +843,6 @@ void main()
     vec2 uv = gl_FragCoord.xy / outSize;
     vec2 t = 1.0 / outSize;
     vec3 c = texture(srcTex, uv).rgb;
-    vec3 a = texture(srcAmbient, uv).rgb;
     float d = texture(depthTex, uv).r;
     float lc = luminance(c);
 
@@ -853,7 +853,6 @@ void main()
     offsets[3] = vec2(-t.x, 0.0);
 
     vec3 sum = c;
-    vec3 asum = a;
     float count = 1.0;
     for (int i = 0; i < 4; ++i)
     {
@@ -862,12 +861,24 @@ void main()
         if (abs(luminance(nc) - lc) > lumThreshold || abs(nd - d) > depthThreshold)
         {
             sum += nc;
-            asum += texture(srcAmbient, uv + offsets[i]).rgb;
             count += 1.0;
         }
     }
-    outColor = vec4(sum / count, 1.0);
-    outAmb = vec4(asum / count, 1.0);
+    fragment = vec4(sum / count, 1.0);
+}
+)";
+
+// Present pass (milestone 6e, decision 23): the chain ends in the offscreen
+// 8-bit display target; this textured fullscreen copy presents it onto the
+// default framebuffer, which is what swapBuffers then shows. A device blit
+// composed from the generic pass primitives (beginRenderPass(nullptr) +
+// bindTexture + draw) — no contract change.
+constexpr const char* kPostBlitFragmentShader = R"(#version 330 core
+uniform sampler2D srcTex;   // the display target's colour attachment
+out vec4 fragment;
+void main()
+{
+    fragment = texture(srcTex, gl_FragCoord.xy / vec2(textureSize(srcTex, 0)));
 }
 )";
 

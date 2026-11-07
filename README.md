@@ -49,6 +49,17 @@ The following are intentionally excluded:
 - Memory dumps, extracted resources, disassembler databases, and traces.
 - Decompiled code, copied pseudocode, proprietary symbols, and internal tables.
 
+## Running it
+
+`grace` with no arguments renders through the HDR post-processing chain
+(HDR target, bloom, filmic tonemap + sRGB display encode, SSAO, morphological
+AA; depth of field is off by default because its focus distance is scene
+content) on the forward path and prints the centre pixel of the frame:
+`center_pixel=110,110,110,255` for the default clear colour 30 — derivable as
+round(255 * sRGB(aces(30/255))) = 110. The pre-chain legacy linear->8-bit
+output is still available as a compatibility path: `grace --no-post` prints
+`center_pixel=30,30,30,255`.
+
 ## Documentation
 
 - [docs/grace-architecture.md](docs/grace-architecture.md) — the architectural

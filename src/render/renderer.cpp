@@ -214,6 +214,20 @@ RenderTarget* Renderer::ensureHdrTarget()
         pdesc.depthAttachment = false;
         m_postA = m_backend.createRenderTarget(pdesc);
 
+        // 6e (decision 22 update): the chain ends in an offscreen 8-bit display
+        // target, which IS sampleable through the contract — so MLAA can run
+        // on the display-encoded image, and the present pass (PostBlit) copies
+        // it onto the default framebuffer. Rgba8, full framebuffer size,
+        // ~4 bytes/pixel (~3.7 MB at 1280x720) each.
+        RenderTargetDesc ddesc;
+        ddesc.width = m_backend.width();
+        ddesc.height = m_backend.height();
+        ddesc.colorAttachmentCount = 1;
+        ddesc.colorFormats[0] = PixelFormat::Rgba8;
+        ddesc.depthAttachment = false;
+        m_display = m_backend.createRenderTarget(ddesc);
+        m_displayB = m_backend.createRenderTarget(ddesc);
+
         // Bloom downsample chain: half resolution each level, same aspect as
         // the framebuffer (the chain's uv math assumes matching aspect), float,
         // no depth.
@@ -240,6 +254,7 @@ RenderTarget* Renderer::ensureHdrTarget()
         m_postSSAO = m_backend.createShaderProgram(ShaderProgramId::PostSSAO);
         m_postMLAA = m_backend.createShaderProgram(ShaderProgramId::PostMLAA);
         m_postDOF = m_backend.createShaderProgram(ShaderProgramId::PostDOF);
+        m_postBlit = m_backend.createShaderProgram(ShaderProgramId::PostBlit);
         ensureFullscreenQuad();
     }
     return m_hdr;
@@ -282,12 +297,21 @@ void Renderer::releasePostResources()
         m_backend.releaseRenderTarget(m_postA);
         m_postA = nullptr;
     }
+    for (RenderTarget* target : {m_display, m_displayB})
+    {
+        if (target != nullptr)
+            m_backend.releaseRenderTarget(target);
+    }
+    m_display = nullptr;
+    m_displayB = nullptr;
+    m_displaySrc = nullptr;
     m_postBright.reset();
     m_postBlur.reset();
     m_postTonemap.reset();
     m_postSSAO.reset();
     m_postMLAA.reset();
     m_postDOF.reset();
+    m_postBlit.reset();
 }
 
 void Renderer::runPostChain()
@@ -304,11 +328,12 @@ void Renderer::runPostChain()
     // Every pass in the chain is a fullscreen pass: run them with the depth
     // test off so none of them tests against or overwrites scene depth.
     m_backend.setDepthTestEnabled(false);
-    // Chain order (decision 21, milestone 6d), a single line:
+    // Chain order (decision 21 as updated by decision 22/23 in 6e), one line:
     //   lighting -> HDR(2 att + scene depth) -> SSAO(depth -> R8)
-    //   -> MLAA(linear HDR) -> DOF(linear HDR, bokeh) -> bloom
-    //   -> tonemap: sRGB(aces(direct + amb*occ + bloom))  [display boundary]
-    //   -> default 8-bit framebuffer -> swapBuffers.
+    //   -> DOF(linear HDR, bokeh) -> bloom
+    //   -> tonemap: sRGB(aces(direct + amb*occ + bloom)) [DISPLAY BOUNDARY]
+    //   -> offscreen 8-bit display target -> MLAA(display-encoded)
+    //   -> present (PostBlit) -> default framebuffer -> swapBuffers.
     // `src` tracks the target currently holding the HDR image (colour 0 +
     // ambient 1); the scene depth always stays in m_hdr (decision 19).
     ensureHdrTarget();
@@ -337,26 +362,6 @@ void Renderer::runPostChain()
         m_postSSAO->setUniform("bias", m_config.post.ssao.bias);
         m_fullscreen_quad->drawIndexed();
         m_backend.endRenderPass();
-    }
-
-    // MLAA pass (6d): morphological edge blend on the linear HDR, src -> m_postA.
-    if (m_config.post.mlaa.enabled && m_postA != nullptr)
-    {
-        m_backend.beginRenderPass(m_postA);
-        m_backend.bindTexture(m_backend.renderTargetTexture(src, 0), 0);
-        m_backend.bindTexture(m_backend.renderTargetTexture(src, 1), 1);
-        m_backend.bindTexture(m_backend.renderTargetTexture(m_hdr, kDepthAttachment), 2);
-        m_postMLAA->use();
-        m_postMLAA->setUniform("srcTex", 0);
-        m_postMLAA->setUniform("srcAmbient", 1);
-        m_postMLAA->setUniform("depthTex", 2);
-        m_postMLAA->setUniform("outSize", core::vec2{static_cast<float>(m_postA->width()),
-                                                      static_cast<float>(m_postA->height())});
-        m_postMLAA->setUniform("lumThreshold", m_config.post.mlaa.luminanceThreshold);
-        m_postMLAA->setUniform("depthThreshold", m_config.post.mlaa.depthThreshold);
-        m_fullscreen_quad->drawIndexed();
-        m_backend.endRenderPass();
-        src = m_postA;
     }
 
     // DOF pass (6d): bokeh-disc blur of the linear HDR, src -> the other target.
@@ -412,10 +417,13 @@ void Renderer::runPostChain()
         m_backend.endRenderPass();
     }
 
-    // Tonemap + compose into the default framebuffer (display-encoded output;
-    // the linear->display boundary sits here, decision 15). Reads the current
-    // HDR image `src` (after any MLAA/DOF), the bloom chain and the occlusion.
-    m_backend.beginRenderPass(nullptr);
+    // Tonemap + compose into the offscreen 8-bit DISPLAY target
+    // (display-encoded output; the linear->display boundary sits here,
+    // decision 15). 6e: the default framebuffer is not sampleable through the
+    // contract, so the chain ends in this target and the present pass below
+    // copies it out. Reads the current HDR image `src` (after DOF), the bloom
+    // chain and the occlusion.
+    m_backend.beginRenderPass(m_display);
     m_backend.clear();
     m_backend.bindTexture(m_backend.renderTargetTexture(src, 0), 0);
     m_backend.bindTexture(m_backend.renderTargetTexture(src, 1), 1);
@@ -428,11 +436,45 @@ void Renderer::runPostChain()
     m_postTonemap->setUniform("ssaoTex", 3);
     m_postTonemap->setUniform("useSSAO",
                               m_config.post.ssao.enabled && m_ssao != nullptr ? 1 : 0);
-    m_postTonemap->setUniform("outSize", core::vec2{static_cast<float>(m_backend.width()),
-                                                    static_cast<float>(m_backend.height())});
+    m_postTonemap->setUniform("outSize", core::vec2{static_cast<float>(m_display->width()),
+                                                     static_cast<float>(m_display->height())});
     m_postTonemap->setUniform("exposure", m_config.post.exposure);
     m_fullscreen_quad->drawIndexed();
     m_backend.endRenderPass();
+    RenderTarget* displaySrc = m_display;
+
+    // MLAA pass (6d/6e): morphological edge blend on the DISPLAY-ENCODED
+    // image (decision 22 update — the display target is sampleable, so the
+    // luminance threshold means the same in shadows and highlights). Reads
+    // the display image + the scene depth (still in m_hdr), writes m_displayB.
+    if (m_config.post.mlaa.enabled && m_displayB != nullptr)
+    {
+        m_backend.beginRenderPass(m_displayB);
+        m_backend.bindTexture(m_backend.renderTargetTexture(m_display, 0), 0);
+        m_backend.bindTexture(m_backend.renderTargetTexture(m_hdr, kDepthAttachment), 1);
+        m_postMLAA->use();
+        m_postMLAA->setUniform("srcTex", 0);
+        m_postMLAA->setUniform("depthTex", 1);
+        m_postMLAA->setUniform("outSize", core::vec2{static_cast<float>(m_displayB->width()),
+                                                      static_cast<float>(m_displayB->height())});
+        m_postMLAA->setUniform("lumThreshold", m_config.post.mlaa.luminanceThreshold);
+        m_postMLAA->setUniform("depthThreshold", m_config.post.mlaa.depthThreshold);
+        m_fullscreen_quad->drawIndexed();
+        m_backend.endRenderPass();
+        displaySrc = m_displayB;
+    }
+
+    // Present pass (6e): copy the display target onto the default framebuffer
+    // with a textured fullscreen draw (PostBlit). swapBuffers (endFrame) then
+    // presents exactly what the chain produced; queued readbacks capture it
+    // pre-swap from the default framebuffer.
+    m_backend.beginRenderPass(nullptr);
+    m_backend.bindTexture(m_backend.renderTargetTexture(displaySrc, 0), 0);
+    m_postBlit->use();
+    m_postBlit->setUniform("srcTex", 0);
+    m_fullscreen_quad->drawIndexed();
+    m_backend.endRenderPass();
+    m_displaySrc = displaySrc;
     m_backend.setDepthTestEnabled(true);  // restore for the next frame's geometry
 }
 
@@ -468,6 +510,14 @@ void Renderer::renderShadowMapsIfNeeded()
 void Renderer::renderForwardFrame()
 {
     renderShadowMapsIfNeeded();
+    // The shadow passes end on the default framebuffer (endRenderPass), which
+    // would capture the lighting submissions when the chain is on. Re-open
+    // the lighting pass when shadow passes actually ran, so submissions land
+    // on the lighting target — the HDR target with the chain on, the default
+    // framebuffer otherwise (6e fix: exposed when the chain became the
+    // default; with post off this is the same binding as before).
+    if (m_shadow_map.cascadeCount > 0 || !m_point_shadow_maps.entries.empty())
+        m_backend.beginRenderPass(lightingTarget());
     for (DrawSubmission& submission : m_pending)
     {
         if (submission.castOnly)

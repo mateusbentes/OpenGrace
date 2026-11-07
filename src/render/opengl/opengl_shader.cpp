@@ -67,6 +67,10 @@ GlShaderProgram::GlShaderProgram(GlLoader& gl, ShaderProgramId id)
         vertexSource = kDeferredLightVertexShader;
         fragmentSource = kPostDOFFragmentShader;
         break;
+    case ShaderProgramId::PostBlit:
+        vertexSource = kDeferredLightVertexShader;
+        fragmentSource = kPostBlitFragmentShader;
+        break;
     }
     if (vertexSource == nullptr || fragmentSource == nullptr)
         throw std::runtime_error("GlShaderProgram: unknown ShaderProgramId");

@@ -269,6 +269,44 @@ int main()
         GRACE_CHECK(withinTol(p, ClearColor{expected, expected, expected, 255}, 3));
     }
 
+    // 6e A3: the default configuration runs the chain — a clear-colour-only
+    // frame with default RendererConfig reports the derivable pixel
+    // sRGB(aces(30/255))*255 ~ 110 (GL measures 110) at the centre.
+    {
+        Renderer renderer(*backend);  // default config: post on (decision 23)
+        GRACE_CHECK(renderer.config().post.enabled);
+        renderer.setClearColor(ClearColor{30, 30, 30, 255});
+        renderer.beginFrame();
+        backend->queueReadback(64, 48);
+        renderer.endFrame();
+        const ClearColor p = backend->lastReadback()[0].color;
+        const std::uint8_t derived = expectedTonemap(30.0f / 255.0f);
+        std::printf("default config, clear 30 -> centre pixel %d (derived %d, ~110)\n",
+                    static_cast<int>(p.r), static_cast<int>(derived));
+        GRACE_CHECK(withinTol(p, ClearColor{110, 110, 110, 255}, 2));
+        GRACE_CHECK(std::abs(static_cast<int>(p.r) - static_cast<int>(derived)) <= 2);
+    }
+
+    // 6e A3: the presented image is what the chain produced — the default
+    // framebuffer's captured pixel equals the display target's pixel (the
+    // present pass copied it; not a stale framebuffer).
+    {
+        Renderer renderer(*backend);  // default config, MLAA on -> displayB
+        renderer.setClearColor(ClearColor{30, 30, 30, 255});
+        renderer.beginFrame();
+        backend->queueReadback(64, 48);
+        renderer.endFrame();
+        const ClearColor presented = backend->lastReadback()[0].color;
+        backend->beginRenderPass(renderer.displayTarget());
+        backend->queueReadback(64, 48);
+        backend->readback();
+        const ClearColor chain = backend->lastReadback()[0].color;
+        backend->endRenderPass();
+        std::printf("present proof: default fb=%d  display target=%d (must be equal)\n",
+                    static_cast<int>(presented.r), static_cast<int>(chain.r));
+        GRACE_CHECK(presented == chain);
+    }
+
     GRACE_CHECK_EQ(backend->glErrorCount(), 0u);
     backend->shutdown();
 
