@@ -67,6 +67,15 @@ opengl::GlRenderTarget* findGlTarget(
     return nullptr;
 }
 
+opengl::GlTexture3DView* findGlVolume(
+    std::vector<std::unique_ptr<opengl::GlTexture3DView>>& volumes, const TextureView* view)
+{
+    for (auto& candidate : volumes)
+        if (candidate.get() == view)
+            return candidate.get();
+    return nullptr;
+}
+
 void parseVersion(const std::string& version, int& major, int& minor)
 {
     major = 0;
@@ -151,6 +160,9 @@ struct OpenGLRenderBackend::Impl
     // shutdown so use-after-release is detected safely.
     std::vector<std::unique_ptr<opengl::GlRenderTarget>> targets;
     opengl::GlRenderTarget* bound_target = nullptr;
+
+    // 3D textures: backend-owned registry, same lifetime rule as the targets.
+    std::vector<std::unique_ptr<opengl::GlTexture3DView>> volumes;
 
     // Camera used by submit()/draw() (documented diagnostic default).
     CameraParams camera;
@@ -384,6 +396,7 @@ void OpenGLRenderBackend::shutdownImpl(bool countViolation)
     for (auto& target : impl.targets)
         target->release();
     impl.targets.clear();
+    impl.volumes.clear();  // GL objects deleted while the context is current
     impl.drainGlErrors("shutdown");
     if (impl.context != nullptr)
     {
@@ -741,6 +754,77 @@ void OpenGLRenderBackend::bindTexture(const TextureView* view, std::uint32_t uni
     impl.gl.glActiveTexture(GL_TEXTURE0 + static_cast<GLenum>(unit));
     impl.gl.glBindTexture(GL_TEXTURE_2D, glView->textureId());
     impl.drainGlErrors("bindTexture");
+}
+
+TextureView* OpenGLRenderBackend::createTexture3D(const Texture3DDesc& desc)
+{
+    Impl& impl = *m_impl;
+    if (!impl.ready())
+    {
+        ++impl.violations;
+        throw std::logic_error("OpenGLRenderBackend::createTexture3D: not initialised");
+    }
+    validateTexture3DDesc(desc);  // throws, the same rejection the null backend makes
+    auto volume = std::make_unique<opengl::GlTexture3DView>(impl.gl, desc);
+    opengl::GlTexture3DView* raw = volume.get();
+    impl.volumes.push_back(std::move(volume));
+    impl.drainGlErrors("createTexture3D");
+    return raw;
+}
+
+void OpenGLRenderBackend::bindTexture3D(const TextureView* view, std::uint32_t unit)
+{
+    Impl& impl = *m_impl;
+    if (!impl.ready() || view == nullptr)
+    {
+        ++impl.violations;
+        return;
+    }
+    const auto* glView = dynamic_cast<const opengl::GlTexture3DView*>(view);
+    if (glView == nullptr)
+    {
+        ++impl.violations;  // a 2D attachment view is not a volume
+        return;
+    }
+    impl.gl.glActiveTexture(GL_TEXTURE0 + static_cast<GLenum>(unit));
+    impl.gl.glBindTexture(GL_TEXTURE_3D, glView->textureId());
+    impl.drainGlErrors("bindTexture3D");
+}
+
+void OpenGLRenderBackend::fillTexture3D(TextureView* view, std::uint32_t layer, const void* data,
+                                        std::size_t sizeBytes)
+{
+    Impl& impl = *m_impl;
+    if (!impl.ready())
+    {
+        ++impl.violations;
+        return;
+    }
+    opengl::GlTexture3DView* volume = findGlVolume(impl.volumes, view);
+    if (volume == nullptr)
+        throw std::invalid_argument("fillTexture3D: view is not a 3D texture of this backend");
+    volume->uploadSlice(layer, data, sizeBytes);
+    impl.drainGlErrors("fillTexture3D");
+}
+
+bool OpenGLRenderBackend::readTexture3D(const TextureView* view, std::uint32_t layer, void* data,
+                                        std::size_t sizeBytes)
+{
+    Impl& impl = *m_impl;
+    if (!impl.ready())
+    {
+        ++impl.violations;
+        return false;
+    }
+    opengl::GlTexture3DView* volume = findGlVolume(impl.volumes, view);
+    if (volume == nullptr || layer >= volume->depth() || sizeBytes != volume->sliceBytes())
+    {
+        ++impl.violations;
+        return false;
+    }
+    volume->readSlice(layer, data, sizeBytes);
+    impl.drainGlErrors("readTexture3D");
+    return true;
 }
 
 void OpenGLRenderBackend::ensureLightingProgram()

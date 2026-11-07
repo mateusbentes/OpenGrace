@@ -133,6 +133,24 @@ int main()
         "setDepthTestEnabled(0)", "setDepthTestEnabled(1)",
         "copyDepthAttachment", "copyDepthAttachment",
         "releaseRenderTarget", "copyDepthAttachment", "releaseRenderTarget",
+        // 3D texture round trip (milestone 7, first increment). The two refused
+        // creations are absent: validation throws before the call is recorded,
+        // exactly as an incomplete render target does.
+        "createTexture3D(4x4x3)",
+        "createRenderTarget(8x8,color=0,depth=1)",
+        "renderTargetTexture",
+        "bindTexture3D(unit=0,depth=1)",    // a 2D attachment is not a volume
+        "releaseRenderTarget",
+        "fillTexture3D(layer=0,bytes=64)",
+        "readTexture3D(layer=0,bytes=64)",
+        "fillTexture3D(layer=1,bytes=64)",
+        "readTexture3D(layer=1,bytes=64)",
+        "fillTexture3D(layer=2,bytes=64)",
+        "readTexture3D(layer=2,bytes=64)",
+        "bindTexture3D(unit=0,depth=3)",
+        "bindTexture(unit=0,depth=0)",      // a volume is not a 2D attachment
+        "readTexture3D(layer=3,bytes=64)",  // layer out of range
+        "readTexture3D(layer=0,bytes=63)",  // byte count does not match
         "beginRenderPass(64x64)", "clear(1,2,3,4)", "draw", "use", "drawIndexed",
         "renderTargetTexture", "endRenderPass", "renderTargetTexture", "releaseRenderTarget",
         "beginRenderPass(unknown)", "renderTargetTexture", "beginRenderPass(unknown)",
@@ -184,8 +202,10 @@ int main()
         return 77;
     }
     grace::test::runContractChecks(*gl_backend, contract_color, 3);
-    // 1 MRT + 5 misuse/over-budget + 2 depth-copy + 5 post-shutdown
-    GRACE_CHECK_EQ(gl_backend->violationCount(), 13u);
+    // 1 MRT + 5 misuse/over-budget + 2 depth-copy + 2 wrong-view binds + 5 post-shutdown
+    // 1 MRT + 5 misuse/over-budget + 2 depth-copy + 2 wrong-view binds
+    // + 2 refused volume reads + 5 post-shutdown
+    GRACE_CHECK_EQ(gl_backend->violationCount(), 17u);
     GRACE_CHECK_EQ(gl_backend->glErrorCount(), 0u);
 
     return grace::test::summary("opengl_render");

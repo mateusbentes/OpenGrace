@@ -35,6 +35,7 @@ bool GlLoader::load(ResolveFn resolve, std::string& missingSymbol)
 
     GRACE_GL_LOAD(glGetString, "glGetString");
     GRACE_GL_LOAD(glGetError, "glGetError");
+    GRACE_GL_LOAD(glGetIntegerv, "glGetIntegerv");
     GRACE_GL_LOAD(glClearColor, "glClearColor");
     GRACE_GL_LOAD(glClearDepth, "glClearDepth");
     GRACE_GL_LOAD(glClearStencil, "glClearStencil");
@@ -86,6 +87,10 @@ bool GlLoader::load(ResolveFn resolve, std::string& missingSymbol)
     GRACE_GL_LOAD(glGenTextures, "glGenTextures");
     GRACE_GL_LOAD(glBindTexture, "glBindTexture");
     GRACE_GL_LOAD(glTexImage2D, "glTexImage2D");
+    GRACE_GL_LOAD(glTexImage3D, "glTexImage3D");
+    GRACE_GL_LOAD(glTexSubImage3D, "glTexSubImage3D");
+    GRACE_GL_LOAD(glGetTexImage, "glGetTexImage");
+    GRACE_GL_LOAD(glPixelStorei, "glPixelStorei");
     GRACE_GL_LOAD(glTexParameteri, "glTexParameteri");
     GRACE_GL_LOAD(glDeleteTextures, "glDeleteTextures");
     GRACE_GL_LOAD(glActiveTexture, "glActiveTexture");

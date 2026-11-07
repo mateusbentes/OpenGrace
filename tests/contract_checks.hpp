@@ -55,6 +55,102 @@ inline grace::render::Mesh makeContractTriangle()
 
 }  // namespace detail
 
+/// 3D texture round trip (milestone 7, first increment): create a volume, write
+/// a known pattern into every slice, read it back and compare, plus the
+/// rejections the contract documents. Split out of runContractChecks so the
+/// null backend can be proved with no GL context at all: the same function runs
+/// against both backends, which is what makes the two comparable.
+template <typename Backend>
+void runTexture3DChecks(Backend& backend)
+{
+    const std::uint64_t volumeViolations = backend.violationCount();
+    grace::render::Texture3DDesc volume;
+    volume.width = 4;
+    volume.height = 4;
+    volume.depth = 3;
+    volume.format = grace::render::PixelFormat::Rgba8;
+    grace::render::TextureView* view = backend.createTexture3D(volume);
+    GRACE_CHECK(view != nullptr);
+    GRACE_CHECK_EQ(view->width(), 4u);
+    GRACE_CHECK_EQ(view->height(), 4u);
+    GRACE_CHECK_EQ(view->depth(), 3u);
+    GRACE_CHECK(!view->isDepth());
+    GRACE_CHECK(view->format() == grace::render::PixelFormat::Rgba8);
+
+    // A 2D attachment view is not a volume: both backends must refuse it.
+    grace::render::RenderTargetDesc flat;
+    flat.width = 8;
+    flat.height = 8;
+    flat.colorAttachmentCount = 0;
+    flat.depthAttachment = true;
+    grace::render::RenderTarget* flatTarget = backend.createRenderTarget(flat);
+    grace::render::TextureView* attachment = backend.renderTargetTexture(flatTarget);
+    if (attachment != nullptr)
+    {
+        backend.bindTexture3D(attachment, 0);
+        GRACE_CHECK_EQ(backend.violationCount(), volumeViolations + 1u);
+    }
+    backend.releaseRenderTarget(flatTarget);
+
+    const std::size_t sliceBytes = static_cast<std::size_t>(volume.width) * volume.height *
+                                   grace::render::bytesPerPixel(volume.format);
+    bool all_match = true;
+    for (std::uint32_t layer = 0; layer < volume.depth; ++layer)
+    {
+        std::vector<std::uint8_t> written(sliceBytes);
+        for (std::size_t i = 0; i < sliceBytes; ++i)
+            written[i] = static_cast<std::uint8_t>((layer * 53u + i * 7u + 11u) & 0xFFu);
+        backend.fillTexture3D(view, layer, written.data(), written.size());
+        std::vector<std::uint8_t> read(sliceBytes, 0);
+        const bool ok = backend.readTexture3D(view, layer, read.data(), read.size());
+        GRACE_CHECK(ok);
+        all_match = all_match && (read == written);
+    }
+    GRACE_CHECK(all_match);
+    backend.bindTexture3D(view, 0);
+
+    // The reverse distinction: a volume bound as a 2D attachment is refused
+    // as well, so neither bind path accepts the other's view.
+    {
+        const std::uint64_t beforeBind = backend.violationCount();
+        backend.bindTexture(view, 0);
+        GRACE_CHECK_EQ(backend.violationCount(), beforeBind + 1u);
+    }
+
+    // Out-of-range layer and a mismatched byte count are rejected, and the
+    // read reports it rather than filling the buffer with anything.
+    std::vector<std::uint8_t> scratch(sliceBytes, 0);
+    GRACE_CHECK(!backend.readTexture3D(view, volume.depth, scratch.data(), scratch.size()));
+    GRACE_CHECK(!backend.readTexture3D(view, 0, scratch.data(), scratch.size() - 1u));
+
+    // A zero dimension and the depth/stencil format are rejected at
+    // creation, like an incomplete render target is.
+    grace::render::Texture3DDesc bad = volume;
+    bad.depth = 0;
+    bool threw = false;
+    try
+    {
+        static_cast<void>(backend.createTexture3D(bad));
+    }
+    catch (const std::invalid_argument&)
+    {
+        threw = true;
+    }
+    GRACE_CHECK(threw);
+    bad = volume;
+    bad.format = grace::render::PixelFormat::Depth24Stencil8;
+    threw = false;
+    try
+    {
+        static_cast<void>(backend.createTexture3D(bad));
+    }
+    catch (const std::invalid_argument&)
+    {
+        threw = true;
+    }
+    GRACE_CHECK(threw);
+}
+
 /// Shared RenderBackend contract checks, run unchanged against every backend
 /// implementation (null, OpenGL). Covers the full contract: clear lifecycle,
 /// mesh/shader/draw, readback with its documented per-backend value, and
@@ -248,6 +344,8 @@ void runContractChecks(Backend& backend, grace::render::ClearColor color,
         GRACE_CHECK_EQ(backend.violationCount(), depthViolations + 2u);
         backend.releaseRenderTarget(depthB);
     }
+
+    runTexture3DChecks(backend);
 
     // Render-pass composition: begin, clear, draw into the target, end.
     const std::uint64_t baseViolations = backend.violationCount();

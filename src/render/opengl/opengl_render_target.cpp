@@ -1,8 +1,11 @@
 #include "opengl_render_target.hpp"
 
+#include <cstddef>
 #include <cstdio>
+#include <cstring>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 namespace grace::render::opengl {
 
@@ -158,6 +161,82 @@ void GlRenderTarget::destroyGlObjects()
         m_gl.glDeleteFramebuffers(1, &m_fbo);
         m_fbo = 0;
     }
+}
+
+// --- GlTexture3DView -------------------------------------------------------
+
+GlTexture3DView::GlTexture3DView(GlLoader& gl, const Texture3DDesc& desc)
+    : m_gl(gl), m_desc(desc)
+{
+    m_gl.glGenTextures(1, &m_texture);
+    m_gl.glBindTexture(GL_TEXTURE_3D, m_texture);
+    m_gl.glTexImage3D(GL_TEXTURE_3D, 0, toInternalFormat(m_desc.format),
+                      static_cast<GLsizei>(m_desc.width), static_cast<GLsizei>(m_desc.height),
+                      static_cast<GLsizei>(m_desc.depth), 0, toPixelFormat(m_desc.format),
+                      toPixelType(m_desc.format), nullptr);
+    m_gl.glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    m_gl.glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    m_gl.glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    m_gl.glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    m_gl.glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+}
+
+GlTexture3DView::~GlTexture3DView()
+{
+    if (m_texture != 0)
+    {
+        GLuint texture = m_texture;
+        m_gl.glDeleteTextures(1, &texture);
+        m_texture = 0;
+    }
+}
+
+void GlTexture3DView::uploadSlice(std::uint32_t layer, const void* data, std::size_t sizeBytes)
+{
+    if (layer >= m_desc.depth || sizeBytes != sliceBytes())
+        throw std::invalid_argument(
+            "GlTexture3DView::uploadSlice: layer out of range or byte count does not match");
+    // Row alignment 1. With the default of 4, a single-channel slice whose row
+    // length is not a multiple of four bytes is read with the wrong stride.
+    // Measured on this driver: an R8 3x3x2 volume round-trips exactly with
+    // alignment 1 and does not with alignment 4.
+    m_gl.glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    m_gl.glBindTexture(GL_TEXTURE_3D, m_texture);
+    m_gl.glTexSubImage3D(GL_TEXTURE_3D, 0, 0, 0, static_cast<GLint>(layer),
+                         static_cast<GLsizei>(m_desc.width),
+                         static_cast<GLsizei>(m_desc.height), 1, toPixelFormat(m_desc.format),
+                         toPixelType(m_desc.format), data);
+    m_gl.glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+}
+
+void GlTexture3DView::readSlice(std::uint32_t layer, void* data, std::size_t sizeBytes) const
+{
+    if (layer >= m_desc.depth || sizeBytes != sliceBytes())
+        throw std::invalid_argument(
+            "GlTexture3DView::readSlice: layer out of range or byte count does not match");
+    // glGetTexImage takes no layer: it reads a whole mip level. The volume is
+    // bound to a scratch unit, the whole level is read into a buffer, and only
+    // the requested layer is copied out. The active unit and its previous 3D
+    // binding are restored before returning, so sampling state is untouched.
+    constexpr GLenum kScratchUnit = GL_TEXTURE0 + 15;
+    GLint previous_unit = GL_TEXTURE0;
+    GLint previous_texture = 0;
+    m_gl.glGetIntegerv(GL_ACTIVE_TEXTURE, &previous_unit);
+    m_gl.glActiveTexture(kScratchUnit);
+    m_gl.glGetIntegerv(GL_TEXTURE_BINDING_3D, &previous_texture);
+    m_gl.glBindTexture(GL_TEXTURE_3D, m_texture);
+    m_gl.glPixelStorei(GL_PACK_ALIGNMENT, 1);
+
+    std::vector<std::byte> whole(sliceBytes() * static_cast<std::size_t>(m_desc.depth));
+    m_gl.glGetTexImage(GL_TEXTURE_3D, 0, toPixelFormat(m_desc.format), toPixelType(m_desc.format),
+                       whole.data());
+
+    m_gl.glPixelStorei(GL_PACK_ALIGNMENT, 4);
+    m_gl.glBindTexture(GL_TEXTURE_3D, static_cast<GLuint>(previous_texture));
+    m_gl.glActiveTexture(static_cast<GLenum>(previous_unit));
+
+    const std::size_t offset = static_cast<std::size_t>(layer) * sliceBytes();
+    std::memcpy(data, whole.data() + offset, sizeBytes);
 }
 
 }  // namespace grace::render::opengl

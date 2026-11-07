@@ -2,6 +2,7 @@
 
 #include <GL/gl.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
@@ -86,6 +87,47 @@ private:
     std::vector<GlTextureView> m_color_views;
     GLuint m_depth_texture = 0;
     GlTextureView m_depth_view;
+};
+
+/// 3D texture of the OpenGL backend: one GL_TEXTURE_3D object, created with
+/// glTexImage3D and filled per slice with glTexSubImage3D (milestone 7, first
+/// increment). It owns no framebuffer: the contract has no pass that renders
+/// into a volume yet, and the round trip is what the capability is proved by.
+class GlTexture3DView final : public TextureView
+{
+public:
+    GlTexture3DView(GlLoader& gl, const Texture3DDesc& desc);
+    ~GlTexture3DView() override;
+
+    GlTexture3DView(const GlTexture3DView&) = delete;
+    GlTexture3DView& operator=(const GlTexture3DView&) = delete;
+
+    std::uint32_t width() const noexcept override { return m_desc.width; }
+    std::uint32_t height() const noexcept override { return m_desc.height; }
+    std::uint32_t depth() const noexcept override { return m_desc.depth; }
+    PixelFormat format() const noexcept override { return m_desc.format; }
+    bool isDepth() const noexcept override { return false; }
+
+    GLuint textureId() const noexcept { return m_texture; }
+    std::size_t sliceBytes() const noexcept
+    {
+        return static_cast<std::size_t>(m_desc.width) * m_desc.height * bytesPerPixel(m_desc.format);
+    }
+
+    /// Replaces one slice. Throws std::invalid_argument on a bad layer or size,
+    /// the same rejection the null backend makes, and std::runtime_error when
+    /// the driver reports an error.
+    void uploadSlice(std::uint32_t layer, const void* data, std::size_t sizeBytes);
+
+    /// Reads one slice back through glGetTexImage. The volume is bound to a
+    /// scratch texture unit first, so the unit the caller had selected is
+    /// restored afterwards and the call does not disturb sampling state.
+    void readSlice(std::uint32_t layer, void* data, std::size_t sizeBytes) const;
+
+private:
+    GlLoader& m_gl;
+    Texture3DDesc m_desc;
+    GLuint m_texture = 0;
 };
 
 }  // namespace grace::render::opengl

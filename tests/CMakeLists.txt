@@ -37,6 +37,17 @@ target_include_directories(test_lights PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
 add_test(NAME lights COMMAND test_lights)
 
+# 3D texture contract checks (milestone 7, first increment). Linked against the
+# null backend only, so it runs with no GL context: the volume capability is
+# proved where it can be proved everywhere. The OpenGL half of the same checks
+# runs inside test_opengl_render through the shared runTexture3DChecks.
+add_executable(test_texture3d test_texture3d.cpp)
+
+target_link_libraries(test_texture3d PRIVATE grace_render grace_null_render grace_warnings)
+target_include_directories(test_texture3d PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+add_test(NAME texture3d COMMAND test_texture3d)
+
 add_executable(test_cascades test_cascades.cpp)
 
 target_link_libraries(test_cascades PRIVATE grace_render grace_null_render grace_warnings)

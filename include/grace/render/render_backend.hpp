@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -169,6 +170,39 @@ public:
     /// Binds an attachment texture for sampling on a texture unit (a device
     /// operation, like draw). Calls after shutdown are protocol violations.
     virtual void bindTexture(const TextureView* view, std::uint32_t unit) = 0;
+
+    // -- 3D textures (milestone 7, first increment) ---------------------------
+    //
+    // A volume is a standalone resource, not a render target: it owns no
+    // framebuffer and no pass renders into it yet. What it must do is hold
+    // values that survive a write and a read, which is what the round trip
+    // through fillTexture3D() and readTexture3D() proves on its own, before
+    // any light propagation exists.
+
+    /// Creates a 3D texture and returns its view for sampling. The view's
+    /// depth() reports the volume's own layer count. Throws
+    /// std::invalid_argument on an invalid desc (a zero dimension, or the
+    /// depth/stencil format, which cannot describe a volume).
+    virtual TextureView* createTexture3D(const Texture3DDesc& desc) = 0;
+
+    /// Binds a 3D texture for sampling on a texture unit. A view that is not a
+    /// volume is a violation, as is a call after shutdown.
+    virtual void bindTexture3D(const TextureView* view, std::uint32_t unit) = 0;
+
+    /// Writes one 2D slice of a volume: layer z of view, from width * height *
+    /// bytesPerPixel(format) bytes in row-major order, rows top to bottom, no
+    /// row padding. Throws std::invalid_argument when the layer is out of
+    /// range or the byte count does not match the volume. Calls after shutdown
+    /// are protocol violations.
+    virtual void fillTexture3D(TextureView* view, std::uint32_t layer, const void* data,
+                               std::size_t sizeBytes) = 0;
+
+    /// Reads one 2D slice of a volume back into data, in the same order and
+    /// with the same size rule as fillTexture3D. Returns false and counts a
+    /// violation when the layer is out of range or the byte count does not
+    /// match. This is the round trip the volume capability is proved with.
+    virtual bool readTexture3D(const TextureView* view, std::uint32_t layer, void* data,
+                               std::size_t sizeBytes) = 0;
 
     /// Copies the depth attachment of source onto destination (a generic
     /// pass primitive, milestone 6d decision 20: moves scene depth between

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -63,6 +64,42 @@ public:
 
 private:
     RenderTargetDesc m_desc;
+};
+
+/// 3D texture of the null backend: plain data, one byte vector per slice, so a
+/// write and a read round-trip the same values with no graphics API involved.
+/// NullTextureView is final and describes a single 2D layer, so a volume needs
+/// its own view type; depth() reports the slice count.
+class NullTexture3DView final : public TextureView
+{
+public:
+    explicit NullTexture3DView(const Texture3DDesc& desc)
+        : m_desc(desc),
+          m_slices(static_cast<std::size_t>(desc.depth),
+                   std::vector<std::byte>(sliceBytes(desc)))
+    {
+    }
+
+    std::uint32_t width() const noexcept override { return m_desc.width; }
+    std::uint32_t height() const noexcept override { return m_desc.height; }
+    std::uint32_t depth() const noexcept override { return m_desc.depth; }
+    PixelFormat format() const noexcept override { return m_desc.format; }
+    bool isDepth() const noexcept override { return false; }
+
+    const Texture3DDesc& desc() const noexcept { return m_desc; }
+    /// Bytes in one slice, the size fillTexture3D and readTexture3D require.
+    std::size_t sliceBytes() const noexcept { return sliceBytes(m_desc); }
+    std::vector<std::byte>& slice(std::uint32_t layer) { return m_slices[layer]; }
+    const std::vector<std::byte>& slice(std::uint32_t layer) const { return m_slices[layer]; }
+
+    static std::size_t sliceBytes(const Texture3DDesc& desc) noexcept
+    {
+        return static_cast<std::size_t>(desc.width) * desc.height * bytesPerPixel(desc.format);
+    }
+
+private:
+    Texture3DDesc m_desc;
+    std::vector<std::vector<std::byte>> m_slices;
 };
 
 /// GPU mesh handle of the null backend: validates and records upload/draw
@@ -145,6 +182,12 @@ public:
     CameraParams camera() const override { return m_camera; }
 
     void bindTexture(const TextureView* view, std::uint32_t unit) override;
+    TextureView* createTexture3D(const Texture3DDesc& desc) override;
+    void bindTexture3D(const TextureView* view, std::uint32_t unit) override;
+    void fillTexture3D(TextureView* view, std::uint32_t layer, const void* data,
+                       std::size_t sizeBytes) override;
+    bool readTexture3D(const TextureView* view, std::uint32_t layer, void* data,
+                       std::size_t sizeBytes) override;
     void copyDepthAttachment(RenderTarget* source, RenderTarget* destination) override;
 
     void queueReadback(std::uint32_t x, std::uint32_t y) override;
@@ -170,8 +213,10 @@ private:
     bool ready() const noexcept { return !m_shutdown; }
     void countViolation() noexcept { ++m_violations; }
     NullRenderTarget* findTarget(RenderTarget* target) const;
+    NullTexture3DView* findVolume(TextureView* view) const;
 
     std::vector<std::unique_ptr<NullRenderTarget>> m_targets;
+    std::vector<std::unique_ptr<NullTexture3DView>> m_volumes;
     RenderTarget* m_bound_target = nullptr;
     CameraParams m_camera;
 

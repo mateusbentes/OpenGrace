@@ -13,6 +13,7 @@ namespace grace::render::opengl {
 // locally so the loader depends on no generated or third-party loader header.
 using FnGetString = const GLubyte* (*)(GLenum name);
 using FnGetError = GLenum (*)();
+using FnGetIntegerv = void (*)(GLenum pname, GLint* data);
 using FnClearColor = void (*)(GLfloat red, GLfloat green, GLfloat blue, GLfloat alpha);
 using FnClearDepth = void (*)(GLdouble depth);
 using FnClearStencil = void (*)(GLint s);
@@ -73,6 +74,18 @@ using FnBindTexture = void (*)(GLenum target, GLuint texture);
 using FnTexImage2D = void (*)(GLenum target, GLint level, GLint internalformat, GLsizei width,
                               GLsizei height, GLint border, GLenum format, GLenum type,
                               const GLvoid* pixels);
+// 3D texture entry points (milestone 7, first increment). glGetTexImage is
+// OpenGL 1.0 but is not declared by the system gl.h this project builds
+// against, so it is resolved here like the rest rather than linked.
+using FnTexImage3D = void (*)(GLenum target, GLint level, GLint internalformat, GLsizei width,
+                              GLsizei height, GLsizei depth, GLint border, GLenum format,
+                              GLenum type, const GLvoid* pixels);
+using FnTexSubImage3D = void (*)(GLenum target, GLint level, GLint xoffset, GLint yoffset,
+                                 GLint zoffset, GLsizei width, GLsizei height, GLsizei depth,
+                                 GLenum format, GLenum type, const GLvoid* pixels);
+using FnGetTexImage = void (*)(GLenum target, GLint level, GLenum format, GLenum type,
+                               GLvoid* pixels);
+using FnPixelStorei = void (*)(GLenum pname, GLint param);
 using FnTexParameteri = void (*)(GLenum target, GLenum pname, GLint param);
 using FnDeleteTextures = void (*)(GLsizei n, const GLuint* textures);
 using FnActiveTexture = void (*)(GLenum texture);
@@ -99,6 +112,7 @@ public:
     // OpenGL 1.1 entry points.
     FnGetString glGetString = nullptr;
     FnGetError glGetError = nullptr;
+    FnGetIntegerv glGetIntegerv = nullptr;
     FnClearColor glClearColor = nullptr;
     FnClearDepth glClearDepth = nullptr;
     FnClearStencil glClearStencil = nullptr;
@@ -151,6 +165,10 @@ public:
     FnGenTextures glGenTextures = nullptr;
     FnBindTexture glBindTexture = nullptr;
     FnTexImage2D glTexImage2D = nullptr;
+    FnTexImage3D glTexImage3D = nullptr;
+    FnTexSubImage3D glTexSubImage3D = nullptr;
+    FnGetTexImage glGetTexImage = nullptr;
+    FnPixelStorei glPixelStorei = nullptr;
     FnTexParameteri glTexParameteri = nullptr;
     FnDeleteTextures glDeleteTextures = nullptr;
     FnActiveTexture glActiveTexture = nullptr;

@@ -1,6 +1,8 @@
 #include "grace/render/null_render_backend.hpp"
 
+#include <cstddef>
 #include <cstdio>
+#include <cstring>
 #include <stdexcept>
 
 #include "grace/render/shadow.hpp"
@@ -395,8 +397,97 @@ void NullRenderBackend::bindTexture(const TextureView* view, std::uint32_t unit)
     std::snprintf(buffer, sizeof(buffer), "bindTexture(unit=%u,depth=%d)",
                   static_cast<unsigned int>(unit), view != nullptr && view->isDepth() ? 1 : 0);
     record(std::string(buffer));
-    if (view == nullptr || m_shutdown)
+    // A volume is not a 2D attachment: the OpenGL backend rejects it by the
+    // dynamic type, so the null backend rejects it by the layer count, and both
+    // count the same violation.
+    if (view == nullptr || view->depth() != 1u || m_shutdown)
         ++m_violations;
+}
+
+NullTexture3DView* NullRenderBackend::findVolume(TextureView* view) const
+{
+    for (const auto& volume : m_volumes)
+        if (volume.get() == view)
+            return volume.get();
+    return nullptr;
+}
+
+TextureView* NullRenderBackend::createTexture3D(const Texture3DDesc& desc)
+{
+    validateTexture3DDesc(desc);  // throws, the same rejection a real backend makes
+    char buffer[96];
+    std::snprintf(buffer, sizeof(buffer), "createTexture3D(%ux%ux%u)",
+                  static_cast<unsigned int>(desc.width), static_cast<unsigned int>(desc.height),
+                  static_cast<unsigned int>(desc.depth));
+    record(std::string(buffer));
+    if (m_shutdown)
+    {
+        ++m_violations;
+        throw std::logic_error("NullRenderBackend::createTexture3D: backend is shut down");
+    }
+    auto volume = std::make_unique<NullTexture3DView>(desc);
+    NullTexture3DView* raw = volume.get();
+    m_volumes.push_back(std::move(volume));
+    return raw;
+}
+
+void NullRenderBackend::bindTexture3D(const TextureView* view, std::uint32_t unit)
+{
+    char buffer[56];
+    std::snprintf(buffer, sizeof(buffer), "bindTexture3D(unit=%u,depth=%u)",
+                  static_cast<unsigned int>(unit),
+                  static_cast<unsigned int>(view != nullptr ? view->depth() : 0u));
+    record(std::string(buffer));
+    // A single-layer view is a 2D attachment, not a volume: the distinction a
+    // real backend makes by binding GL_TEXTURE_3D instead of GL_TEXTURE_2D.
+    if (view == nullptr || view->depth() < 2u || m_shutdown)
+        ++m_violations;
+}
+
+void NullRenderBackend::fillTexture3D(TextureView* view, std::uint32_t layer, const void* data,
+                                      std::size_t sizeBytes)
+{
+    NullTexture3DView* volume = findVolume(view);
+    char buffer[80];
+    std::snprintf(buffer, sizeof(buffer), "fillTexture3D(layer=%u,bytes=%zu)",
+                  static_cast<unsigned int>(layer), sizeBytes);
+    record(std::string(buffer));
+    if (m_shutdown)
+    {
+        ++m_violations;
+        return;
+    }
+    if (volume == nullptr)
+        throw std::invalid_argument("fillTexture3D: view is not a 3D texture");
+    if (layer >= volume->depth() || sizeBytes != volume->sliceBytes())
+        throw std::invalid_argument(
+            "fillTexture3D: layer out of range or byte count does not match the volume");
+    const auto* bytes = static_cast<const std::byte*>(data);
+    volume->slice(layer).assign(bytes, bytes + sizeBytes);
+}
+
+bool NullRenderBackend::readTexture3D(const TextureView* view, std::uint32_t layer, void* data,
+                                      std::size_t sizeBytes)
+{
+    char buffer[80];
+    std::snprintf(buffer, sizeof(buffer), "readTexture3D(layer=%u,bytes=%zu)",
+                  static_cast<unsigned int>(layer), sizeBytes);
+    record(std::string(buffer));
+    if (m_shutdown)
+    {
+        ++m_violations;
+        return false;
+    }
+    // findVolume takes a mutable pointer; this lookup only reads.
+    NullTexture3DView* volume = findVolume(const_cast<TextureView*>(view));
+    if (volume == nullptr || layer >= volume->depth() || sizeBytes != volume->sliceBytes())
+    {
+        ++m_violations;
+        return false;
+    }
+    const std::vector<std::byte>& slice = volume->slice(layer);
+    std::memcpy(data, slice.data(), sizeBytes);
+    return true;
 }
 
 void NullRenderBackend::queueReadback(std::uint32_t x, std::uint32_t y)

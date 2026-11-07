@@ -89,6 +89,12 @@ public:
     void setCamera(const CameraParams& camera) override;
     CameraParams camera() const override;
     void bindTexture(const TextureView* view, std::uint32_t unit) override;
+    TextureView* createTexture3D(const Texture3DDesc& desc) override;
+    void bindTexture3D(const TextureView* view, std::uint32_t unit) override;
+    void fillTexture3D(TextureView* view, std::uint32_t layer, const void* data,
+                       std::size_t sizeBytes) override;
+    bool readTexture3D(const TextureView* view, std::uint32_t layer, void* data,
+                       std::size_t sizeBytes) override;
     void copyDepthAttachment(RenderTarget* source, RenderTarget* destination) override;
 
     /// Queues a pixel to be read back before the next buffer swap. The back
