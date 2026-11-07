@@ -739,22 +739,30 @@ grep -rn 'GLuint\|GLenum\|SDL_\|Window' include/grace/render/render_backend.hpp 
     - no 3D texture exists anywhere (`grep -rn -i 'TEXTURE_3D|Texture3D'` in
       `include/`, `src/` and `tests/` returns nothing);
     - there is no way to create a standalone texture at all. The
-      `RenderBackend` contract has 24 virtual methods and none of them
+      `RenderBackend` contract has 32 virtual methods and none of them
       creates one: a texture exists only as an attachment of a render
       target, reached through `renderTargetTexture`;
     - `RenderTargetDesc` is 2D by construction: it has `width` and `height`
       and no depth field, so the existing attachment path cannot describe a
       volume;
-    - `PixelFormat` holds four values (`Rgba8`, `Rgba16F`, `R8`,
-      `Depth24Stencil8`) and none is suited to a multi-channel float irradiance
-      volume.
+    - the OpenGL backend cannot express one either. `gl_loader.cpp` loads 60
+      functions and the only texture-image entry is `glTexImage2D`; the
+      only framebuffer-attachment entry is `glFramebufferTexture2D`. The
+      3D forms (`glTexImage3D`, `glTexSubImage3D`, `glFramebufferTexture3D`)
+      are not loaded at all.
+
+    The format is not the obstacle: `Rgba16F` is RGBA 16-bit float, ~8
+    bytes per pixel, mapped to `GL_RGBA16F`, and the renderer already uses
+    it as a renderable colour attachment for the HDR target. An earlier
+    version of this entry listed the four `PixelFormat` values as unsuited
+    to a float irradiance volume. That was wrong and is corrected here: the
+    volume needs a third dimension, not a new format.
 
     So the first increment is not the propagation, it is the volume: a 3D
     texture in the contract (descriptor, creation, bind, in both backends and
     in the null backend), provable on its own by writing known values and
-    reading them back. Rendering into the volume, feeding it from the
-    scene, and
-    propagating are the increments that follow, and the scope decisions the
+    reading them back. Rendering into the volume, feeding it from the scene,
+    and propagating are the increments that follow, and the scope decisions the
     documentation does not settle — grid resolution, iteration count, whether
     geometry occludes, how many bounces — belong with them, measured the way
     decision 25 measured the volumetric light.
