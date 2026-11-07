@@ -319,7 +319,7 @@ The documented feature set lists a resource manager among the core components,
 so this project needs a container format. The original did not expose
 containers through its plugin architecture and its own format was never
 published, so there is nothing documented to reproduce: the container is this
-project's own, specified in [resource-container.md](resource-container.md)
+project's own, the OWD format, specified in [resource-container.md](resource-container.md)
 rather than inherited from any byte layout.
 
 Its payloads are DEFLATE streams (RFC 1951) produced and consumed through zlib,

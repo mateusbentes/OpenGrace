@@ -506,7 +506,7 @@ not exist before GL 3.2, so "3.0 core" is not a valid request.
 24. **Resource container: define one, or adopt an existing format?** The engine
     needs one: the documented feature set lists a resource manager among the
     core components. Two ways to get one, adopt an existing format or define
-    one, and this project defines its own, specified in [resource-
+    one, and this project defines its own, the OWD format, specified in [resource-
     container.md](resource-container.md). Its payloads are DEFLATE streams (RFC
     1951) produced and consumed through zlib, which is a published IETF
     standard under the zlib licence and already a transitive dependency through

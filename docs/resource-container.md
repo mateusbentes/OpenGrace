@@ -1,18 +1,30 @@
-# Resource container format
+# OWD: Open World Data container format
 
 ## 1. Scope
 
-OpenGrace needs a container for shipped resources. The documented feature set
-lists a resource manager among the core components, but the original's
-container format was never published and containers were not exposed through
-the plugin architecture, so there is nothing documented to reproduce. This
-document specifies the format this project uses instead.
+OpenGrace needs a container for shipped resources. The format is called OWD,
+for Open World Data, and its files use the extension .owd.
+
+The documented feature set lists a resource manager among the core
+components, but the original's container format was never published and
+containers were not exposed through the plugin architecture, so there is
+nothing documented to reproduce. This document specifies the format this
+project uses instead.
 
 The format is specified by requirements first and by encoding second, because
 the requirements are what a caller depends on and the encoding is only one way
 to satisfy them. Every requirement below can be stated without reference to any
 existing container, which is the test that separates a requirement from a
-copied structure. Nothing here was derived from any shipped product's format.
+copied structure. Nothing here was derived from any shipped
+product's format.
+
+The name is a description and not a reference. Its two letters coincide
+with those of a proprietary container belonging to an engine this project
+does not reproduce, and the coincidence is one of initials: the expansion
+names what the container holds, which is the data a world is built from,
+and nothing about the format was derived from that other one. The two
+share a payload codec and nothing else, and neither may be used to derive
+the other.
 
 ## 2. Payload encoding
 
@@ -110,7 +122,7 @@ knows where the index is.
 
 | offset | size | field |
 | --- | --- | --- |
-| 0 | 4 | magic, ASCII `GRCR` |
+| 0 | 4 | magic, `OWD` followed by a NUL byte |
 | 4 | 1 | format major version |
 | 5 | 1 | format minor version |
 | 6 | 2 | flags, reserved, must be zero |
