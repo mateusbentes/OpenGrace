@@ -108,7 +108,7 @@ All results below are real runs, on the tree at the stated commit.
 | 2026-11-07 | same, container specification | Index blocked and dictionary declined, both measured before being written. The index as one deflated stream against blocks of 256 records: a lookup is 0.4 ms at 10,000 entries and 32.9 ms at 400,000, against 12 us at every size in blocks; the block table is 12 bytes per block, a flat 0.5% of the index at every size measured, 18,756 bytes at 400,000 entries against the 3,513,508 it replaces. Header 28 -> 32 bytes for the block count. The dictionary's first measurement is retracted: its payloads differed in 1.0% of their bytes because the generator never read its seed, so the dictionary contained the payload it was measured against. Re-measured on payloads whose geometry differs, the dictionary makes them 1.8-1.9% larger, gains 0.0% over the filter, and gains 3.2% on an LOD chain, capped at 4.0% by the 32768-byte window. Also corrects a contradiction in section 4.6, whose prose described record transposition (43.1%) where its table measures byte transposition (34.9%). Tools: tools/measure-owd.py, tools/measure-dict.py |
 | 2026-11-07 | same, container specification | Payload blocked so requirement 2 holds in the middle of an entry, not only at its start. One deflate stream cannot be entered part way, so serving a 64 KB read in the middle of an 8.0 MiB vertex buffer inflates 8,400,000 bytes and takes 6.5 ms; with the payload blocked it is 131,072 bytes and 231 us, 64 and 28 times less, and on a 16 MB texture 14.4 ms against 223 us. The payload now uses the index's shape: a payload block table and independently deflated blocks of 256 KiB, reduced to a multiple of the element size. Filtering per block costs +21.55% on the vertex buffer and +91.60% on an index buffer, which is 2.6% of the payload in bytes. No record field was added: block size and count are derived. Sections 4.6.1 and 4.8. Measured by `tools/measure-stream.py` |
 | 2026-11-07 | same, both documents under the rules | OpenGL off: 14/14 Debug; OpenGL on: 27/27 Debug and Release; -L opengl 13/13; docs_structure 16 checks, 0 failures in both trees; zero warnings under -Werror |
-| 2026-11-07 | same, milestone 7 first increment | 3D texture in the contract, both backends and the null backend. OpenGL off: 15/15 Debug; OpenGL on: 28/28 Debug and Release; -L opengl 14/14; docs_structure 17 checks, 0 failures; texture3d 23 checks, 0 failures with no GL context; opengl_render 125 -> 157 checks; zero warnings under -Werror. Measured on the driver before the code was written: a Depth24Stencil8 volume is refused by glTexImage3D with GL_INVALID_OPERATION, and an R8 3x3 slice round-trips with row alignment 1 and not with 4 |
+| 2026-11-07 | same, milestone 7 first increment | 3D texture in the contract, both backends and the null backend. OpenGL off: 15/15 Debug; OpenGL on: 28/28 Debug and Release; -L opengl 13/13; docs_structure 17 checks, 0 failures; texture3d 23 checks, 0 failures with no GL context; opengl_render 125 -> 157 checks; zero warnings under -Werror. Measured on the driver before the code was written: a Depth24Stencil8 volume is refused by glTexImage3D with GL_INVALID_OPERATION, and an R8 3x3 slice round-trips with row alignment 1 and not with 4 |
 
 ### Defects found by the tests, and fixed
 
@@ -779,6 +779,15 @@ grep -rn 'GLuint\|GLenum\|SDL_\|Window' include/grace/render/render_backend.hpp 
     the commit that published the numbers: 31 and 59, not 32 and 60. This is
     the same class of error as the `PixelFormat` claim corrected above, and it
     is recorded rather than silently replaced.
+
+    A third number in the same commit was wrong the same way. The validation
+    record for this increment claimed `-L opengl 14/14`, assuming the new
+    `texture3d` suite would carry the `opengl` label. It does not: that label
+    marks the suites that need an X server, and `test_texture3d` runs with no
+    GL context at all, so the label still covers 13 suites. Measured from the
+    run, `-L opengl` is 13/13 and the count is unchanged from the previous
+    record. Written by presumption rather than measurement, in the commit that
+    was correcting two numbers written by presumption.
 
     The first increment is built. `Texture3DDesc` (width, height, depth,
     `PixelFormat`) with `validateTexture3DDesc`; `createTexture3D`,
