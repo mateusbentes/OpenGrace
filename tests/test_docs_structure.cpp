@@ -48,7 +48,17 @@ namespace {
 
 using Failure = std::pair<std::string, std::string>;
 
-constexpr const char* kDocsPath = "docs/implementation-status.md";
+// Every document the rules apply to. R1 to R3 are about numbered decisions, and
+// R6 and R8 about cross-references and a verification section; those belong to
+// the status document. A document without them does not violate those rules, it
+// has nothing for them to describe, and R4, R5 and R7 to R11 are Markdown
+// structure that applies to any document. That is why no rule needs an
+// exemption here. Measured before the specification was added: it has zero
+// decisions, zero "decision N" references and no verification section.
+constexpr const char* kDocsPaths[] = {
+    "docs/implementation-status.md",
+    "docs/resource-container.md",
+};
 
 bool startsWith(const std::string& text, const std::string& prefix)
 {
@@ -214,10 +224,26 @@ std::vector<Failure> checkDocument(const std::string& text)
             anyDecisionLine.push_back(i);
     }
 
-    if (decisions.empty())
+    // R1 to R3 describe a document that has a decisions section, the same way
+    // R8 describes a document that has a verification section. A document with
+    // no such section is one they do not describe, and the specification is that
+    // document: it has no "## Open decisions", so its numbering cannot be sound
+    // or unsound, and its section 9 holds a bold numbered list that the
+    // unrestricted scan below does see.
+    //
+    // Before this guard the empty list was reported as a defect and the function
+    // returned, so on the specification R4 to R11 never ran at all: every rule
+    // added after R3 was silently inapplicable to it. A section that exists and
+    // holds no decision is still a defect, because that is a section emptied by
+    // a bad edit rather than a document that never had one.
+    // The same test the loop above makes, run again so the guard does not
+    // depend on a sentinel value that a section at the end of the file could
+    // share.
+    bool hasDecisionSection = false;
+    for (const std::size_t h : headings)
     {
-        failures.emplace_back("R1", "no decisions found");
-        return failures;
+        if (lines[h] == "## Open decisions")
+            hasDecisionSection = true;
     }
 
     std::vector<int> numbers;
@@ -225,47 +251,62 @@ std::vector<Failure> checkDocument(const std::string& text)
     for (const auto& entry : decisions)
         numbers.push_back(entry.second);
 
-    // R1: strictly ascending.
-    for (std::size_t i = 1; i < numbers.size(); ++i)
+    if (!hasDecisionSection)
     {
-        if (numbers[i] <= numbers[i - 1])
+        // Nothing to check. R4 onwards are checked below.
+    }
+    else if (decisions.empty())
+    {
+        failures.emplace_back("R1", "no decisions found");
+    }
+    else
+    {
+        // R1: strictly ascending.
+        for (std::size_t i = 1; i < numbers.size(); ++i)
         {
-            failures.emplace_back(
-                "R1", "decision " + std::to_string(numbers[i]) +
-                          " follows " + std::to_string(numbers[i - 1]) +
-                          " at line " + std::to_string(decisions[i].first + 1));
-            break;
+            if (numbers[i] <= numbers[i - 1])
+            {
+                failures.emplace_back(
+                    "R1", "decision " + std::to_string(numbers[i]) +
+                              " follows " + std::to_string(numbers[i - 1]) +
+                              " at line " + std::to_string(decisions[i].first + 1));
+                break;
+            }
+        }
+
+        // R2: contiguous from one.
+        for (std::size_t i = 0; i < numbers.size(); ++i)
+        {
+            const int want = static_cast<int>(i) + 1;
+            if (numbers[i] != want)
+            {
+                failures.emplace_back(
+                    "R2", "expected decision " + std::to_string(want) + " at line " +
+                              std::to_string(decisions[i].first + 1) + ", found " +
+                              std::to_string(numbers[i]));
+                break;
+            }
         }
     }
 
-    // R2: contiguous from one.
-    for (std::size_t i = 0; i < numbers.size(); ++i)
+    // R3: no level-2 heading inside the decision span. Guarded on the
+    // unrestricted scan, because that is where the span comes from, and a
+    // document with no decisions section has no span to be inside of.
+    if (hasDecisionSection && !anyDecisionLine.empty())
     {
-        const int want = static_cast<int>(i) + 1;
-        if (numbers[i] != want)
+        for (std::size_t i = 0; i < headings.size(); ++i)
         {
-            failures.emplace_back(
-                "R2", "expected decision " + std::to_string(want) + " at line " +
-                          std::to_string(decisions[i].first + 1) + ", found " +
-                          std::to_string(numbers[i]));
-            break;
+            if (headings[i] > anyDecisionLine.front() &&
+                headings[i] < anyDecisionLine.back())
+            {
+                failures.emplace_back(
+                    "R3", "heading \"" + lines[headings[i]] +
+                              "\" sits inside the decisions at line " +
+                              std::to_string(headings[i] + 1));
+                break;
+            }
         }
     }
-
-    // R3: no level-2 heading inside the decision span.
-    for (std::size_t i = 0; i < headings.size(); ++i)
-    {
-        if (headings[i] > anyDecisionLine.front() &&
-            headings[i] < anyDecisionLine.back())
-        {
-            failures.emplace_back(
-                "R3", "heading \"" + lines[headings[i]] +
-                          "\" sits inside the decisions at line " +
-                          std::to_string(headings[i] + 1));
-            break;
-        }
-    }
-
     // R4: every level-2 section has content.
     for (std::size_t h = 0; h < headings.size(); ++h)
     {
@@ -482,6 +523,42 @@ std::vector<Failure> checkDocument(const std::string& text)
         }
     }
 
+    // R11: a run of two or more blank lines is not a layout choice. R7 looks
+    // only at the end of the file, where git has something to say. A run in the
+    // middle is silent, and one was carried into a commit of the specification,
+    // where it sat above a heading until the file was measured. Fences are
+    // skipped as in R9 and R10: a blank line inside a fenced block is part of
+    // the block's content, and the good document carries one.
+    {
+        bool fenced = false;
+        std::size_t i = 0;
+        while (i < lines.size())
+        {
+            if (isFence(lines[i]))
+            {
+                fenced = !fenced;
+                ++i;
+                continue;
+            }
+            if (fenced || !lines[i].empty())
+            {
+                ++i;
+                continue;
+            }
+            const std::size_t start = i;
+            while (i < lines.size() && lines[i].empty())
+                ++i;
+            if (i - start > 1)
+            {
+                failures.emplace_back(
+                    "R11", "lines " + std::to_string(start + 1) + "-" +
+                               std::to_string(i) + " are " +
+                               std::to_string(i - start) +
+                               " consecutive blank lines");
+                break;
+            }
+        }
+    }
     return failures;
 }
 
@@ -521,6 +598,8 @@ const std::string kGood = "# Status\n"
                           "\n"
                           "```sh\n"
                           "cmake -S . -B build\n"
+                          "\n"
+                          "\n"
                           "grep -rn 'api' include/ \\\n"
                           "    || echo 'none'\n"
                           "```\n";
@@ -597,6 +676,13 @@ const Fixture kFixtures[] = {
      " script that did not measure the file, and it is long enough to go past"
      " the limit of seventy-nine columns by a wide margin.\n\n"
      "## Verification commands\n\n```sh\ncmake -S . -B build\n```\n"},
+    {"R11", "a run of blank lines in the middle of a document",
+     "# Status\n\n## Open decisions\n\n"
+     "1. **First?** Yes.\n\n"
+     "## A section\n\n"
+     "Text.\n\n\n"
+     "More text.\n\n"
+     "## Verification commands\n\n```sh\ncmake -S . -B build\n```\n"},
 };
 
 }  // namespace
@@ -604,10 +690,6 @@ const Fixture kFixtures[] = {
 int main(int argc, char** argv)
 {
     const std::string root = (argc > 1) ? argv[1] : std::string(".");
-    const std::string path = root + "/" + kDocsPath;
-    const std::string text = readFile(path);
-
-    GRACE_CHECK(!text.empty());
 
     // The rules must accept a sound document.
     const std::vector<Failure> good = checkDocument(kGood);
@@ -630,11 +712,26 @@ int main(int argc, char** argv)
         GRACE_CHECK(caught);
     }
 
-    // The real document.
-    const std::vector<Failure> failures = checkDocument(text);
-    for (const Failure& failure : failures)
-        std::printf("  %s: %s\n", failure.first.c_str(), failure.second.c_str());
-    GRACE_CHECK_EQ(failures.size(), 0u);
+    // Every document the rules apply to, by every rule. A document that cannot
+    // be read is a failure, not an empty string that passes every rule.
+    for (const char* doc : kDocsPaths)
+    {
+        const std::string path = root + "/" + doc;
+        const std::string text = readFile(path);
+        GRACE_CHECK(!text.empty());
+        if (text.empty())
+        {
+            std::printf("  %s: missing or empty\n", doc);
+            continue;
+        }
+        const std::vector<Failure> failures = checkDocument(text);
+        for (const Failure& failure : failures)
+        {
+            std::printf("  %s: %s: %s\n", doc, failure.first.c_str(),
+                        failure.second.c_str());
+        }
+        GRACE_CHECK_EQ(failures.size(), 0u);
+    }
 
     return grace::test::summary("docs_structure");
 }
