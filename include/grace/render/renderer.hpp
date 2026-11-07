@@ -28,6 +28,13 @@ enum class RenderPath : std::uint8_t
 /// std::invalid_argument, never truncated.
 inline constexpr std::uint32_t kMaxDeferredLights = 16;
 
+/// Cap on volumetric lights (volumeDensity > 0) in one frame's volume pass
+/// (milestone 6f). The cap is the volume shader's uniform array size,
+/// documented and enforced: a frame that would exceed it is rejected with
+/// std::invalid_argument in submit(), never truncated. Per-light cost is
+/// per-pixel: 16 ray samples x (attenuation + shadow lookup) each.
+inline constexpr std::uint32_t kMaxVolumetricLights = 4;
+
 /// Post-processing chain configuration (milestone 6a). Off by default; with it
 /// off, every pixel value is bit-identical to before the chain existed (H4).
 /// The chain runs after lighting and before frame completion, owned by the
@@ -184,6 +191,7 @@ private:
     void renderDeferredFrame();
     void renderShadowMapsIfNeeded();
     void runPostChain();
+    std::uint32_t volumetricLightCount() const;
     RenderTarget* ensureHdrTarget();
     void ensureFullscreenQuad();
     void releasePostResources();
@@ -220,6 +228,8 @@ private:
     RenderTarget* m_display = nullptr;   ///< 6e offscreen 8-bit display target (Rgba8, sampleable)
     RenderTarget* m_displayB = nullptr;  ///< 6e MLAA ping-pong on the display image (Rgba8)
     RenderTarget* m_displaySrc = nullptr;///< 6e the target the last present pass copied from
+    std::unique_ptr<ShaderProgram> m_postVolumetric;  ///< 6f volumetric in-scattering pass
+    RenderTarget* m_vol = nullptr;  ///< 6f linear in-scattering buffer: Rgba16F, full framebuffer size
     std::unique_ptr<ShaderProgram> m_gbuffer_program;
     std::unique_ptr<ShaderProgram> m_deferred_program;
     std::unique_ptr<GpuMesh> m_fullscreen_quad;

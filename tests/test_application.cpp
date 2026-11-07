@@ -108,10 +108,16 @@ int main()
         GRACE_CHECK(step_indices == expected_indices);
 
         // With the post chain ON by default (6e, decision 23) each frame is
-        // setCamera + HDR pass + the full chain + present pass (114 entries
-        // per frame after the initial setClearColor), so frame f's steps run
-        // while the log has 1 + 114*f entries.
-        const std::vector<std::size_t> expected_events{1, 1, 115, 115, 211, 211};
+        // setCamera + HDR pass + the full chain + present pass. Derivation of
+        // the counts (measured, not fitted): the first frame emits 120 events
+        // = 100 steady-state per-frame events + 20 one-time creations (10
+        // render targets: HDR, ssao, postA, vol, display, displayB, 4 bloom
+        // levels; 8 shader programs; the fullscreen quad's createGpuMesh +
+        // upload); later frames emit 100 each because the post resources are
+        // cached. Steps of frame f run before frame f renders, so they see 1
+        // entry for f = 0 and 1 + 120 + 100*(f-1) for f >= 1: run(3) gives
+        // {1, 1, 121, 121, 221, 221} (121 = 1 + 120, 221 = 121 + 100).
+        const std::vector<std::size_t> expected_events{1, 1, 121, 121, 221, 221};
         GRACE_CHECK(events_at_step == expected_events);
 
         // Structural anchors of the per-frame shape: one setCamera per frame,

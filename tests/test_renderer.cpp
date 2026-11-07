@@ -111,6 +111,7 @@ int main()
             "createRenderTarget(128x96,color=2,depth=0)",
             "createRenderTarget(128x96,color=1,depth=0)",
             "createRenderTarget(128x96,color=1,depth=0)",
+            "createRenderTarget(128x96,color=1,depth=0)",
             "createRenderTarget(64x48,color=1,depth=0)",
             "createRenderTarget(32x24,color=1,depth=0)",
             "createRenderTarget(16x12,color=1,depth=0)",
@@ -122,6 +123,7 @@ int main()
             "createShaderProgram(PostMLAA)",
             "createShaderProgram(PostDOF)",
             "createShaderProgram(PostBlit)",
+            "createShaderProgram(PostVolumetric)",
             "createGpuMesh",
             "upload",
             "beginRenderPass(128x96)",
@@ -188,11 +190,15 @@ int main()
             "bindTexture(unit=2,depth=0)",
             "renderTargetTexture",
             "bindTexture(unit=3,depth=0)",
+            "renderTargetTexture",
+            "bindTexture(unit=4,depth=0)",
             "use",
             "setUniform(hdrTex)",
             "setUniform(hdrAmbient)",
             "setUniform(bloomTex)",
             "setUniform(ssaoTex)",
+            "setUniform(volTex)",
+            "setUniform(useVolumetric)",
             "setUniform(useSSAO)",
             "setUniform(outSize)",
             "setUniform(exposure)",
@@ -219,7 +225,8 @@ int main()
             "drawIndexed",
             "endRenderPass",
             "setDepthTestEnabled(1)",
-            "endRenderPass"};
+            "endRenderPass"
+        };
         GRACE_CHECK(backend.events() == expected);
         GRACE_CHECK_EQ(backend.violationCount(), 0u);
         backend.shutdown();

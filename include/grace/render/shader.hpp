@@ -34,6 +34,7 @@ enum class ShaderProgramId : std::uint8_t
     PostDOF,            ///< post: depth of field with a bokeh disc, linear HDR (6d)
     PostBlit,           ///< post: present pass — textured fullscreen copy of the
                         ///< display target onto the default framebuffer (6e)
+    PostVolumetric,     ///< post: volumetric light in-scattering along the view ray (6f)
 };
 
 /// Caches uniform locations by name so repeated sets do not re-query the

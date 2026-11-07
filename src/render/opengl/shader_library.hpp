@@ -706,6 +706,8 @@ uniform sampler2D hdrAmbient; // linear ambient-only attachment (6c)
 uniform sampler2D bloomTex;   // linear bloom (already blurred)
 uniform sampler2D ssaoTex;    // occlusion factor in [0,1] (1 = unoccluded)
 uniform int useSSAO;          // 0 when the SSAO pass was skipped: occlusion is 1
+uniform sampler2D volTex;     // linear in-scattering from volumetric lights (6f)
+uniform int useVolumetric;    // 0 when no volumetric light is present: no in-scattering
 uniform vec2 outSize;         // default framebuffer size
 uniform float exposure;
 out vec4 fragment;
@@ -733,8 +735,11 @@ void main()
     vec3 amb = texture(hdrAmbient, uv).rgb;      // ambient alone (attachment 1; 0 on single-attachment targets)
     vec3 bloom = texture(bloomTex, uv).rgb;
     float occ = useSSAO == 1 ? texture(ssaoTex, uv).r : 1.0;
+    // 6f: volumetric in-scattering is added in LINEAR space, before the
+    // tonemap, so it responds to exposure like all other lighting.
+    vec3 vol = useVolumetric == 1 ? texture(volTex, uv).rgb : vec3(0.0);
     // 6c: occlusion multiplies the ambient term only: direct + ambient * occ.
-    vec3 tonemapped = aces((hdr - amb + amb * occ + bloom) * exposure);
+    vec3 tonemapped = aces((hdr - amb + amb * occ + bloom + vol) * exposure);
     fragment = vec4(srgbEncode(tonemapped), 1.0);
 }
 )";
@@ -984,6 +989,158 @@ void main()
     }
     outColor = vec4(sum / wsum, 1.0);
     outAmb = vec4(asum / wsum, 1.0);
+}
+)";
+
+// Volumetric light pass (milestone 6f, decision 24): single-scattering
+// in-scattering integrated ALONG THE VIEW RAY (not sampled at one point).
+// For each volumetric light the ray from the camera through the pixel is
+// intersected with the light's ANALYTIC volume — a sphere of `radius` for a
+// point-style light, a cone (truncated by `range`) for a spot-style one — and
+// the segment is marched with 16 fixed samples. Each sample contributes
+// attenuation * shadow * ds; the result is color * intensity * density * sum
+// / (4*pi) (isotropic phase), written in LINEAR HDR; the tonemap adds it
+// before exposure. Camera inside the volume: the entry t0 is clamped to 0,
+// so the march never runs backwards. Point-style volumes with a paraboloid
+// shadow map (slot >= 0) test it once per sample (single tap; the bilateral
+// 3x3 filter remains a surface-shading property). Spot-style cone volumes
+// are unshadowed in this tree (no spot shadow maps) — documented limitation.
+constexpr const char* kPostVolumetricFragmentShader = R"(#version 330 core
+uniform sampler2D depthTex;      // HDR scene depth (NDC [0,1])
+uniform mat4 invProj;
+uniform mat4 invView;
+uniform vec3 cameraPos;
+uniform vec2 outSize;
+uniform int volCount;            // <= 4
+uniform vec3 volPos[4];
+uniform vec3 volDir[4];          // spot axis (unused for spheres)
+uniform vec3 volColor[4];
+uniform float volIntensity[4];
+uniform float volRadius[4];      // sphere radius (point) / range (spot), world units
+uniform float volInnerCos[4];    // spot cone inner cos
+uniform float volOuterCos[4];    // spot cone outer cos
+uniform int volIsCone[4];        // 1 = cone volume (spot), 0 = sphere volume (point)
+uniform float volDensity[4];     // scattering density, 1/world unit
+uniform int volShadowSlot[4];    // paraboloid map slot, -1 = unshadowed
+uniform sampler2D pointShadowFront[2];
+uniform sampler2D pointShadowBack[2];
+uniform mat4 pointLightViews[2];
+uniform vec2 pointLightRange[2];   // near, far
+uniform float pointShadowBias[2];
+out vec4 fragment;
+
+vec3 viewPos(vec2 uv, float d)
+{
+    vec4 clip = vec4(uv * 2.0 - 1.0, d * 2.0 - 1.0, 1.0);
+    vec4 v = invProj * clip;
+    return v.xyz / v.w;
+}
+
+// Documented windowed inverse-square range attenuation (same as surfaces).
+float rangeAtten(float intensity, float range, float d)
+{
+    if (d > range) return 0.0;
+    float w = 1.0 - d / range;
+    return intensity * w * w / (d * d + 1.0);
+}
+
+// Single-tap paraboloid lookup (volume pass; the bilateral 3x3 filter is a
+// surface-shading property). Outside the map or beyond far: lit (documented).
+float tapF0(vec2 uv, float d, float b) { float s = texture(pointShadowFront[0], uv).r; return (d <= s + b) ? 1.0 : 0.0; }
+float tapB0(vec2 uv, float d, float b) { float s = texture(pointShadowBack[0], uv).r; return (d <= s + b) ? 1.0 : 0.0; }
+float tapF1(vec2 uv, float d, float b) { float s = texture(pointShadowFront[1], uv).r; return (d <= s + b) ? 1.0 : 0.0; }
+float tapB1(vec2 uv, float d, float b) { float s = texture(pointShadowBack[1], uv).r; return (d <= s + b) ? 1.0 : 0.0; }
+
+float volShadow(int slot, vec3 wp)
+{
+    if (slot < 0) return 1.0;
+    vec4 l = pointLightViews[slot] * vec4(wp, 1.0);
+    float ldist = length(l.xyz);
+    vec3 ldir = l.xyz / max(ldist, 1e-6);
+    float ldepth = clamp((ldist - pointLightRange[slot].x) /
+                             (pointLightRange[slot].y - pointLightRange[slot].x),
+                         0.0, 1.0);
+    int hemi = (l.z >= 0.0) ? 0 : 1;
+    float u;
+    float v;
+    if (hemi == 0) { u = ldir.x / (1.0 + ldir.z); v = ldir.y / (1.0 + ldir.z); }
+    else { u = -ldir.x / (1.0 - ldir.z); v = -ldir.y / (1.0 - ldir.z); }
+    vec2 luv = vec2(u, v) * 0.5 + 0.5;
+    if (luv.x < 0.0 || luv.x > 1.0 || luv.y < 0.0 || luv.y > 1.0 || ldepth > 1.0) return 1.0;
+    if (slot <= 0)
+        return hemi == 0 ? tapF0(luv, ldepth, pointShadowBias[0]) : tapB0(luv, ldepth, pointShadowBias[0]);
+    return hemi == 0 ? tapF1(luv, ldepth, pointShadowBias[1]) : tapB1(luv, ldepth, pointShadowBias[1]);
+}
+
+// Ray-sphere: returns (t0, t1); both negative when there is no hit ahead.
+vec2 raySphere(vec3 o, vec3 d, vec3 c, float r)
+{
+    vec3 oc = o - c;
+    float b = dot(oc, d);
+    float cc = dot(oc, oc) - r * r;
+    float disc = b * b - cc;
+    if (disc < 0.0) return vec2(-1.0, -1.0);
+    float s = sqrt(disc);
+    return vec2(-b - s, -b + s);
+}
+
+void main()
+{
+    vec2 uv = gl_FragCoord.xy / outSize;
+    float d = texture(depthTex, uv).r;
+    vec3 sp = viewPos(uv, d);          // view-space surface point (far plane if background)
+    float rayDist = length(sp);        // camera sits at the view origin
+    vec4 pv = invProj * vec4(uv * 2.0 - 1.0, -1.0, 1.0);
+    vec3 dirView = normalize(pv.xyz / pv.w);
+    vec4 dw = invView * vec4(dirView, 0.0);
+    vec3 dir = normalize(dw.xyz);
+    vec3 o = cameraPos;
+
+    vec3 inscatter = vec3(0.0);
+    for (int i = 0; i < volCount && i < 4; ++i)
+    {
+        float t0 = 0.0;
+        float t1 = rayDist;
+        if (volIsCone[i] == 0)
+        {
+            vec2 tr = raySphere(o, dir, volPos[i], volRadius[i]);
+            if (tr.y <= 0.0) continue;          // sphere behind the camera
+            t0 = max(tr.x, 0.0);                // camera inside: clamp entry to 0
+            t1 = min(tr.y, rayDist);
+        }
+        else
+        {
+            vec3 axis = normalize(volDir[i]);
+            float dA = dot(dir, axis);
+            if (dA <= 1e-4) continue;           // ray never enters the forward cone
+            t1 = min(rayDist, volRadius[i] / dA);  // cone truncated by range
+        }
+        if (t1 <= t0) continue;
+        float ds = (t1 - t0) / 16.0;            // 16 fixed samples along the ray
+        float sum = 0.0;
+        for (int s = 0; s < 16; ++s)
+        {
+            float t = t0 + (float(s) + 0.5) * ds;
+            vec3 p = o + dir * t;
+            vec3 toL = volPos[i] - p;
+            float dist = length(toL);
+            vec3 L = toL / max(dist, 1e-6);
+            float atten = rangeAtten(volIntensity[i], volRadius[i], dist);
+            if (volIsCone[i] == 1)
+            {
+                float cone = smoothstep(volOuterCos[i], volInnerCos[i],
+                                        dot(-L, normalize(volDir[i])));
+                if (cone <= 0.0) continue;
+                atten *= cone;
+            }
+            else if (dist > volRadius[i])
+                continue;
+            float shadow = volShadow(volShadowSlot[i], p);
+            sum += atten * shadow * ds;
+        }
+        inscatter += volColor[i] * volDensity[i] * sum / (4.0 * 3.14159265358979);
+    }
+    fragment = vec4(inscatter, 1.0);
 }
 )";
 

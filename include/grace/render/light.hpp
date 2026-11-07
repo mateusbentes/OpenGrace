@@ -45,6 +45,13 @@ struct PointLight
     core::vec3 color{1.0f, 1.0f, 1.0f};  ///< linear RGB, components >= 0
     float intensity = 1.0f;              ///< >= 0
     float radius = 10.0f;                ///< range in world units, must be > 0
+    /// Scattering density of the light's spherical volume, 1/world unit, >= 0.
+    /// 0 (default) = not volumetric: the light shades surfaces only. > 0 makes
+    /// the sphere of `radius` around the position additionally visible as
+    /// in-scattered light (milestone 6f, decision 24 — a property of the
+    /// point light, since the documentation does not say whether "volumetric"
+    /// is a distinct type).
+    float volumeDensity = 0.0f;
 
     void validate() const;
 };
@@ -67,6 +74,10 @@ struct SpotLight
     float range = 10.0f;                      ///< > 0, world units
     float innerAngle = 0.5f;                  ///< radians, in (0, outerAngle)
     float outerAngle = 1.0f;                  ///< radians, in (innerAngle, pi]
+    /// Scattering density of the light's conical volume (truncated by `range`),
+    /// 1/world unit, >= 0. 0 (default) = not volumetric; > 0 makes the cone
+    /// additionally visible as in-scattered light (milestone 6f, decision 24).
+    float volumeDensity = 0.0f;
 
     void validate() const;
 };

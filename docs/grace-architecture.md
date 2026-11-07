@@ -134,6 +134,13 @@ as a decision rather than folded in as if it were fidelity.
   sunlight.
 - Deferred rendering supporting an unlimited number of lights.
 
+> Note (implementation, milestone 6f): the source does not say whether
+> "volumetric" is a distinct light type or a property of point/spot lights,
+> nor which representation (analytic region, mesh, screen-space) the volume
+> has. This project implements it as a scattering-density property of point
+> and spot lights with an analytic volume; see decision 25 in
+> [implementation-status.md](implementation-status.md).
+
 ### 3.4 Shadows
 
 - Dual paraboloid shadow maps with bilateral filtering.

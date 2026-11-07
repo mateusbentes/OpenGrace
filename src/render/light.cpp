@@ -52,6 +52,8 @@ void PointLight::validate() const
     validateColor(color, "point");
     validateIntensity(intensity, "point");
     validateRange(radius, "radius", "point");
+    if (!(volumeDensity >= 0.0f))
+        throw std::invalid_argument("point light: volumeDensity must be >= 0");
 }
 
 void SpotLight::validate() const
@@ -66,6 +68,8 @@ void SpotLight::validate() const
     if (!(innerAngle < outerAngle))
         throw std::invalid_argument(
             "spot light: inverted cone (innerAngle must be < outerAngle)");
+    if (!(volumeDensity >= 0.0f))
+        throw std::invalid_argument("spot light: volumeDensity must be >= 0");
 }
 
 void validateLight(const DynamicLight& light)

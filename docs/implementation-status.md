@@ -100,7 +100,8 @@ All results below are real runs, on the tree at the stated commit.
 | 2026-11-06 | same, milestone 6d | New suite test_dof_mlaa 40/40: DOF edge row (ground split at x=0, sun 0.5 + ambient 0.2, hard edge 44/220 at column 64): off and focus=1.0 identical (sharp plane at focus); focus=0.5 (CoC clamped 12 px) blends the edge 220->195 at x=64, 44->82 at x=54 (10 px out), x=50 (14 px) and x=76 untouched — the disc cutoff at the 12 px CoC, not a Gaussian decay; deferred row matches forward within 1 (195 182 163 133 133 83 45 45 201 209 215 220). MLAA edge row (ambient-only, dark 12 / bright 149): off hard step, on the two straddling pixels blend to ~103, interiors unchanged. Both techniques off: flat ambient-1.0 pixel 232 = pre-6d tree. CLI 16 visible + 8 xvfb combos (paths x post off/on x technique flags) all exit 0: 30,30,30,255 post off, 110,110,110,255 post on (centre sample is background, so technique flags do not move it) |
 | 2026-11-06 | same, milestone 6e | OpenGL off: 13/13 Debug; OpenGL on: 25/25 Debug and Release; `-L opengl` 12/12; zero warnings under `-Werror`. Structural change (decision 22 update): the chain ends in an offscreen Rgba8 display target; MLAA runs after the tonemap on the display-encoded image (edge blend of codes 12/149 now 80, was 103 in the linear domain); present = new PostBlit pass onto the default framebuffer. test_post 16/16 adds: default-config frame reports centre 110 (derived sRGB(aces(30/255))*255 = 110.51, GL 110) and the present proof (default-FB captured pixel == displayTarget() pixel). CLI: no args -> 110,110,110,255 both paths, visible and xvfb, exit 0; --no-post -> 30,30,30,255 (the two paths differ) |
 | 2026-11-06 | same, milestone 6e | Re-baseline table (old legacy -> new chain, equation round(255*sRGB(aces(x)))): test_deferred D4 parity centre 178 -> 220 (x=0.7, relative check diff 0 unchanged in form); 6-lights centre 253 -> 231 (x~0.9922); shadow parity occluded 51 -> 149,149,149,255 both paths (diff 0; x=0.2 ambient); test_renderer forward-frame event log 7 -> 117 events (full chain, regenerated literal); test_application events_at_step {1,1,5,5,9,9} -> {1,1,115,115,211,211} with structural anchors (3 setCamera, 6 clears, 3 present passes, shutdown last, violations 0). Unchanged: all direct-backend suites (lighting/shadows/point_shadows/tsm/opengl_render — they never run the chain), test_post explicit on/off values, test_ssao 206/232/232 + HDR depth 0.9045, test_dof_mlaa DOF row. Category: default change (decision 23), NOT defect fixes and NOT re-baselines-for-convenience; no tolerance was widened. 6e also fixed a real defect the flip exposed: forward + shadows + chain drew lighting into the default FB because shadow passes end there (renderer now re-opens the lighting pass after shadow passes) — before the flip this was masked because post-off targeted the default FB anyway |
-| 2026-11-06 | same, milestone 6c | Check counts (all zero failures): version 4, fixed_step_clock 42, application 26, math 38, lights 36, cascades 133, paraboloid 27, trapezoid 80, shader_source_rule 1, renderer 26, opengl_context 20, opengl_render 125, mesh 13, shader 15, lighting 11, shadows 8, point_shadows 7, tsm 11, deferred 23, post 16, ssao 11, dof_mlaa 40, application 30. No existing suite decreased (opengl_render grew 115 -> 125 for the new contract checks; ssao 9 -> 11 for the depth proof). shader_source_rule: `#version` only in `src/render/opengl/shader_library.hpp`. `application.cpp` unchanged (git diff empty). R8 occlusion buffer ~1 B/pixel; HDR target 2x Rgba16F + depth (~16.6 MB colour at 1280x720) |
+| 2026-11-06 | same, milestone 6f | OpenGL off: 13/13 Debug; OpenGL on: 26/26 Debug and Release; `-L opengl` 13/13; zero warnings under `-Werror`. New suite test_volumetric 14/14 with derived expectations: sphere volume centre ray — march mirrored in C++ gives v=0.04163, expected chainPixel(0.2+v)=round(255*sRGB(aces(0.24163)))=162, measured 162; exposure 2 -> derived 204, measured 204 (volume responds to exposure); camera inside the sphere (light at the camera): t0 clamped to 0, derived v=0.02588 -> 157, measured 157; spot cone: derived v=0.05056 + surface light 0.02439 -> 171, measured 171, and outside the outer cone (x=112) the pixel stays 149; shadow along the ray: unshadowed 182 vs occluder 177 (paraboloid tested per sample; pointShadows.near=0.02 so the occluder 0.05 from the light is inside the map); path agreement forward 162 = deferred 162 (diff 0); over-cap (5 volumetric lights, deferred) rejected with invalid_argument; default off: density-0 light 149 = no light 149. No contract change (composed from pass primitives; PostVolumetric is one id + one library entry). Null-backend logs: first frame +2 creation events (m_vol target, PostVolumetric program) and +4 per-frame tonemap events (volTex bind + uniforms) — test_application events_at_step {1,1,115,115,211,211} -> {1,1,121,121,221,221} with the derivation updated (120 = 100 steady-state + 20 one-time creations); test_renderer forward literal regenerated (123 events). CLI unchanged: 110,110,110,255 no args (both paths, visible + xvfb, exit 0), 30,30,30,255 with --no-post — the diagnostic frame has no lights, so the effect does not move the CLI pixel |
+| 2026-11-06 | same, milestone 6c | Check counts (all zero failures): version 4, fixed_step_clock 42, application 26, math 38, lights 36, cascades 133, paraboloid 27, trapezoid 80, shader_source_rule 1, renderer 26, opengl_context 20, opengl_render 125, mesh 13, shader 15, lighting 11, shadows 8, point_shadows 7, tsm 11, deferred 23, post 16, ssao 11, dof_mlaa 40, volumetric 14, application 30. No existing suite decreased (opengl_render grew 115 -> 125 for the new contract checks; ssao 9 -> 11 for the depth proof). shader_source_rule: `#version` only in `src/render/opengl/shader_library.hpp`. `application.cpp` unchanged (git diff empty). R8 occlusion buffer ~1 B/pixel; HDR target 2x Rgba16F + depth (~16.6 MB colour at 1280x720) |
 | 2026-11-05 | same, contract extension | OpenGL off: 7/7 Debug; OpenGL on: 11/11 Debug and Release; `-L opengl` 4/4; zero warnings under `-Werror`; check counts: opengl_context 20, opengl_render 47 |
 
 | Published tree did not build with `GRACE_ENABLE_OPENGL=ON` | The lighting commit left the shader header unstaged and published half of a `const` change, so `drawIndexed() const` in the null backend had no matching override | Complete the change set and verify by building a fresh clone |
@@ -402,12 +403,16 @@ not exist before GL 3.2, so "3.0 core" is not a valid request.
     through a medium. This is a deviation from a documented capability and is
     recorded as one, per the rule section 3 now states.
 
-    Deferring it is defensible on sequencing: a volumetric light is a scattering
-    integral along a view ray, which needs shadowed space to march through, and
-    that depends on the global illumination work rather than on the lighting
-    path that exists. It is not deferred because it is unimportant. It is
-    deferred because implementing it before the light-volume milestone would mean
-    writing the same sampling twice.
+    Deferring it was defensible on sequencing: a volumetric light is a scattering
+    integral along a view ray, which needs shadowed space to march through.
+    **Resolved 2026-11-06 (milestone 6f): implemented** as an analytic region
+    (sphere for point-style, cone for spot-style) realized by a `volumeDensity`
+    property on `PointLight`/`SpotLight` (default 0 = off, so no existing pixel
+    changed). The documentation does not state whether "volumetric" is a
+    distinct light type or a property of point/spot, nor which representation
+    the original used — both recorded as deviations (decision 25). What was
+    NOT implemented: directional (half-space) volumes, and shadowing of
+    spot-style cone volumes (no spot shadow maps exist in this tree).
 
 20. **Do fullscreen passes write depth, and where does scene depth live?**
     **Resolved 2026-11-06 (milestone 6d base repair): fullscreen passes never
@@ -482,6 +487,22 @@ not exist before GL 3.2, so "3.0 core" is not a valid request.
     default OFF and leave every pixel unchanged when off (test_dof_mlaa:
     flat ambient-1.0 surface reads 232 with both off, matching the pre-6d
     tree).
+23. **What does the engine do when nobody asks for anything (defaults)?**
+    **Resolved 2026-11-06 (milestone 6e).** Default render path: forward
+    (decision 1 unchanged — forward is the primary path). Default post state:
+    **ON** (decision 15's flip; the chain is the product now that its
+    techniques landed). Technique defaults inside the chain: SSAO ON
+    (view-independent, darkens the ambient term only), MLAA ON
+    (view-independent, part of the documented chain in section 3.2), bloom
+    ON within the chain (threshold 1.0 linear, strength 1.0), **DOF OFF** — the
+    focus distance is scene content, not a pipeline property, so a default
+    focus would blur every scene unless it happened to match; enabled via
+    config / CLI `--dof`. `grace` with no arguments renders through the chain
+    and reports center_pixel 110,110,110,255 for the default clear colour 30:
+    sRGB(aces(30/255))*255 = 110.51, GL conversion 110 (measured, both paths,
+    visible and xvfb). The legacy linear path survives as `--no-post`,
+    documented in the CLI help as a compatibility path (reports 30,30,30,255).
+
 24. **Resource container: define one, or adopt an existing format?** The engine
     needs one: the documented feature set lists a resource manager among the
     core components. Two ways to get one, adopt an existing format or define
@@ -571,21 +592,37 @@ not exist before GL 3.2, so "3.0 core" is not a valid request.
     passes, +1 shader (PostBlit); the contract needed no new method — present
     composes from beginRenderPass(nullptr) + bindTexture + draw.
 
-23. **What does the engine do when nobody asks for anything (defaults)?**
-    **Resolved 2026-11-06 (milestone 6e).** Default render path: forward
-    (decision 1 unchanged — forward is the primary path). Default post state:
-    **ON** (decision 15's flip; the chain is the product now that its
-    techniques landed). Technique defaults inside the chain: SSAO ON
-    (view-independent, darkens the ambient term only), MLAA ON
-    (view-independent, part of the documented chain in section 3.2), bloom
-    ON within the chain (threshold 1.0 linear, strength 1.0), **DOF OFF** — the
-    focus distance is scene content, not a pipeline property, so a default
-    focus would blur every scene unless it happened to match; enabled via
-    config / CLI `--dof`. `grace` with no arguments renders through the chain
-    and reports center_pixel 110,110,110,255 for the default clear colour 30:
-    sRGB(aces(30/255))*255 = 110.51, GL conversion 110 (measured, both paths,
-    visible and xvfb). The legacy linear path survives as `--no-post`,
-    documented in the CLI help as a compatibility path (reports 30,30,30,255).
+25. **What is a light volume, and how is a volumetric light modelled?**
+    **Resolved 2026-11-06 (milestone 6f).** The volume is an ANALYTIC region
+    derived from the light's type and parameters: a sphere of `radius` around a
+    point light, a cone (half-angle outerAngle, truncated by `range`) around a
+    spot light. Not a generated mesh — this tree has no geometry-generation
+    path, and a per-light mesh would need generation + upload per light per
+    frame through a contract that only draws submitted meshes. Not a
+    screen-space construct — a depth-buffer volume is view-dependent and cannot
+    be shadowed along the ray; the analytic world-space test composes with the
+    world-space lights, the single HDR scene-depth target (decision 19) and
+    the shadow maps. Deviation: the documentation does not say which
+    representation the original used, nor whether "volumetric" is a distinct
+    type — it is implemented as a `volumeDensity` property on PointLight and
+    SpotLight (default 0). Model (A2): single-scattering in-scattering
+    integrated along the view ray — analytic ray-volume intersection, 16 fixed
+    samples, per sample the documented attenuation x paraboloid shadow factor x
+    ds, isotropic phase 1/(4pi); result added in LINEAR HDR inside the aces
+    argument, so it responds to exposure. Camera inside the volume: the entry
+    t0 is clamped to 0 (never marched backwards). The pass runs in the shared
+    post chain on the HDR depth, so forward and deferred agree byte-for-byte
+    (measured 162 = 162). Shadows along the ray (A3): point-style volumes with
+    a paraboloid map test it once per sample (16 single-tap lookups per volume
+    per pixel; the bilateral 3x3 filter stays a surface property). Spot-style
+    cone volumes are unshadowed — known limitation (no spot shadow maps).
+    Directional volumes not implemented (a half-space is not a useful shaft).
+    Cap (A4): kMaxVolumetricLights = 4 per frame, over-cap rejected with
+    std::invalid_argument in submit(), never truncated; the deferred surface
+    cap of 16 is unchanged. Default OFF (A6): volumeDensity defaults to 0, so
+    no pixel re-baselined; the CLI diagnostic frame has no lights, so `grace`
+    reads 110,110,110,255 with and without the effect (application.cpp submits
+    nothing).
 
 ```sh
 # Default configuration, no graphics dependency

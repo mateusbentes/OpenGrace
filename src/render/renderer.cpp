@@ -10,6 +10,19 @@
 
 namespace grace::render {
 
+namespace {
+
+/// Scattering density of a dynamic light (0 = not volumetric).
+float volumetricDensity(const DynamicLight& light)
+{
+    if (const auto* point = std::get_if<PointLight>(&light))
+        return point->volumeDensity;
+    if (const auto* spot = std::get_if<SpotLight>(&light))
+        return spot->volumeDensity;
+    return 0.0f;
+}
+
+}  // namespace
 
 void SSAOConfig::validate() const
 {
@@ -124,7 +137,14 @@ void Renderer::submit(const DrawSubmission& submission)
     }
     m_pending.push_back(submission);
     for (const DynamicLight& light : submission.lights)
+    {
         m_frame_lights.push_back(light);
+        if (volumetricDensity(light) > 0.0f &&
+            volumetricLightCount() >= kMaxVolumetricLights)
+            throw std::invalid_argument(
+                "submit: frame would exceed kMaxVolumetricLights volumetric lights; "
+                "rejected, not truncated");
+    }
     if (submission.sun.has_value() && !m_frame_sun.has_value())
         m_frame_sun = submission.sun;
 }
@@ -228,6 +248,16 @@ RenderTarget* Renderer::ensureHdrTarget()
         m_display = m_backend.createRenderTarget(ddesc);
         m_displayB = m_backend.createRenderTarget(ddesc);
 
+        // 6f: linear in-scattering buffer for volumetric lights (Rgba16F,
+        // ~8 bytes/pixel, ~7.4 MB at 1280x720), no depth.
+        RenderTargetDesc vdesc;
+        vdesc.width = m_backend.width();
+        vdesc.height = m_backend.height();
+        vdesc.colorAttachmentCount = 1;
+        vdesc.colorFormats[0] = PixelFormat::Rgba16F;
+        vdesc.depthAttachment = false;
+        m_vol = m_backend.createRenderTarget(vdesc);
+
         // Bloom downsample chain: half resolution each level, same aspect as
         // the framebuffer (the chain's uv math assumes matching aspect), float,
         // no depth.
@@ -255,6 +285,7 @@ RenderTarget* Renderer::ensureHdrTarget()
         m_postMLAA = m_backend.createShaderProgram(ShaderProgramId::PostMLAA);
         m_postDOF = m_backend.createShaderProgram(ShaderProgramId::PostDOF);
         m_postBlit = m_backend.createShaderProgram(ShaderProgramId::PostBlit);
+        m_postVolumetric = m_backend.createShaderProgram(ShaderProgramId::PostVolumetric);
         ensureFullscreenQuad();
     }
     return m_hdr;
@@ -305,6 +336,11 @@ void Renderer::releasePostResources()
     m_display = nullptr;
     m_displayB = nullptr;
     m_displaySrc = nullptr;
+    if (m_vol != nullptr)
+    {
+        m_backend.releaseRenderTarget(m_vol);
+        m_vol = nullptr;
+    }
     m_postBright.reset();
     m_postBlur.reset();
     m_postTonemap.reset();
@@ -312,6 +348,7 @@ void Renderer::releasePostResources()
     m_postMLAA.reset();
     m_postDOF.reset();
     m_postBlit.reset();
+    m_postVolumetric.reset();
 }
 
 void Renderer::runPostChain()
@@ -339,6 +376,106 @@ void Renderer::runPostChain()
     ensureHdrTarget();
     ensureFullscreenQuad();
     RenderTarget* src = m_hdr;
+
+    // Volumetric light pass (6f): in-scattering along the view ray into m_vol,
+    // in LINEAR HDR. Reads the HDR scene depth (decision 19) and the paraboloid
+    // shadow maps of shadowed point-style volumes; runs in the shared chain, so
+    // forward and deferred get identical volumes. Skipped entirely when no
+    // light has volumeDensity > 0 (the default — no pixel changes).
+    const std::uint32_t volCount = volumetricLightCount();
+    if (volCount > 0 && m_vol != nullptr)
+    {
+        const core::mat4 view = core::lookAt(m_config.camera.eye, m_config.camera.target,
+                                              m_config.camera.up);
+        m_backend.beginRenderPass(m_vol);
+        m_backend.clear();
+        m_backend.bindTexture(m_backend.renderTargetTexture(m_hdr, kDepthAttachment), 0);
+        // Paraboloid shadow maps (slots 0..1 -> texture units 1..4), bound the
+        // same way the deferred lighting pass binds them.
+        const std::size_t entryCount = m_point_shadow_maps.entries.size();
+        for (std::size_t k = 0; k < entryCount && k < 2; ++k)
+        {
+            const PointShadowMapEntry& entry = m_point_shadow_maps.entries[k];
+            m_backend.bindTexture(m_backend.renderTargetTexture(entry.front, kDepthAttachment),
+                                  1u + 2u * static_cast<std::uint32_t>(k));
+            m_backend.bindTexture(m_backend.renderTargetTexture(entry.back, kDepthAttachment),
+                                  2u + 2u * static_cast<std::uint32_t>(k));
+        }
+        m_postVolumetric->use();
+        m_postVolumetric->setUniform("depthTex", 0);
+        m_postVolumetric->setUniform("pointShadowFront[0]", 1);
+        m_postVolumetric->setUniform("pointShadowBack[0]", 2);
+        m_postVolumetric->setUniform("pointShadowFront[1]", 3);
+        m_postVolumetric->setUniform("pointShadowBack[1]", 4);
+        m_postVolumetric->setUniform("invProj", core::perspectiveInverse(
+            m_config.camera.fovYRad, m_config.camera.aspect, m_config.camera.near, m_config.camera.far));
+        m_postVolumetric->setUniform("invView", core::inverseAffine(view));
+        m_postVolumetric->setUniform("cameraPos", m_config.camera.eye);
+        m_postVolumetric->setUniform("outSize", core::vec2{static_cast<float>(m_vol->width()),
+                                                            static_cast<float>(m_vol->height())});
+        m_postVolumetric->setUniform("volCount", static_cast<int>(volCount));
+        std::uint32_t j = 0;
+        for (std::uint32_t i = 0; i < m_frame_lights.size() && j < volCount; ++i)
+        {
+            const DynamicLight& light = m_frame_lights[i];
+            const float density = volumetricDensity(light);
+            if (density <= 0.0f)
+                continue;
+            const std::string index = "[" + std::to_string(j) + "]";
+            int slot = -1;
+            for (std::size_t k = 0; k < entryCount; ++k)
+                if (m_point_shadow_maps.entries[k].lightIndex == i)
+                    slot = static_cast<int>(k);
+            if (const auto* point = std::get_if<PointLight>(&light))
+            {
+                m_postVolumetric->setUniform(("volPos" + index).c_str(), point->position);
+                m_postVolumetric->setUniform(("volDir" + index).c_str(),
+                                             core::vec3{0.0f, 0.0f, 0.0f});
+                m_postVolumetric->setUniform(("volColor" + index).c_str(), point->color);
+                m_postVolumetric->setUniform(("volIntensity" + index).c_str(), point->intensity);
+                m_postVolumetric->setUniform(("volRadius" + index).c_str(), point->radius);
+                m_postVolumetric->setUniform(("volInnerCos" + index).c_str(), 0.0f);
+                m_postVolumetric->setUniform(("volOuterCos" + index).c_str(), -1.0f);
+                m_postVolumetric->setUniform(("volIsCone" + index).c_str(), 0);
+                m_postVolumetric->setUniform(("volDensity" + index).c_str(), density);
+                // Point-style volumes use their paraboloid map when they have one.
+                m_postVolumetric->setUniform(("volShadowSlot" + index).c_str(), slot);
+            }
+            else
+            {
+                const auto& spot = std::get<SpotLight>(light);
+                m_postVolumetric->setUniform(("volPos" + index).c_str(), spot.position);
+                m_postVolumetric->setUniform(("volDir" + index).c_str(), spot.direction);
+                m_postVolumetric->setUniform(("volColor" + index).c_str(), spot.color);
+                m_postVolumetric->setUniform(("volIntensity" + index).c_str(), spot.intensity);
+                m_postVolumetric->setUniform(("volRadius" + index).c_str(), spot.range);
+                m_postVolumetric->setUniform(("volInnerCos" + index).c_str(),
+                                             std::cos(spot.innerAngle));
+                m_postVolumetric->setUniform(("volOuterCos" + index).c_str(),
+                                             std::cos(spot.outerAngle));
+                m_postVolumetric->setUniform(("volIsCone" + index).c_str(), 1);
+                m_postVolumetric->setUniform(("volDensity" + index).c_str(), density);
+                // No spot shadow maps exist in this tree: cone volumes are
+                // unshadowed (documented limitation, decision 24).
+                m_postVolumetric->setUniform(("volShadowSlot" + index).c_str(), -1);
+            }
+            ++j;
+        }
+        for (std::size_t k = 0; k < entryCount && k < 2; ++k)
+        {
+            const PointShadowMapEntry& entry = m_point_shadow_maps.entries[k];
+            const std::string index = "[" + std::to_string(k) + "]";
+            m_postVolumetric->setUniform(("pointLightViews" + index).c_str(), entry.lightView);
+            m_postVolumetric->setUniform(("pointLightRange" + index).c_str(),
+                                         core::vec2{entry.near, entry.far});
+            const float bias01 = m_point_shadow_maps.biasWorld / (entry.far - entry.near);
+            m_postVolumetric->setUniform(("pointShadowBias" + index).c_str(), bias01);
+        }
+        m_postVolumetric->setUniform("pointShadowMapSize",
+                                     static_cast<float>(m_point_shadow_maps.mapSize));
+        m_fullscreen_quad->drawIndexed();
+        m_backend.endRenderPass();
+    }
 
     // SSAO pass: screen-space occlusion from the HDR target's depth texture
     // into the R8 occlusion buffer. Decision 19: the HDR depth is the scene
@@ -429,11 +566,14 @@ void Renderer::runPostChain()
     m_backend.bindTexture(m_backend.renderTargetTexture(src, 1), 1);
     m_backend.bindTexture(m_backend.renderTargetTexture(m_bloom.back(), 0), 2);
     m_backend.bindTexture(m_backend.renderTargetTexture(m_ssao, 0), 3);
+    m_backend.bindTexture(m_backend.renderTargetTexture(m_vol, 0), 4);
     m_postTonemap->use();
     m_postTonemap->setUniform("hdrTex", 0);
     m_postTonemap->setUniform("hdrAmbient", 1);
     m_postTonemap->setUniform("bloomTex", 2);
     m_postTonemap->setUniform("ssaoTex", 3);
+    m_postTonemap->setUniform("volTex", 4);
+    m_postTonemap->setUniform("useVolumetric", volCount > 0 && m_vol != nullptr ? 1 : 0);
     m_postTonemap->setUniform("useSSAO",
                               m_config.post.ssao.enabled && m_ssao != nullptr ? 1 : 0);
     m_postTonemap->setUniform("outSize", core::vec2{static_cast<float>(m_display->width()),
@@ -476,6 +616,15 @@ void Renderer::runPostChain()
     m_backend.endRenderPass();
     m_displaySrc = displaySrc;
     m_backend.setDepthTestEnabled(true);  // restore for the next frame's geometry
+}
+
+std::uint32_t Renderer::volumetricLightCount() const
+{
+    std::uint32_t count = 0;
+    for (const DynamicLight& light : m_frame_lights)
+        if (volumetricDensity(light) > 0.0f)
+            ++count;
+    return count;
 }
 
 void Renderer::renderShadowMapsIfNeeded()
