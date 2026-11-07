@@ -59,6 +59,7 @@ target_include_directories(test_trapezoid PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME trapezoid COMMAND test_trapezoid)
 
 add_executable(test_shader_source_rule test_shader_source_rule.cpp)
+target_link_libraries(test_shader_source_rule PRIVATE grace_warnings)
 target_include_directories(test_shader_source_rule PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME shader_source_rule COMMAND test_shader_source_rule ${CMAKE_CURRENT_SOURCE_DIR}/..)
 
@@ -68,6 +69,11 @@ target_link_libraries(test_renderer PRIVATE grace_render grace_null_render grace
 target_include_directories(test_renderer PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
 add_test(NAME renderer COMMAND test_renderer)
+
+add_executable(test_docs_structure test_docs_structure.cpp)
+target_link_libraries(test_docs_structure PRIVATE grace_warnings)
+target_include_directories(test_docs_structure PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME docs_structure COMMAND test_docs_structure ${CMAKE_CURRENT_SOURCE_DIR}/..)
 
 # CLI tests for the grace executable, checked for their exact exit code
 # through check_exit_code.cmake in script mode (no test framework):
