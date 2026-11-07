@@ -577,39 +577,6 @@ not exist before GL 3.2, so "3.0 core" is not a valid request.
     contract in the engine, and a format-specific backend outside the published
     tree, cloned locally. The engine's vocabulary stays its own either way.
 
-26. **How does the container compress payloads it cannot compress?**
-    The specification's method field was a single bit, stored or deflated,
-    which is not enough for the payloads this format exists to carry. Measured
-    on payloads shaped like the ones it carries, an index buffer deflates to
-    23.1% of its size and to 0.6% of it once its bytes are transposed first, a
-    factor of 41, and the transposition is not compression: it is a
-    rearrangement the container has to record or the payload cannot be read
-    back. The method is now a filter plus a codec, the index record carries the
-    filter and its element size, and the checksum covers the bytes after the
-    filter is reversed, for the same reason it already covered the inflated
-    bytes rather than the stored ones. The delta filter is measured to make
-    things worse on the same data in a different order, 74.5% against 71.7%, so
-    it is never chosen automatically and the build sets it per entry. A reader
-    that implements only the unfiltered case reads any container that does not
-    use a filter, so this is an extension rather than a break. The measurement
-    is kept as tools/measure-filter.py, so the numbers in the specification can
-    be reproduced rather than taken on trust.
-
-## Verification commands
-    **Updated in 6e (decision 22 resolved): the chain now ends in an
-    offscreen 8-bit display target, which IS sampleable through the contract,
-    so MLAA runs AFTER the tonemap on the display-encoded image — the
-    departure above is removed. The final order is now: lighting -> HDR ->
-    SSAO -> DOF(linear HDR) -> bloom -> tonemap+sRGB [DISPLAY BOUNDARY] ->
-    offscreen 8-bit display target -> MLAA(display-encoded) -> present
-    (PostBlit fullscreen copy) -> default framebuffer -> swapBuffers. The
-    MLAA luminance threshold now measures display-code contrast, uniform
-    across exposure (on linear HDR the same threshold was generous in the
-    dark and stingy in the light — edges in shadowed regions were missed).
-    Cost: +2 Rgba8 full-res targets (~7.4 MB at 1280x720), +1-2 fullscreen
-    passes, +1 shader (PostBlit); the contract needed no new method — present
-    composes from beginRenderPass(nullptr) + bindTexture + draw.
-
 25. **What is a light volume, and how is a volumetric light modelled?**
     **Resolved 2026-11-06 (milestone 6f).** The volume is an ANALYTIC region
     derived from the light's type and parameters: a sphere of `radius` around a
@@ -666,3 +633,36 @@ grep -rn 'SDL\|GL/\|gl\.h\|GLuint' include/grace/core src/core || echo 'core is 
 grep -rn 'GLuint\|GLenum\|SDL_\|Window' include/grace/render/render_backend.hpp | grep -v '^ *//' \
   || echo 'the render contract is API-neutral'
 ```
+26. **How does the container compress payloads it cannot compress?**
+    The specification's method field was a single bit, stored or deflated,
+    which is not enough for the payloads this format exists to carry. Measured
+    on payloads shaped like the ones it carries, an index buffer deflates to
+    23.1% of its size and to 0.6% of it once its bytes are transposed first, a
+    factor of 41, and the transposition is not compression: it is a
+    rearrangement the container has to record or the payload cannot be read
+    back. The method is now a filter plus a codec, the index record carries the
+    filter and its element size, and the checksum covers the bytes after the
+    filter is reversed, for the same reason it already covered the inflated
+    bytes rather than the stored ones. The delta filter is measured to make
+    things worse on the same data in a different order, 74.5% against 71.7%, so
+    it is never chosen automatically and the build sets it per entry. A reader
+    that implements only the unfiltered case reads any container that does not
+    use a filter, so this is an extension rather than a break. The measurement
+    is kept as tools/measure-filter.py, so the numbers in the specification can
+    be reproduced rather than taken on trust.
+
+## Verification commands
+    **Updated in 6e (decision 22 resolved): the chain now ends in an
+    offscreen 8-bit display target, which IS sampleable through the contract,
+    so MLAA runs AFTER the tonemap on the display-encoded image — the
+    departure above is removed. The final order is now: lighting -> HDR ->
+    SSAO -> DOF(linear HDR) -> bloom -> tonemap+sRGB [DISPLAY BOUNDARY] ->
+    offscreen 8-bit display target -> MLAA(display-encoded) -> present
+    (PostBlit fullscreen copy) -> default framebuffer -> swapBuffers. The
+    MLAA luminance threshold now measures display-code contrast, uniform
+    across exposure (on linear HDR the same threshold was generous in the
+    dark and stingy in the light — edges in shadowed regions were missed).
+    Cost: +2 Rgba8 full-res targets (~7.4 MB at 1280x720), +1-2 fullscreen
+    passes, +1 shader (PostBlit); the contract needed no new method — present
+    composes from beginRenderPass(nullptr) + bindTexture + draw.
+
