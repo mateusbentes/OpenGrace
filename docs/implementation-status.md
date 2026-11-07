@@ -31,8 +31,9 @@ The `.docx` files in this directory are generated from the `.md` sources with
 | 6d | Base repair (decision 20: fullscreen passes never write depth; HDR depth = scene depth in both paths) + ambient default 0.2 (decision 21) + DOF with bokeh and morphological AA (decision 22 chain order), both off by default | Done |
 | 6e | Post chain on by default: the chain became the product once its techniques landed (decision 23). Every measured value re-baselined with before/after figures, no tolerance widened | Done |
 | 6f | Volumetric lights as an analytic region — a sphere around a point light, a cone around a spot light, through a `volumeDensity` property defaulting to off (decision 25) | Done |
+| 6g | SSAO with selective temporal filtering (SSAO-STF). **Deferred, not started** — needs motion-vector reprojection, which needs motion this tree does not have (decision 18) | Planned |
 | 6 | Post-processing: HDR, bloom, filmic tonemap (6a), ambient term (6b), SSAO (6c), DOF + morphological AA (6d) — all documented in section 3.2 except SSAO-STF temporal filtering, which remains deferred to its own increment | Done (SSAO-STF deferred) |
-| 7 | Global illumination by light volume propagation | Planned |
+| 7 | Global illumination by light volume propagation. **Blocked:** needs a 3D grid the render contract cannot express (decision 30) | Planned |
 | 8 | Physics contract and the first backend | Planned |
 | 9 | Script host: AngelScript integration and type registration | Planned |
 | 10 | Visual scripting: block registry and graph evaluation | Planned |
@@ -402,7 +403,13 @@ not exist before GL 3.2, so "3.0 core" is not a valid request.
     tests use ambient 1.0 where one step is ~4/255 (measured 232 -> 228).
     Temporal filtering (A3): NOT implemented — SSAO-STF is deferred to its own
     increment; it would need per-pixel motion-vector reprojection, which
-    nothing in the project supplies today. What the non-temporal version does
+    nothing in the project supplies today. The prerequisite is larger than
+    the shader: this tree has no motion to reproject. The camera is fixed
+    from construction (`grep camera src/app/` finds nothing), the application
+    submits nothing, no test moves the camera, and `setConfig()` releases the
+    shadow maps so it cannot change only the camera per frame. A per-frame
+    camera and a per-frame transform come first. What the non-temporal
+    version does
     that a temporal one would not: it is deterministic (fixed sample pattern,
     no per-frame noise rotation), so tests are reproducible byte-for-byte.
     Path agreement (A4): forward and deferred read the same scene depth and
@@ -720,6 +727,41 @@ grep -rn 'GLuint\|GLenum\|SDL_\|Window' include/grace/render/render_backend.hpp 
     the block size and the block count are both derivable from fields it
     already has, and an entry with one block has no table. Measured by
     `tools/measure-stream.py`.
+30. **What blocks global illumination by light volume propagation?**
+    Section 3.2 promises GI by light volume propagation and the milestone table
+    lists it as milestone 7. "Planned" reads as "not started"; measured, it is
+    blocked on a capability the render contract does not have, and the blocker
+    is larger than the algorithm.
+
+    Light volume propagation needs a 3D grid to hold and propagate irradiance.
+    Measured on the published tree:
+
+    - no 3D texture exists anywhere (`grep -rn -i 'TEXTURE_3D|Texture3D'` in
+      `include/`, `src/` and `tests/` returns nothing);
+    - there is no way to create a standalone texture at all. The
+      `RenderBackend` contract has 24 virtual methods and none of them
+      creates one: a texture exists only as an attachment of a render
+      target, reached through `renderTargetTexture`;
+    - `RenderTargetDesc` is 2D by construction: it has `width` and `height`
+      and no depth field, so the existing attachment path cannot describe a
+      volume;
+    - `PixelFormat` holds four values (`Rgba8`, `Rgba16F`, `R8`,
+      `Depth24Stencil8`) and none is suited to a multi-channel float irradiance
+      volume.
+
+    So the first increment is not the propagation, it is the volume: a 3D
+    texture in the contract (descriptor, creation, bind, in both backends and
+    in the null backend), provable on its own by writing known values and
+    reading them back. Rendering into the volume, feeding it from the
+    scene, and
+    propagating are the increments that follow, and the scope decisions the
+    documentation does not settle — grid resolution, iteration count, whether
+    geometry occludes, how many bounces — belong with them, measured the way
+    decision 25 measured the volumetric light.
+
+    Recorded now because a milestone marked "Planned" and a milestone blocked
+    on a missing contract capability are different states, and only one of
+    them can be started.
 
 ## Verification commands
 
