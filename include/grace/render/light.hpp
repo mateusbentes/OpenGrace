@@ -48,7 +48,7 @@ struct PointLight
     /// Scattering density of the light's spherical volume, 1/world unit, >= 0.
     /// 0 (default) = not volumetric: the light shades surfaces only. > 0 makes
     /// the sphere of `radius` around the position additionally visible as
-    /// in-scattered light (milestone 6f, decision 24 — a property of the
+    /// in-scattered light (milestone 6f, decision 25 — a property of the
     /// point light, since the documentation does not say whether "volumetric"
     /// is a distinct type).
     float volumeDensity = 0.0f;
@@ -76,7 +76,7 @@ struct SpotLight
     float outerAngle = 1.0f;                  ///< radians, in (innerAngle, pi]
     /// Scattering density of the light's conical volume (truncated by `range`),
     /// 1/world unit, >= 0. 0 (default) = not volumetric; > 0 makes the cone
-    /// additionally visible as in-scattered light (milestone 6f, decision 24).
+    /// additionally visible as in-scattered light (milestone 6f, decision 25).
     float volumeDensity = 0.0f;
 
     void validate() const;

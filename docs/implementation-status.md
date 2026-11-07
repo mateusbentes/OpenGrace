@@ -22,7 +22,7 @@ The `.docx` files in this directory are generated from the `.md` sources with
 | 4c | Cascaded sun shadow mapping with per-slice corner fitting and bilateral filtering. The trapezoidal projective transform of architecture §3.4 (decision 8) is evaluated in 4e. Dual paraboloid point-light shadows are 4d | Done |
 | 4d | Dual paraboloid point-light shadow maps with bilateral filtering | Done |
 | 4e | Trapezoidal projective transform for the sun cascades — implemented behind `CascadeProjection::Trapezoidal` and measured against the fitted default (decision 8 resolved below) | Done |
-| 5 | Deferred lighting alongside forward: MRT G-buffer, lighting pass. Light-volume GI remains milestone 7 | Done |
+| 5 | Deferred lighting alongside forward: MRT G-buffer, lighting pass (decision 11). Light-volume GI remains milestone 7 | Done |
 | 5b | Move frame composition out of the render contract into a renderer layer (`grace::render::Renderer`); the backend is a device again. Closes decision 12 | Done |
 | 5c | Shader sources leave the API-neutral module (decision 14); deferred path consumes the existing shadow maps (G1) | Done |
 | 6a | HDR pipeline: float HDR target, bloom, filmic tonemap + sRGB display encode, owned by the renderer, off by default | Done |
@@ -616,7 +616,7 @@ not exist before GL 3.2, so "3.0 core" is not a valid request.
     frame through a contract that only draws submitted meshes. Not a
     screen-space construct — a depth-buffer volume is view-dependent and cannot
     be shadowed along the ray; the analytic world-space test composes with the
-    world-space lights, the single HDR scene-depth target (decision 19) and
+    world-space lights, the single HDR scene-depth target (decision 20) and
     the shadow maps. Deviation: the documentation does not say which
     representation the original used, nor whether "volumetric" is a distinct
     type — it is implemented as a `volumeDensity` property on PointLight and

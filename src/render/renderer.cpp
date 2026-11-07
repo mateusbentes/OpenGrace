@@ -372,13 +372,13 @@ void Renderer::runPostChain()
     //   -> offscreen 8-bit display target -> MLAA(display-encoded)
     //   -> present (PostBlit) -> default framebuffer -> swapBuffers.
     // `src` tracks the target currently holding the HDR image (colour 0 +
-    // ambient 1); the scene depth always stays in m_hdr (decision 19).
+    // ambient 1); the scene depth always stays in m_hdr (decision 20).
     ensureHdrTarget();
     ensureFullscreenQuad();
     RenderTarget* src = m_hdr;
 
     // Volumetric light pass (6f): in-scattering along the view ray into m_vol,
-    // in LINEAR HDR. Reads the HDR scene depth (decision 19) and the paraboloid
+    // in LINEAR HDR. Reads the HDR scene depth (decision 20) and the paraboloid
     // shadow maps of shadowed point-style volumes; runs in the shared chain, so
     // forward and deferred get identical volumes. Skipped entirely when no
     // light has volumeDensity > 0 (the default — no pixel changes).
@@ -456,7 +456,7 @@ void Renderer::runPostChain()
                 m_postVolumetric->setUniform(("volIsCone" + index).c_str(), 1);
                 m_postVolumetric->setUniform(("volDensity" + index).c_str(), density);
                 // No spot shadow maps exist in this tree: cone volumes are
-                // unshadowed (documented limitation, decision 24).
+                // unshadowed (documented limitation, decision 25).
                 m_postVolumetric->setUniform(("volShadowSlot" + index).c_str(), -1);
             }
             ++j;
@@ -527,7 +527,7 @@ void Renderer::runPostChain()
     }
 
     // Bright pass into bloom level 0 (reads the current HDR image, after any
-    // MLAA/DOF, so the threshold sees their linear output — decision 21(b)).
+    // MLAA/DOF, so the threshold sees their linear output — decision 22(b)).
     m_backend.beginRenderPass(m_bloom[0]);
     m_backend.bindTexture(m_backend.renderTargetTexture(src, 0), 0);
     m_postBright->use();
@@ -734,7 +734,7 @@ void Renderer::renderDeferredFrame()
 
     // Lighting pass into the lighting target (HDR when post is on, else the
     // default framebuffer), reading the G-buffer and the shadow maps. The
-    // fullscreen quad runs with the depth test off (decision 19): it must
+    // fullscreen quad runs with the depth test off (decision 20): it must
     // never write depth, so the HDR target's depth keeps the scene depth
     // copied from the G-buffer below.
     m_backend.beginRenderPass(lightingTarget());

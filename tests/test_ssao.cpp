@@ -267,7 +267,7 @@ int main()
         GRACE_CHECK(withinTol(a, b, 1));
     }
 
-    // A5 base repair (decision 19): the HDR target's depth attachment is the
+    // A5 base repair (decision 20): the HDR target's depth attachment is the
     // scene depth in BOTH paths — read it back after a full frame and compare.
     // Before the repair the deferred path's fullscreen lighting quad overwrote
     // it with 0.5 (the quad's window depth); now it must equal the forward

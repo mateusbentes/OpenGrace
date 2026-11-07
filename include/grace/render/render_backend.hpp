@@ -69,7 +69,7 @@ public:
     /// Enables or disables depth testing for subsequent passes (device
     /// state, default enabled). When disabled, no depth test is performed
     /// and no depth writes occur, so fullscreen passes never overwrite a
-    /// target's scene depth (decision 19, milestone 6d). Re-enable before
+    /// target's scene depth (decision 20, milestone 6d). Re-enable before
     /// geometry passes. Calls after shutdown are protocol violations.
     virtual void setDepthTestEnabled(bool enabled) = 0;
 
@@ -171,7 +171,7 @@ public:
     virtual void bindTexture(const TextureView* view, std::uint32_t unit) = 0;
 
     /// Copies the depth attachment of source onto destination (a generic
-    /// pass primitive, milestone 6d decision 19: moves scene depth between
+    /// pass primitive, milestone 6d decision 20: moves scene depth between
     /// targets, e.g. G-buffer -> HDR in the deferred path, so later passes
     /// read scene depth from one target in both paths). Both targets must
     /// be known, unreleased, have a depth attachment and match in size;

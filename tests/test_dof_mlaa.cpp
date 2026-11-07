@@ -205,7 +205,7 @@ int main()
         // 14 px (sharp cutoff at the 12 px CoC), not a gradual decay.
         GRACE_CHECK(blur[5].r - off[5].r > 20 && withinTol(blur[7], off[7], 2));
 
-        // A4/A5: both paths agree with DOF on (same depth in both, decision 19).
+        // A4/A5: both paths agree with DOF on (same depth in both, decision 20).
         RendererConfig cfgBlurDef = cfgBlur;
         cfgBlurDef.path = RenderPath::Deferred;
         Renderer rBlurDef(*backend);

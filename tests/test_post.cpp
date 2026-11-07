@@ -261,7 +261,7 @@ int main()
         sunSub.sun = sun;
         const ClearColor p = runScene(*backend, renderer, sunSub);
         // deferred+post now includes the scene ambient on top of the sun
-        // (default 0.2 since decision 20; 0.05 before milestone 6d)
+        // (default 0.2 since decision 21; 0.05 before milestone 6d)
         const std::uint8_t expected = expectedTonemap(0.5f + cfg.ambient);
         std::printf("deferred + post: linear 0.5 (sun) + ambient %.2f -> pixel %d (expected %d)\n",
                     static_cast<double>(cfg.ambient), static_cast<int>(p.r),

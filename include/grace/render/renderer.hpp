@@ -117,7 +117,7 @@ struct RendererConfig
     /// Scene-global ambient (indirect) term, linear, same units as light
     /// intensity (milestone 6b, decision 17 — a documented deviation from the
     /// documented light types, which list no ambient). Default 0.2, chosen on
-    /// measured evidence in decision 20 (6d): at 0.05 one SSAO occlusion step
+    /// measured evidence in decision 21 (6d): at 0.05 one SSAO occlusion step
     /// (1/8) moved a lit pixel by 0 eight-bit levels; at 0.2 the full occlusion
     /// range moves a lit pixel by 14 levels (220->206) and an ambient-only
     /// corner by 50 (149->99), while occluded surfaces still read 51/255

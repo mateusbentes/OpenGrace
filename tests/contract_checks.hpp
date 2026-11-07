@@ -191,7 +191,7 @@ void runContractChecks(Backend& backend, grace::render::ClearColor color,
         backend.releaseRenderTarget(hdrTarget);
     }
 
-    // MRT descriptor (milestone 5, decision 9): two colour attachments + depth,
+    // MRT descriptor (milestone 5, decision 11): two colour attachments + depth,
     // per-attachment views, cap enforced at creation.
     {
         grace::render::RenderTargetDesc mrt;

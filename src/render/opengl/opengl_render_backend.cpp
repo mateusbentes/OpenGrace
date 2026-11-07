@@ -120,7 +120,7 @@ struct OpenGLRenderBackend::Impl
     std::int32_t clear_stencil = 0;
     std::uint32_t clear_mask = static_cast<std::uint32_t>(
         ClearBuffer::Color | ClearBuffer::Depth | ClearBuffer::Stencil);
-    // Device state (decision 19): when false, passes run without a depth
+    // Device state (decision 20): when false, passes run without a depth
     // test and without depth writes, so fullscreen passes never overwrite a
     // target's scene depth. Default true; geometry passes rely on it.
     bool depth_test = true;
@@ -968,7 +968,7 @@ void OpenGLRenderBackend::setDepthTestEnabled(bool enabled)
     }
     else
     {
-        // No test and no writes (decision 19): fullscreen passes must not
+        // No test and no writes (decision 20): fullscreen passes must not
         // touch the depth attachment of the target they render into.
         impl.gl.glDisable(GL_DEPTH_TEST);
         impl.gl.glDepthMask(GL_FALSE);
@@ -1005,7 +1005,7 @@ void OpenGLRenderBackend::beginRenderPass(RenderTarget* target)
     impl.bound_target = known;
     impl.gl.glBindFramebuffer(GL_FRAMEBUFFER, known->framebufferId());
     applyViewport();
-    // Depth state for the pass follows the device flag (decision 19): a
+    // Depth state for the pass follows the device flag (decision 20): a
     // shadow/depth pass writes depth; a fullscreen post pass does not.
     applyDepthState();
     impl.drainGlErrors("beginRenderPass");

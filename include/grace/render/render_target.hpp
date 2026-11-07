@@ -15,7 +15,7 @@ enum class PixelFormat : std::uint8_t
     Depth24Stencil8    ///< 24-bit depth + 8-bit stencil attachment (sampleable as a texture)
 };
 
-/// Hard cap on colour attachments per render target (milestone 5, decision 9).
+/// Hard cap on colour attachments per render target (milestone 5, decision 11).
 /// A G-buffer needs 2-3; 4 is the documented maximum and createRenderTarget
 /// THROWS std::invalid_argument when a desc exceeds it — the cap is enforced,
 /// never silently applied.

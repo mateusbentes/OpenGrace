@@ -887,7 +887,7 @@ void main()
 }
 )";
 
-// Depth of field with bokeh (milestone 6d, decision 21). Runs in LINEAR HDR
+// Depth of field with bokeh (milestone 6d, decision 22). Runs in LINEAR HDR
 // before the tonemap (blurring light, not display codes). The circle of
 // confusion is derived from the scene depth: view distance d from the depth
 // buffer via invProj (camera looks down -Z), coc = clamp(aperture * |d -
@@ -951,7 +951,7 @@ void main()
     }
     vec3 p = viewPos(uv, d);
     float dist = -p.z;  // view distance: camera looks down -Z
-    // Circle of confusion (documented formula and clamp, decision 21): the
+    // Circle of confusion (documented formula and clamp, decision 22): the
     // world-space CoC aperture*|d-focus|/d converted to pixels at this
     // distance (worldPerPixel = 2*d*tan(fovY/2)/height), clamped to maxCocPixels.
     float worldPerPixel = 2.0 * dist * tanHalfFovY / outSize.y;
@@ -992,7 +992,7 @@ void main()
 }
 )";
 
-// Volumetric light pass (milestone 6f, decision 24): single-scattering
+// Volumetric light pass (milestone 6f, decision 25): single-scattering
 // in-scattering integrated ALONG THE VIEW RAY (not sampled at one point).
 // For each volumetric light the ray from the camera through the pixel is
 // intersected with the light's ANALYTIC volume — a sphere of `radius` for a

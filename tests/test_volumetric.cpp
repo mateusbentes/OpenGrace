@@ -388,7 +388,7 @@ int main()
     }
 
     // A2: both paths agree — the volume pass runs in the shared chain on the
-    // HDR scene depth (decision 19).
+    // HDR scene depth (decision 20).
     {
         PointLight light;
         light.position = vec3{0.0f, 0.0f, 0.5f};

@@ -330,7 +330,7 @@ int main()
                     static_cast<int>(defShadow.b), static_cast<int>(defShadow.a),
                     std::abs(static_cast<int>(fwdShadow.r) - static_cast<int>(defShadow.r)));
         // Defect fix (6b): occluded surfaces read the ambient contribution, not
-        // black, in BOTH paths. Legacy 8-bit read 51 (ambient 0.2, decision 20);
+        // black, in BOTH paths. Legacy 8-bit read 51 (ambient 0.2, decision 21);
         // with the chain on by default (6e) the same 0.2 linear goes through
         // sRGB(aces(0.2)) -> 149.
         const ClearColor ambientPixel{149, 149, 149, 255};
