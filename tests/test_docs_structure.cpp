@@ -22,8 +22,16 @@
 //       "new blank line at EOF" and which passed a commit unnoticed.
 //   R8  The verification section held prose instead of the commands the first
 //       paragraph of the document promises.
+//   R9  A table row was left between two blank lines, so it was not part of
+//       any table. Every renderer shows it as a paragraph of text with
+//       pipes in it, and R1 to R8 do not look at tables.
+//   R10 Ten paragraphs had lost their line breaks, the worst a single line of
+//       688 columns. Seven of the ten were one to three columns over the limit,
+//       so nothing looked wrong and nothing failed. A fence is skipped because
+//       a command is meant to be long, and a table row is skipped because its
+//       width follows its cells.
 //
-// The rules are checked against the real document and against eight fixtures,
+// The rules are checked against the real document and against nine fixtures,
 // one per rule. A fixture that the rules fail to catch fails this test, so the
 // test cannot silently become useless.
 
@@ -73,6 +81,23 @@ bool isFence(const std::string& line)
     return first != std::string::npos && startsWith(line.substr(first), "```");
 }
 
+// The width a reader sees, in code points rather than bytes. A UTF-8
+// continuation byte is 0x80 to 0xBF and never begins a character, so the bytes
+// that are not continuation bytes are exactly the code points. R10 measured
+// bytes first and reported a line of 79 columns as 81, because the document
+// holds an em dash: one code point, three bytes.
+std::size_t displayColumns(const std::string& line)
+{
+    std::size_t columns = 0;
+    for (std::size_t i = 0; i < line.size(); ++i)
+    {
+        const unsigned char c = static_cast<unsigned char>(line[i]);
+        if ((c & 0xC0) != 0x80)
+            ++columns;
+    }
+    return columns;
+}
+
 // A decision opens with "N. **". Returns -1 when the line is not one, and the
 // number when it is. The trailing marker matters: without it a numbered list
 // inside a decision body is counted as a decision, which is exactly how R1 was
@@ -97,6 +122,50 @@ int decisionNumber(const std::string& line)
     if (i + 1 >= line.size() || line[i] != '*' || line[i + 1] != '*')
         return -1;
     return static_cast<int>(value);
+}
+
+bool isTableRow(const std::string& line)
+{
+    const std::size_t first = line.find_first_not_of(" 	");
+    if (first == std::string::npos || line[first] != '|')
+        return false;
+    // A shell continuation line begins with "||", which is an operator and not
+    // a table row. A row never opens with two pipes: the first opens the row
+    // and the second would mean an empty first cell.
+    if (first + 1 < line.size() && line[first + 1] == '|')
+        return false;
+    return true;
+}
+
+// Counts the pipes that separate cells, so a literal pipe escaped as \| inside
+// a cell does not make the row look wider than its table.
+std::size_t columnCount(const std::string& line)
+{
+    std::size_t pipes = 0;
+    for (std::size_t i = 0; i < line.size(); ++i)
+    {
+        if (line[i] != '|')
+            continue;
+        if (i > 0 && line[i - 1] == '\\')
+            continue;
+        ++pipes;
+    }
+    return pipes > 0 ? pipes - 1 : 0;
+}
+
+bool isSeparatorRow(const std::string& line)
+{
+    if (!isTableRow(line))
+        return false;
+    bool dash = false;
+    for (const char c : line)
+    {
+        if (c == '-')
+            dash = true;
+        else if (c != '|' && c != ':' && c != ' ' && c != '\t')
+            return false;
+    }
+    return dash;
 }
 
 std::vector<Failure> checkDocument(const std::string& text)
@@ -312,6 +381,113 @@ std::vector<Failure> checkDocument(const std::string& text)
                                         "fenced command block");
     }
 
+    // R9: a contiguous run of pipe-rows must be a table. A run between two
+    // blank lines is not one: Markdown wants a header, a separator and data
+    // rows with no blank line inside, so a lone row renders as a paragraph of
+    // text with pipes in it. A table row was left that way in this repository
+    // and nothing caught it, because R1 to R8 do not look at tables.
+    {
+        bool fenced = false;
+        std::size_t i = 0;
+        while (i < lines.size())
+        {
+            // A fenced block holds shell, and shell has lines that begin with a
+            // pipe: "|| echo ..." is an operator. R5 skips fences for headings
+            // for the same reason, and this rule has to as well.
+            if (isFence(lines[i]))
+            {
+                fenced = !fenced;
+                ++i;
+                continue;
+            }
+            if (fenced || !isTableRow(lines[i]))
+            {
+                ++i;
+                continue;
+            }
+            const std::size_t start = i;
+            while (i < lines.size() && isTableRow(lines[i]))
+                ++i;
+            const std::size_t end = i - 1;
+            const std::size_t rows = end - start + 1;
+            const std::size_t cols = columnCount(lines[start]);
+
+            std::string why;
+            if (rows < 3)
+            {
+                why = "only " + std::to_string(rows) + " row(s)";
+            }
+            else if (!isSeparatorRow(lines[start + 1]))
+            {
+                why = "no separator row under the header";
+            }
+            else
+            {
+                for (std::size_t r = start; r <= end; ++r)
+                {
+                    const std::size_t here = columnCount(lines[r]);
+                    if (here != cols)
+                    {
+                        why = "line " + std::to_string(r + 1) + " has " +
+                              std::to_string(here) +
+                              " columns where the table has " +
+                              std::to_string(cols);
+                        break;
+                    }
+                }
+            }
+
+            if (!why.empty())
+            {
+                failures.emplace_back(
+                    "R9", "lines " + std::to_string(start + 1) + "-" +
+                              std::to_string(end + 1) +
+                              " look like a table but are not one: " + why);
+                break;
+            }
+        }
+    }
+    // R10: no line of prose is wider than the document's own limit. Ten
+    // paragraphs had lost their line breaks, the worst at 688 columns, and
+    // no rule looked at width. A fenced block holds commands, where a long
+    // line is the point and wrapping it would break it, so fences are
+    // skipped. A table row is as wide as its cells and Markdown has no
+    // opinion, so rows are skipped too. The limit is 79 columns, which is
+    // R10: no line of prose is wider than the document's own limit. Ten
+    // paragraphs had lost their line breaks, the worst at 688 columns, and no
+    // rule looked at width. A fenced block holds commands, where a long line is
+    // the point and wrapping it would break it, so fences are skipped. A table
+    // row is as wide as its cells and Markdown has no opinion, so rows are
+    // skipped too. The limit is 79 columns, which is what the document uses.
+    //
+    // The width is counted in code points, not bytes. Counting bytes made this
+    // rule report a line of 79 columns as 81, because the document holds an em
+    // dash and that character is three bytes. Both numbers were right and they
+    // disagreed, which is what measuring two different things looks like.
+    {
+        constexpr std::size_t kLimit = 79;
+        bool fenced = false;
+        for (std::size_t i = 0; i < lines.size(); ++i)
+        {
+            if (isFence(lines[i]))
+            {
+                fenced = !fenced;
+                continue;
+            }
+            if (fenced || isTableRow(lines[i]))
+                continue;
+            if (displayColumns(lines[i]) > kLimit)
+            {
+                failures.emplace_back(
+                    "R10", "line " + std::to_string(i + 1) + " is " +
+                               std::to_string(displayColumns(lines[i])) +
+                               " columns wide, over the limit of " +
+                               std::to_string(kLimit));
+                break;
+            }
+        }
+    }
+
     return failures;
 }
 
@@ -325,18 +501,34 @@ std::string readFile(const std::string& path)
     return buffer.str();
 }
 
+// kGood contains a line of 87 columns inside a fenced block. R10 skips fences,
+// so the document is accepted, and the R10 fixture has no fence around its long
+// line, so it is caught. If the fence skip were removed, kGood would fail and
+// this test would say so.
+//
+// kGood also carries a line of exactly 79 code points that is 81 bytes, because
+// of one em dash, U+2014. That is the case R10 got wrong when it counted bytes:
+// it called a line of 79 columns 81. The first fixture could not catch that,
+// because it holds no non-ASCII character and bytes and code points were the
+// same number on every line of it.
 const std::string kGood = "# Status\n"
                           "\n"
                           "## Open decisions\n"
                           "\n"
                           "1. **First?** Yes.\n"
                           "\n"
-                          "2. **Second?** No. See decision 1.\n"
+                          // 79 code points and 81 bytes: the em dash is one
+                          // code point and three bytes in UTF-8. R10 counted
+                          // bytes at first and called this line 81 columns.
+                          "2. **Second?** No. See decision 1. A dash \xE2\x80\x94"
+                          " here keeps the line inside the cap.\n"
                           "\n"
                           "## Verification commands\n"
                           "\n"
                           "```sh\n"
                           "cmake -S . -B build\n"
+                          "grep -rn 'api' include/ \\\n"
+                          "    || echo 'none'\n"
                           "```\n";
 
 // One fixture per rule, each reduced from the defect that actually occurred.
@@ -395,6 +587,22 @@ const Fixture kFixtures[] = {
      "1. **First?** Yes.\n\n"
      "## Verification commands\n\n"
      "    **Updated in 6e: the chain changed.**\n"},
+    {"R9", "a table row left outside its table",
+     "# Status\n\n## Open decisions\n\n"
+     "1. **First?** Yes.\n\n"
+     "## A section\n\n"
+     "| Defect | Cause | Fix |\n"
+     "| --- | --- | --- |\n"
+     "| one | two | three |\n\n"
+     "| A row that lost its table | a patch moved it | nothing caught it |\n\n"
+     "## Verification commands\n\n```sh\ncmake -S . -B build\n```\n"},
+    {"R10", "a paragraph that lost its line breaks",
+     "# Status\n\n## Open decisions\n\n"
+     "1. **First?** Yes.\n\n"
+     "2. **Second?** No. This paragraph was joined into a single line by a"
+     " script that did not measure the file, and it is long enough to go past"
+     " the limit of seventy-nine columns by a wide margin.\n\n"
+     "## Verification commands\n\n```sh\ncmake -S . -B build\n```\n"},
 };
 
 }  // namespace
