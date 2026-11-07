@@ -577,6 +577,24 @@ not exist before GL 3.2, so "3.0 core" is not a valid request.
     contract in the engine, and a format-specific backend outside the published
     tree, cloned locally. The engine's vocabulary stays its own either way.
 
+26. **How does the container compress payloads it cannot compress?**
+    The specification's method field was a single bit, stored or deflated,
+    which is not enough for the payloads this format exists to carry. Measured
+    on payloads shaped like the ones it carries, an index buffer deflates to
+    23.1% of its size and to 0.6% of it once its bytes are transposed first, a
+    factor of 41, and the transposition is not compression: it is a
+    rearrangement the container has to record or the payload cannot be read
+    back. The method is now a filter plus a codec, the index record carries the
+    filter and its element size, and the checksum covers the bytes after the
+    filter is reversed, for the same reason it already covered the inflated
+    bytes rather than the stored ones. The delta filter is measured to make
+    things worse on the same data in a different order, 74.5% against 71.7%, so
+    it is never chosen automatically and the build sets it per entry. A reader
+    that implements only the unfiltered case reads any container that does not
+    use a filter, so this is an extension rather than a break. The measurement
+    is kept as tools/measure-filter.py, so the numbers in the specification can
+    be reproduced rather than taken on trust.
+
 ## Verification commands
     **Updated in 6e (decision 22 resolved): the chain now ends in an
     offscreen 8-bit display target, which IS sampleable through the contract,

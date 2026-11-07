@@ -67,10 +67,14 @@ needs, followed by what it forces on the encoding.
    resource needs before reading it, and can stream rather than load whole.
    Forces: a kind field and a dependency list per entry.
 
-3. **A per-entry method, stored or deflated, chosen by the build.** A payload
-   that is already compressed gains nothing from being deflated again and pays
-   for the attempt in build time. Forces: a method bit per entry, and a decoder
-   that branches on it.
+3. **A per-entry method, stored or deflated, chosen by the build, with an
+   optional byte filter ahead of it.** A payload that is already compressed
+   gains nothing from being deflated again and pays for the attempt in build
+   time. A payload whose bytes are interleaved gains a great deal from being
+   transposed before it is deflated, and gains nothing at all from the
+   transposition if it is already compressed. Forces: a method per entry
+   naming both a filter and a codec, an element size for the filter, and a
+   decoder that reverses the filter after inflating.
 
 4. **Alignment per entry.** A texture or vertex buffer can be uploaded without
    an intermediate copy. Forces: a per-entry alignment exponent and padding
@@ -146,11 +150,12 @@ the index size is corruption.
 | size | field |
 | --- | --- |
 | 2 | record length in bytes, including this field |
-| 2 | entry flags, bit 0: payload is deflated, bit 1: has dependencies |
+| 2 | entry flags, bit 0: payload is deflated, bit 1: has dependencies, bits 2-3: filter |
 | 8 | payload offset, absolute |
 | 8 | payload size on disk |
 | 8 | payload size inflated |
-| 4 | payload checksum, CRC-32 of the inflated bytes |
+| 4 | payload checksum, CRC-32 of the inflated, unfiltered bytes |
+| 1 | filter element size in bytes, `0` when no filter is applied |
 | 1 | alignment exponent, `0` meaning no alignment |
 | 2 | resource kind |
 | 1 | name length in bytes |
@@ -163,10 +168,12 @@ record is meaningful on its own and a reader never has to resolve a reference
 before it can report what a resource needs. The cost is repeated name bytes,
 which is trivial next to the payloads and does not grow with them.
 
-The checksum covers the **inflated** bytes, not the stored bytes. Checking the
-stored bytes would detect a corrupted file, but checking the inflated bytes
-also detects a compressor or decompressor that is wrong, which is the failure
-this project is more likely to have.
+The checksum covers the **inflated and unfiltered** bytes, not the stored
+bytes. Checking the stored bytes would detect a corrupted file, but checking
+the bytes the loader hands out also detects a compressor, a decompressor or a
+filter that is wrong, which is the failure this project is more likely to
+have. A filter recorded incorrectly is therefore caught by the same check as a
+corrupt payload, and not by a crash inside the loader.
 
 ### 4.4 Names and kinds
 
@@ -190,6 +197,65 @@ bytes are unspecified and are not read. `a = 0` means no requirement.
 Alignment is expressed as a number and not as a graphics-API enumeration. It is
 the one place where the renderer and the container meet, and a number is the
 only form of that meeting that survives a change of graphics API.
+
+### 4.6 Filters
+
+A filter is a reversible rearrangement of the payload bytes applied before
+Deflate and reversed after inflate. It changes no bit of the resource; it
+changes the order the bits are in, so that Deflate sees runs instead of
+interleaving. Two are defined.
+
+**Shuffle** (filter `1`). The payload is treated as an array of records of
+`element size` bytes. The output is every record's first byte, then every
+record's second byte, and so on. A vertex that is eight floats becomes eight
+planes of four-byte values, and each plane compresses on its own.
+
+**Delta then shuffle** (filter `2`). Each 32-bit word is replaced by its
+difference from the same word of the previous record, and the result is
+shuffled. This only helps when consecutive records are numerically close,
+which is a property of how the buffer was produced and not of the buffer
+itself.
+
+Measured on payloads shaped like the ones this format carries, Deflate at
+level 9, raw streams, sizes in bytes and as a fraction of the payload:
+
+| payload | deflate | shuffle | delta+shuffle |
+| --- | --- | --- | --- |
+| index buffer, triangulated grid, 4.78 MB | 1,101,749 (23.1%) | 26,735 (0.6%) | 7,509 (0.2%) |
+| vertex buffer, grid order, 6.40 MB | 4,073,233 (63.6%) | 1,959,907 (30.6%) | 1,455,067 (22.7%) |
+| vertex buffer, permuted order, 6.40 MB | 4,824,534 (75.4%) | 4,586,279 (71.7%) | 4,767,878 (74.5%) |
+
+Three readings, and the third is why the filter is recorded per entry rather
+than chosen globally.
+
+The index buffer is the large win: 41 times smaller than Deflate alone after a
+shuffle, because its four-byte indices share their high bytes and differ in
+their low ones. Deflate cannot see that in the interleaved form.
+
+Shuffle is modest on 32-bit float data, and the reason is worth stating: the
+low bytes of a float's mantissa are close to random, and they are a third of
+every word. Transposing groups the bytes that are similar, but the random ones
+are still there. A build that quantises its vertex format first gets much more,
+and that is a property of the mesh format, not of this container: the element
+size field means a quantised record filters exactly as well as a wide one.
+
+Delta depends on the order of the data, and the third row is the case that
+decides the design. The same 6.40 MB of vertices in permuted order compress
+worse under delta than under a plain shuffle, because there is nothing for the
+delta to subtract. A writer cannot tell the two cases apart without knowing how
+the buffer was produced, so delta is never chosen automatically: it is an
+opt-in the build sets per entry, and the build is the only party that knows.
+
+The filter is part of the method, and the method is part of the entry. A
+container may therefore hold filtered and unfiltered entries side by side,
+which is what a build produces when it knows the shape of some resources and
+not of others.
+
+Filter `0` is no filter, and `element size` is `0` with it. An entry whose
+filter is `0` and whose flags say it is deflated is the plain case this
+specification described before this section existed, so a reader that
+implements only that case reads any container whose entries do not use a
+filter.
 
 ## 5. Appending and compaction
 
@@ -249,7 +315,10 @@ name in byte order, padding bytes are a fixed value, and no field depends on
 hash iteration order or on a timestamp. The payload bytes are whatever the
 configured compressor produces at the configured level, so the compressor and
 its version are part of the build's reproducibility contract and are recorded
-alongside it.
+alongside it. The filter choice is part of the same contract: it is a build
+decision recorded in the entry, not a property the writer infers, so two runs
+with the same inputs and the same configuration produce the same filter and the
+same bytes.
 
 Byte-identity with the output of a different tool is explicitly **not** a goal.
 Two conforming writers may produce different but equally valid containers.
@@ -267,6 +336,12 @@ project has:
 - **A per-entry compression-quality flag or "light encryption" bit.**
   Compression level is a build setting, not a resource property.
 - **A global directory at a fixed offset.** See section 4.1.
+- **A per-entry compression level.** The level is a build setting. It is not
+  recorded because it is not needed to read the payload back, and a reader that
+  wanted it would be measuring the writer's effort rather than the resource.
+- **A filter that is chosen by the writer.** Filtering is recorded, never
+  inferred. A writer that guessed would be wrong on exactly the payloads where
+  the choice matters, as the permuted case above shows.
 - **A self-extracting or executable form.** The container is read by the
   engine, not by the operating system.
 
