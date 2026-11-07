@@ -426,8 +426,9 @@ not exist before GL 3.2, so "3.0 core" is not a valid request.
     "volumetric" is a distinct light type or a property of point/spot, nor
     which representation the original used — both recorded as deviations
     (decision 25). What was NOT implemented: directional (half-space) volumes,
-    and shadowing of spot-style cone volumes (no spot shadow maps exist in this
-    tree).
+    and shadowing of spot-style cone volumes, and of spot-light
+    surfaces, which share the same cause (no spot shadow maps exist
+    in this tree).
 
 20. **Do fullscreen passes write depth, and where does scene depth live?**
     **Resolved 2026-11-06 (milestone 6d base repair): fullscreen passes never
@@ -631,6 +632,11 @@ not exist before GL 3.2, so "3.0 core" is not a valid request.
     a paraboloid map test it once per sample (16 single-tap lookups per volume
     per pixel; the bilateral 3x3 filter stays a surface property). Spot-style
     cone volumes are unshadowed — known limitation (no spot shadow maps).
+    The SURFACE of a spot light does not shadow either: both surface
+    shaders gate the shadow lookup on `lightType == 0`, which is point
+    only, so a spot light passes through geometry. Not a deviation —
+    the documented shadow mechanisms are the paraboloid point map and the
+    trapezoidal sun cascades, and no spot shadow is promised.
     Directional volumes not implemented (a half-space is not a useful shaft).
     Cap (A4): kMaxVolumetricLights = 4 per frame, over-cap rejected with
     std::invalid_argument in submit(), never truncated; the deferred surface
