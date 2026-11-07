@@ -528,7 +528,7 @@ std::vector<Failure> checkDocument(const std::string& text)
     // middle is silent, and one was carried into a commit of the specification,
     // where it sat above a heading until the file was measured. Fences are
     // skipped as in R9 and R10: a blank line inside a fenced block is part of
-    // the block's content, and the good document carries one.
+    // the block's content, and the good document carries two.
     {
         bool fenced = false;
         std::size_t i = 0;
