@@ -75,6 +75,12 @@ GlShaderProgram::GlShaderProgram(GlLoader& gl, ShaderProgramId id)
         vertexSource = kDeferredLightVertexShader;
         fragmentSource = kPostVolumetricFragmentShader;
         break;
+    case ShaderProgramId::VolumeInject:
+        // Fullscreen pass over a volume layer: the same neutral vertex stage
+        // every other fullscreen pass uses (milestone 7, third increment).
+        vertexSource = kDeferredLightVertexShader;
+        fragmentSource = kVolumeInjectFragmentShader;
+        break;
     }
     if (vertexSource == nullptr || fragmentSource == nullptr)
         throw std::runtime_error("GlShaderProgram: unknown ShaderProgramId");

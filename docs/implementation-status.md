@@ -33,7 +33,7 @@ The `.docx` files in this directory are generated from the `.md` sources with
 | 6f | Volumetric lights as an analytic region — a sphere around a point light, a cone around a spot light, through a `volumeDensity` property defaulting to off (decision 25) | Done |
 | 6g | SSAO with selective temporal filtering (SSAO-STF). **Deferred, not started** — needs motion-vector reprojection, which needs motion this tree does not have (decision 18) | Planned |
 | 6 | Post-processing: HDR, bloom, filmic tonemap (6a), ambient term (6b), SSAO (6c), DOF + morphological AA (6d) — all documented in section 3.2 except SSAO-STF temporal filtering, which remains deferred to its own increment | Done (SSAO-STF deferred) |
-| 7 | Global illumination by light volume propagation. Two increments done: the 3D texture exists in the contract and in both backends, and a pass renders into one layer of a volume without touching the others. **Still blocked:** nothing feeds the volume from the scene, and no propagation exists (decision 30) | In progress |
+| 7 | Global illumination by light volume propagation. Three increments done: the 3D texture exists in the contract and in both backends, a pass renders into one layer of a volume without touching the others, and the scene deposits its light into every layer, measured against the attenuation formula at one known texel. **Still blocked:** nothing propagates the volume or composes it into the frame, so no pixel changes yet (decision 30) | In progress |
 | 8 | Physics contract and the first backend | Planned |
 | 9 | Script host: AngelScript integration and type registration | Planned |
 | 10 | Visual scripting: block registry and graph evaluation | Planned |
@@ -109,6 +109,7 @@ All results below are real runs, on the tree at the stated commit.
 | 2026-11-07 | same, container specification | Payload blocked so requirement 2 holds in the middle of an entry, not only at its start. One deflate stream cannot be entered part way, so serving a 64 KB read in the middle of an 8.0 MiB vertex buffer inflates 8,400,000 bytes and takes 6.5 ms; with the payload blocked it is 131,072 bytes and 231 us, 64 and 28 times less, and on a 16 MB texture 14.4 ms against 223 us. The payload now uses the index's shape: a payload block table and independently deflated blocks of 256 KiB, reduced to a multiple of the element size. Filtering per block costs +21.55% on the vertex buffer and +91.60% on an index buffer, which is 2.6% of the payload in bytes. No record field was added: block size and count are derived. Sections 4.6.1 and 4.8. Measured by `tools/measure-stream.py` |
 | 2026-11-07 | same, both documents under the rules | OpenGL off: 14/14 Debug; OpenGL on: 27/27 Debug and Release; -L opengl 13/13; docs_structure 16 checks, 0 failures in both trees; zero warnings under -Werror |
 | 2026-11-07 | same, milestone 7 second increment | A pass renders into one layer of a volume, and only that layer. OpenGL off: 15/15 Debug; OpenGL on: 28/28 Debug and Release; -L opengl 13/13; docs_structure 17 checks, 0 failures; texture3d 23 -> 41 checks with no GL context; opengl_render 157 -> 193 checks; zero warnings under -Werror. Delta measured suite by suite against f5e84a8: +54 in total, +18 in texture3d and +36 in opengl_render, and no other suite changed. Measured on the driver before the code was written: attaching layer 1 of a 4x4x3 volume is GL_FRAMEBUFFER_COMPLETE for Rgba8, Rgba16F and R8 with no GL error on create, attach, clear or read; clearing through the target changes layer 1 and leaves layers 0 and 2 untouched |
+| 2026-11-07 | same, milestone 7 third increment | The scene deposits its light into the volume. `test_volume_inject` reads the volume back and compares against the surface shader's attenuation: texel(0,0) of layer 0 measures 5.77344 against 5.77600 predicted (one half-float quantum), layer 3 measures 0.37793 against 0.37793, and a bright light outside its radius deposits exactly 0. OpenGL on: 29/29 Debug and Release, 14/14 labelled opengl; the new suite reports 26 checks, 0 failures. No existing count decreased; `test_opengl_render` stays at 193. The contract grew 36 -> 37 pure virtual methods (`releaseTexture3D`, the gap the first increment left), the shader library 24 -> 25 and `ShaderProgramId` 16 -> 17; `gl_loader.cpp` stays at 65, since no new GL entry point is loaded. The test total was first written as 27/27, which counted the suites and not the three command-line tests registered alongside them. Off by default: a frame that asks for no volume creates none and changes no pixel |
 | 2026-11-07 | same, milestone 7 first increment | 3D texture in the contract, both backends and the null backend. OpenGL off: 15/15 Debug; OpenGL on: 28/28 Debug and Release; -L opengl 13/13; docs_structure 17 checks, 0 failures; texture3d 23 checks, 0 failures with no GL context; opengl_render 125 -> 157 checks; zero warnings under -Werror. Measured on the driver before the code was written: a Depth24Stencil8 volume is refused by glTexImage3D with GL_INVALID_OPERATION, and an R8 3x3 slice round-trips with row alignment 1 and not with 4 |
 
 ### Defects found by the tests, and fixed
@@ -837,6 +838,58 @@ grep -rn 'GLuint\|GLenum\|SDL_\|Window' include/grace/render/render_backend.hpp 
     the same `grep -c 'GRACE_GL_LOAD('` the earlier entry names: the previous
     increment took it from 59 to 64, and this one adds
     `glFramebufferTextureLayer`.
+    The third increment closes the sentence before that one: the scene now
+    deposits its light into the volume. `VolumeConfig` (off by default) names a
+    resolution and a world-space box; `runVolumeInjection` creates the volume,
+    then runs one fullscreen pass per layer through the layer target the second
+    increment added, so no new pass protocol exists for this either. The
+    injection shader reuses the surface shader's attenuation exactly — the same
+    `rangeAtten`, the same smoothstep cone, the same colours and intensities —
+    so the volume cannot disagree with what the surfaces around it are lit by.
+    What differs is only what is being lit: a point in space has no normal, so
+    there is no N.L term and no specular.
+
+    This increment also closed a gap the first one left. A volume could be
+    created but never released before shutdown, so a renderer that rebuilt its
+    volume on a configuration change could only leak it. `releaseTexture3D`
+    was added to the contract for that reason, and it removes the view from
+    the registry rather than flagging it the way `releaseRenderTarget` does,
+    because a released volume must never be handed back: a layer target that
+    outlived it would attach freed memory. The contract grew from
+    36 to 37 pure virtual methods, measured the way decision 30
+    declares: `grep -c '= 0;'` on the header. An earlier draft of this
+    paragraph said 32 to 33. That was the same error decision 30 already
+    corrected once, counting only the lines that carry both `virtual` and
+    `= 0`, which silently drops every declaration long enough to wrap.
+
+    The proof is a number, not a pixel, and it runs where the shader runs.
+    `test_volume_inject` places one point light at (1, 0.5, 0.5) with intensity
+    8 and radius 10, over a 4x4x4 volume spanning [0,4]^3, so the texel at the
+    volume's lower-left corner has its centre at (0.5, 0.5, 0.5) and sits 0.5
+    from the light. The value read back is 5.77344 against the 5.77600 the
+    attenuation formula predicts: the difference is one half-float quantum,
+    which is what an Rgba16F target can store. The third axis is checked the
+    same way — layer 3's texel reads 0.37793 against 0.37793 predicted at
+    sqrt(0.25 + 9) — so the pass is proved to write a different slice into each
+    layer rather than repeating one. A bright light placed outside its own
+    radius deposits exactly 0, which checks the windowed cutoff and not merely
+    that the value is small.
+
+    This test needs a GL context, and that is measured rather than assumed. A
+    first version ran the same comparison on the null backend and measured
+    0.00000 against an expected 5.77600: the null backend records events and
+    never executes a shader, so it has no arithmetic to deposit a radiance
+    value with. The numeric half therefore runs on OpenGL, and the structural
+    half — off by default, release and recreate, a foreign view refused, a
+    configuration rejected rather than clamped — runs on the null backend,
+    where it needs no arithmetic at all. The suite gained test_volume_inject at
+    26 checks and the test files go from 25 to 26. No existing count decreased.
+    The shader library went from 24 to 25 entries and
+    ShaderProgramId from 16 to 17 — the paragraph first said 17 to 18,
+    which was one too high at both ends — and gl_loader.cpp stays at
+    65 functions: this increment loads no new
+    GL entry point, because the layer target it renders through was loaded by
+    the second one.
 
 ## Verification commands
 

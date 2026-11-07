@@ -203,6 +203,13 @@ public:
     /// match. This is the round trip the volume capability is proved with.
     virtual bool readTexture3D(const TextureView* view, std::uint32_t layer, void* data,
                                std::size_t sizeBytes) = 0;
+    /// Releases a volume created by createTexture3D. The view is invalid after
+    /// this call and any later use is a violation, the same ownership rule
+    /// releaseRenderTarget states for targets. Added with the third increment
+    /// of milestone 7: the first increment could create a volume but had no way
+    /// to release one before shutdown, so a renderer that rebuilt its volume on
+    /// a configuration change could only leak it.
+    virtual void releaseTexture3D(TextureView* view) = 0;
 
     // -- Rendering into a volume (milestone 7, second increment) --------------
     //

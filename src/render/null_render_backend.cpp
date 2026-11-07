@@ -210,6 +210,7 @@ std::unique_ptr<ShaderProgram> NullRenderBackend::createShaderProgram(ShaderProg
     case ShaderProgramId::PostDOF: name = "PostDOF"; break;
     case ShaderProgramId::PostBlit: name = "PostBlit"; break;
     case ShaderProgramId::PostVolumetric: name = "PostVolumetric"; break;
+    case ShaderProgramId::VolumeInject: name = "VolumeInject"; break;
     }
     record(std::string("createShaderProgram(") + name + ")");
     if (m_shutdown)
@@ -432,6 +433,29 @@ NullTexture3DView* NullRenderBackend::findVolume(TextureView* view) const
         if (volume.get() == view)
             return volume.get();
     return nullptr;
+}
+
+void NullRenderBackend::releaseTexture3D(TextureView* view)
+{
+    record("releaseTexture3D");
+    if (m_shutdown)
+    {
+        ++m_violations;
+        return;
+    }
+    // Only a volume this backend created may be released, and only once.
+    for (const auto& volume : m_volumes)
+    {
+        if (volume.get() == view)
+        {
+            if (volume->released)
+                ++m_violations;
+            else
+                volume->released = true;
+            return;
+        }
+    }
+    ++m_violations;
 }
 
 TextureView* NullRenderBackend::createTexture3D(const Texture3DDesc& desc)

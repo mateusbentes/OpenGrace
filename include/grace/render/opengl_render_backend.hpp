@@ -90,6 +90,7 @@ public:
     CameraParams camera() const override;
     void bindTexture(const TextureView* view, std::uint32_t unit) override;
     TextureView* createTexture3D(const Texture3DDesc& desc) override;
+    void releaseTexture3D(TextureView* view) override;
     void bindTexture3D(const TextureView* view, std::uint32_t unit) override;
     void fillTexture3D(TextureView* view, std::uint32_t layer, const void* data,
                        std::size_t sizeBytes) override;

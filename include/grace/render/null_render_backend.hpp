@@ -66,6 +66,10 @@ public:
         return static_cast<std::size_t>(desc.width) * desc.height * bytesPerPixel(desc.format);
     }
 
+    /// Set by releaseTexture3D. The view stays in the registry (the lifetime
+    /// rule the targets follow) and any later use is a violation.
+    bool released = false;
+
 private:
     Texture3DDesc m_desc;
     std::vector<std::vector<std::byte>> m_slices;
@@ -209,6 +213,7 @@ public:
 
     void bindTexture(const TextureView* view, std::uint32_t unit) override;
     TextureView* createTexture3D(const Texture3DDesc& desc) override;
+    void releaseTexture3D(TextureView* view) override;
     void bindTexture3D(const TextureView* view, std::uint32_t unit) override;
     void fillTexture3D(TextureView* view, std::uint32_t layer, const void* data,
                        std::size_t sizeBytes) override;

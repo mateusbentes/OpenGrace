@@ -65,9 +65,18 @@ void PostConfig::validate() const
         throw std::invalid_argument("post config: bloomLevels must be in [1, 8]");
 }
 
+void VolumeConfig::validate() const
+{
+    if (resolution == 0)
+        throw std::invalid_argument("volume config: resolution must be > 0");
+    if (!(extent.x > 0.0f) || !(extent.y > 0.0f) || !(extent.z > 0.0f))
+        throw std::invalid_argument("volume config: every extent component must be > 0");
+}
+
 void RendererConfig::validate() const
 {
     post.validate();
+    volume.validate();
     if (path != RenderPath::Forward && path != RenderPath::Deferred)
         throw std::invalid_argument("renderer config: out-of-range render path");
     camera.validate();
@@ -85,10 +94,13 @@ void Renderer::setConfig(const RendererConfig& config)
 {
     config.validate();  // throws std::invalid_argument
     const bool wasPost = m_config.post.enabled;
+    const bool wasVolume = m_config.volume.enabled;
     m_config = config;
     releaseShadowMaps();
     if (wasPost && !m_config.post.enabled)
         releasePostResources();  // documented: released when the chain is disabled
+    if (wasVolume && !m_config.volume.enabled)
+        releaseLightVolume();  // same rule for the volume (milestone 7)
 }
 
 void Renderer::setClearColor(ClearColor color)
@@ -157,6 +169,12 @@ void Renderer::endFrame()
         renderDeferredFrame();
     else
         renderForwardFrame();
+    // Volume injection (milestone 7, third increment): after lighting, because
+    // it consumes the frame's light list, and before the post chain, which
+    // reads the scene depth this pass does not touch. Off by default, so a
+    // frame that does not ask for it is unchanged.
+    if (m_config.volume.enabled)
+        runVolumeInjection();
     if (m_config.post.enabled)
         runPostChain();  // after lighting, before frame completion (H4)
     m_backend.endRenderPass();
@@ -349,6 +367,110 @@ void Renderer::releasePostResources()
     m_postDOF.reset();
     m_postBlit.reset();
     m_postVolumetric.reset();
+}
+
+void Renderer::releaseLightVolume()
+{
+    // The volume is a plain resource: released when the configuration stops
+    // asking for it, like the post chain's targets (milestone 7).
+    if (m_light_volume != nullptr)
+    {
+        m_backend.releaseTexture3D(m_light_volume);
+        m_light_volume = nullptr;
+    }
+    m_volumeInject.reset();
+}
+
+void Renderer::runVolumeInjection()
+{
+    // One fullscreen pass per layer of the volume, through the layer target of
+    // the second increment: no new pass protocol exists, which is the point of
+    // that increment. The pass consumes the frame's light list, so it runs
+    // after lighting and cannot run before submit() has filled it.
+    //
+    // Nothing reads the volume back yet — propagation is the next increment —
+    // so enabling this does not change a rendered frame. What it establishes is
+    // that the volume holds the light the surfaces around it are lit by, which
+    // is the prerequisite for propagating it.
+    if (m_light_volume == nullptr ||
+        m_light_volume->width() != m_config.volume.resolution ||
+        m_light_volume->height() != m_config.volume.resolution ||
+        m_light_volume->depth() != m_config.volume.resolution)
+    {
+        releaseLightVolume();
+        Texture3DDesc desc;
+        desc.width = m_config.volume.resolution;
+        desc.height = m_config.volume.resolution;
+        desc.depth = m_config.volume.resolution;
+        // Linear HDR, the same format the lighting target uses, because the
+        // volume holds radiance and a later pass adds it to the frame.
+        desc.format = PixelFormat::Rgba16F;
+        m_light_volume = m_backend.createTexture3D(desc);
+        m_volumeInject = m_backend.createShaderProgram(ShaderProgramId::VolumeInject);
+    }
+    if (m_volumeInject == nullptr)
+        return;
+    // The volume pass is a fullscreen pass like every other one: no depth test,
+    // no depth writes (decision 20). Restored below, because with the post
+    // chain off nothing else would restore it.
+    m_backend.setDepthTestEnabled(false);
+    ensureFullscreenQuad();
+
+    const std::uint32_t depth = m_light_volume->depth();
+    const std::uint32_t lightCount =
+        static_cast<std::uint32_t>(std::min<std::size_t>(m_frame_lights.size(), 4));
+    for (std::uint32_t layer = 0; layer < depth; ++layer)
+    {
+        // A layer target borrows the volume and never owns it, so creating one
+        // per layer and releasing it immediately is safe and leaves the volume
+        // and the layers already written intact.
+        RenderTarget* target = m_backend.createVolumeLayerTarget(m_light_volume, layer);
+        m_backend.beginRenderPass(target);
+        m_volumeInject->use();
+        m_volumeInject->setUniform("volumeOrigin", m_config.volume.origin);
+        m_volumeInject->setUniform("volumeExtent", m_config.volume.extent);
+        m_volumeInject->setUniform("outSize",
+                                   core::vec2{static_cast<float>(target->width()),
+                                              static_cast<float>(target->height())});
+        // Texel centre along the third axis, so a layer samples the middle of
+        // its own slab and not its boundary.
+        m_volumeInject->setUniform(
+            "layerCoord", (static_cast<float>(layer) + 0.5f) / static_cast<float>(depth));
+        m_volumeInject->setUniform("lightCount", static_cast<int>(lightCount));
+        for (std::uint32_t i = 0; i < lightCount; ++i)
+        {
+            const DynamicLight& light = m_frame_lights[i];
+            const std::string index = "[" + std::to_string(i) + "]";
+            if (const auto* point = std::get_if<PointLight>(&light))
+            {
+                m_volumeInject->setUniform(("lightType" + index).c_str(), 0);
+                m_volumeInject->setUniform(("lightPos" + index).c_str(), point->position);
+                m_volumeInject->setUniform(("lightDir" + index).c_str(),
+                                           core::vec3{0.0f, 0.0f, 0.0f});
+                m_volumeInject->setUniform(("lightColor" + index).c_str(), point->color);
+                m_volumeInject->setUniform(("lightIntensity" + index).c_str(), point->intensity);
+                m_volumeInject->setUniform(("lightRange" + index).c_str(), point->radius);
+                m_volumeInject->setUniform(("lightInner" + index).c_str(), 0.0f);
+                m_volumeInject->setUniform(("lightOuter" + index).c_str(), 0.0f);
+            }
+            else
+            {
+                const auto& spot = std::get<SpotLight>(light);
+                m_volumeInject->setUniform(("lightType" + index).c_str(), 1);
+                m_volumeInject->setUniform(("lightPos" + index).c_str(), spot.position);
+                m_volumeInject->setUniform(("lightDir" + index).c_str(), spot.direction);
+                m_volumeInject->setUniform(("lightColor" + index).c_str(), spot.color);
+                m_volumeInject->setUniform(("lightIntensity" + index).c_str(), spot.intensity);
+                m_volumeInject->setUniform(("lightRange" + index).c_str(), spot.range);
+                m_volumeInject->setUniform(("lightInner" + index).c_str(), spot.innerAngle);
+                m_volumeInject->setUniform(("lightOuter" + index).c_str(), spot.outerAngle);
+            }
+        }
+        m_fullscreen_quad->drawIndexed();
+        m_backend.endRenderPass();
+        m_backend.releaseRenderTarget(target);
+    }
+    m_backend.setDepthTestEnabled(true);
 }
 
 void Renderer::runPostChain()

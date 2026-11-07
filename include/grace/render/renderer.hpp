@@ -84,6 +84,23 @@ struct DofConfig
     void validate() const;
 };
 
+/// Volume light injection configuration (milestone 7, third increment). Off by
+/// default, and with it off every pixel value is bit-identical to before the
+/// volume existed: a frame that enables nothing must not change (the same rule
+/// the post chain follows). When on, one pass per frame writes the scene's
+/// light into every layer of a volume, so the volume holds the light the
+/// surfaces are lit by. Nothing reads it back yet — propagation is the next
+/// increment — so enabling this alone does not change a rendered frame.
+struct VolumeConfig
+{
+    bool enabled = false;                  ///< off by default
+    std::uint32_t resolution = 16;         ///< texels along each axis, > 0
+    core::vec3 origin{0.0f, 0.0f, 0.0f};   ///< world-space minimum corner
+    core::vec3 extent{16.0f, 16.0f, 16.0f};///< world-space size, each component > 0
+
+    void validate() const;
+};
+
 struct PostConfig
 {
     /// Post-processing ON by default (milestone 6e, decision 23 — the flip
@@ -124,6 +141,7 @@ struct RendererConfig
     /// legacy — shadows stay readable.
     float ambient = 0.2f;
     PostConfig post;                        ///< post-processing chain (on by default since 6e)
+    VolumeConfig volume;                    ///< light volume injection (7, off by default)
 
     /// Throws std::invalid_argument on invalid values (out-of-range path,
     /// invalid camera/cascade/point-shadow config, zero deferredLightCap).
@@ -183,6 +201,11 @@ public:
     /// chain is off.
     RenderTarget* displayTarget() noexcept { return m_displaySrc; }
 
+    /// The light volume (milestone 7), for inspection only: readback of its
+    /// layers through the backend's readTexture3D. nullptr when volume
+    /// injection is off.
+    TextureView* lightVolume() noexcept { return m_light_volume; }
+
 
     std::uint64_t frameCount() const noexcept { return m_frame_count; }
 
@@ -198,6 +221,8 @@ private:
     RenderTarget* lightingTarget();
     void ensureDeferredResources();
     void releaseShadowMaps();
+    void releaseLightVolume();
+    void runVolumeInjection();
 
     RenderBackend& m_backend;
     RendererConfig m_config;
@@ -228,6 +253,12 @@ private:
     RenderTarget* m_display = nullptr;   ///< 6e offscreen 8-bit display target (Rgba8, sampleable)
     RenderTarget* m_displayB = nullptr;  ///< 6e MLAA ping-pong on the display image (Rgba8)
     RenderTarget* m_displaySrc = nullptr;///< 6e the target the last present pass copied from
+    // Light volume (milestone 7, third increment): one 3D texture holding the
+    // scene's light, filled layer by layer through the layer target of the
+    // second increment. Created on the first frame that asks for it, released
+    // when the configuration stops asking.
+    std::unique_ptr<ShaderProgram> m_volumeInject;
+    TextureView* m_light_volume = nullptr;
     std::unique_ptr<ShaderProgram> m_postVolumetric;  ///< 6f volumetric in-scattering pass
     RenderTarget* m_vol = nullptr;  ///< 6f linear in-scattering buffer: Rgba16F, full framebuffer size
     std::unique_ptr<ShaderProgram> m_gbuffer_program;

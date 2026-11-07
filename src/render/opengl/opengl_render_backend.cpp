@@ -756,6 +756,35 @@ void OpenGLRenderBackend::bindTexture(const TextureView* view, std::uint32_t uni
     impl.drainGlErrors("bindTexture");
 }
 
+void OpenGLRenderBackend::releaseTexture3D(TextureView* view)
+{
+    Impl& impl = *m_impl;
+    if (!impl.ready())
+    {
+        ++impl.violations;
+        return;
+    }
+    opengl::GlTexture3DView* known = findGlVolume(impl.volumes, view);
+    if (known == nullptr)
+    {
+        ++impl.violations;
+        return;
+    }
+    // Deleting the view destroys the GL texture through its destructor, the
+    // rule the targets follow. The registry entry goes with it: a released
+    // volume is not addressable, unlike a released target, because no layer
+    // target may outlive it.
+    for (auto it = impl.volumes.begin(); it != impl.volumes.end(); ++it)
+    {
+        if (it->get() == known)
+        {
+            impl.volumes.erase(it);
+            break;
+        }
+    }
+    impl.drainGlErrors("releaseTexture3D");
+}
+
 TextureView* OpenGLRenderBackend::createTexture3D(const Texture3DDesc& desc)
 {
     Impl& impl = *m_impl;

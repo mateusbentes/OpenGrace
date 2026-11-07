@@ -1144,4 +1144,72 @@ void main()
 }
 )";
 
+// Volume light injection (milestone 7, third increment). Writes ONE LAYER of a
+// volume: the light that reaches each texel of that layer, so the volume holds
+// the scene's light and a later pass can propagate it. The pass runs through
+// the layer target of the second increment, so it needs no new pass protocol:
+// beginRenderPass on the layer target, draw the fullscreen quad, endRenderPass.
+//
+// The light model is deliberately the SAME as the surface shader's, so the
+// volume cannot disagree with what the surfaces around it are lit by: the same
+// rangeAtten, the same smoothstep cone, the same colours and intensities. What
+// differs is only what is being lit — a point in space has no normal, so there
+// is no N.L term and no specular. This is in-scattered radiance at the texel,
+// not a surface response.
+//
+// The texel's world position comes from the volume's own grid, which the
+// renderer supplies as an axis-aligned box in world space. The layer target
+// covers exactly that box's cross-section, so a texel outside the box is never
+// written and no clamping is needed.
+constexpr const char* kVolumeInjectFragmentShader = R"(#version 330 core
+uniform vec3 volumeOrigin;       // world-space minimum corner of the volume
+uniform vec3 volumeExtent;       // world-space size along each axis
+uniform vec2 outSize;            // layer width and height in texels
+uniform float layerCoord;        // 0..1 along the volume's third axis
+uniform int lightCount;          // <= 4, the same cap the surface shader has
+uniform int lightType[4];
+uniform vec3 lightPos[4];
+uniform vec3 lightDir[4];
+uniform vec3 lightColor[4];
+uniform float lightIntensity[4];
+uniform float lightRange[4];
+uniform float lightInner[4];
+uniform float lightOuter[4];
+out vec4 fragment;
+
+// The same windowed inverse-square attenuation the surface shader uses, so the
+// volume cannot be lit differently from the surfaces around it.
+float rangeAtten(float intensity, float range, float d)
+{
+    if (d > range) return 0.0;
+    float w = 1.0 - d / range;
+    return intensity * w * w / (d * d + 1.0);
+}
+
+void main()
+{
+    vec2 uv = gl_FragCoord.xy / outSize;
+    vec3 p = volumeOrigin + vec3(uv.x, uv.y, layerCoord) * volumeExtent;
+    vec3 sum = vec3(0.0);
+    for (int i = 0; i < lightCount && i < 4; ++i)
+    {
+        vec3 toLight = lightPos[i] - p;
+        float d = length(toLight);
+        vec3 L = toLight / max(d, 1e-6);
+        float cone = 1.0;
+        if (lightType[i] == 1)
+        {
+            float cosAngle = dot(-L, normalize(lightDir[i]));
+            float cosInner = cos(lightInner[i]);
+            float cosOuter = cos(lightOuter[i]);
+            float t = clamp((cosAngle - cosOuter) / (cosInner - cosOuter), 0.0, 1.0);
+            cone = t * t * (3.0 - 2.0 * t);
+        }
+        sum += lightColor[i] * rangeAtten(lightIntensity[i], lightRange[i], d) * cone;
+    }
+    fragment = vec4(sum, 1.0);  // linear HDR, like the lighting target
+}
+)";
+
+
 }  // namespace grace::render::opengl

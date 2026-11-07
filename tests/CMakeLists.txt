@@ -122,6 +122,19 @@ if(GRACE_ENABLE_OPENGL)
         grace_null_render grace_render_opengl grace_warnings)
     target_include_directories(test_opengl_render PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
+    # Volume light injection (milestone 7, third increment). Registered with the
+    # OpenGL tests because its numeric half reads back what the injection shader
+    # wrote, and only a real GL context executes a shader: the null backend
+    # records events and does no arithmetic. It links the null backend too,
+    # because its structural half (off by default, release and recreate,
+    # rejected configuration) is proved there. SKIP_RETURN_CODE 77 keeps a
+    # machine without GL from failing the suite, the rule every OpenGL test here
+    # follows.
+    add_executable(test_volume_inject test_volume_inject.cpp)
+    target_link_libraries(test_volume_inject PRIVATE
+        grace_null_render grace_render_opengl grace_warnings)
+    target_include_directories(test_volume_inject PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
     add_executable(test_mesh test_mesh.cpp)
     target_link_libraries(test_mesh PRIVATE grace_render grace_render_opengl grace_warnings)
     target_include_directories(test_mesh PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -173,7 +186,7 @@ if(GRACE_ENABLE_OPENGL)
         set(GRACE_OPENGL_LAUNCHER "")
     endif()
 
-    foreach(test_name test_opengl_context test_opengl_render test_mesh test_shader test_lighting test_shadows test_point_shadows test_tsm test_deferred test_post test_ssao test_dof_mlaa test_volumetric)
+    foreach(test_name test_opengl_context test_opengl_render test_volume_inject test_mesh test_shader test_lighting test_shadows test_point_shadows test_tsm test_deferred test_post test_ssao test_dof_mlaa test_volumetric)
         add_test(NAME ${test_name}
             COMMAND ${GRACE_OPENGL_LAUNCHER} $<TARGET_FILE:${test_name}>)
         set_tests_properties(${test_name} PROPERTIES
