@@ -175,6 +175,8 @@ void Renderer::endFrame()
     // frame that does not ask for it is unchanged.
     if (m_config.volume.enabled)
         runVolumeInjection();
+    if (m_config.volume.enabled && m_config.volume.iterations > 0)
+        runVolumePropagation();
     if (m_config.post.enabled)
         runPostChain();  // after lighting, before frame completion (H4)
     m_backend.endRenderPass();
@@ -378,7 +380,13 @@ void Renderer::releaseLightVolume()
         m_backend.releaseTexture3D(m_light_volume);
         m_light_volume = nullptr;
     }
+    if (m_light_volume_b != nullptr)
+    {
+        m_backend.releaseTexture3D(m_light_volume_b);
+        m_light_volume_b = nullptr;
+    }
     m_volumeInject.reset();
+    m_volumePropagate.reset();
 }
 
 void Renderer::runVolumeInjection()
@@ -388,8 +396,8 @@ void Renderer::runVolumeInjection()
     // that increment. The pass consumes the frame's light list, so it runs
     // after lighting and cannot run before submit() has filled it.
     //
-    // Nothing reads the volume back yet — propagation is the next increment —
-    // so enabling this does not change a rendered frame. What it establishes is
+    // With propagation off (the default), nothing reads the volume back and
+    // enabling this does not change a rendered frame. What it establishes is
     // that the volume holds the light the surfaces around it are lit by, which
     // is the prerequisite for propagating it.
     if (m_light_volume == nullptr ||
@@ -406,7 +414,13 @@ void Renderer::runVolumeInjection()
         // volume holds radiance and a later pass adds it to the frame.
         desc.format = PixelFormat::Rgba16F;
         m_light_volume = m_backend.createTexture3D(desc);
+        // Fourth increment: the propagation step needs a second volume to
+        // write into while the first is sampled. Two objects, never the same
+        // one: the OpenGL spec forbids sampling a texture bound to the same
+        // unit as an active framebuffer attachment.
+        m_light_volume_b = m_backend.createTexture3D(desc);
         m_volumeInject = m_backend.createShaderProgram(ShaderProgramId::VolumeInject);
+        m_volumePropagate = m_backend.createShaderProgram(ShaderProgramId::VolumePropagate);
     }
     if (m_volumeInject == nullptr)
         return;
@@ -469,6 +483,58 @@ void Renderer::runVolumeInjection()
         m_fullscreen_quad->drawIndexed();
         m_backend.endRenderPass();
         m_backend.releaseRenderTarget(target);
+    }
+    m_backend.setDepthTestEnabled(true);
+}
+
+void Renderer::runVolumePropagation()
+{
+    // Fourth increment: one propagation step per iteration. Each step reads
+    // the volume the injection filled (or the previous iteration wrote) and
+    // writes the other volume, one fullscreen pass per layer, through the
+    // layer target the second increment added. The source volume is bound on
+    // a texture unit and the destination is the framebuffer attachment, so
+    // the two volumes must be different objects — the OpenGL spec forbids
+    // sampling a texture bound to the same unit as an active framebuffer
+    // attachment.
+    //
+    // Every iteration is a full pass over the volume: the volume is ping-pong
+    // A->B->A, and the pointers swap at the end of every iteration, so the
+    // frame's light volume (m_light_volume) is always the last one written.
+    if (m_light_volume == nullptr || m_light_volume_b == nullptr ||
+        m_volumePropagate == nullptr)
+        return;
+    m_backend.setDepthTestEnabled(false);
+    const std::uint32_t resolution = m_light_volume->depth();
+    const std::uint32_t depth = m_light_volume_b->depth();
+    const std::uint32_t iterations = m_config.volume.iterations;
+    for (std::uint32_t it = 0; it < iterations; ++it)
+    {
+        for (std::uint32_t layer = 0; layer < depth; ++layer)
+        {
+            // A layer target borrows the volume and never owns it, so creating
+            // one per layer and releasing it immediately is safe and leaves the
+            // volume and the layers already written intact.
+            RenderTarget* target = m_backend.createVolumeLayerTarget(m_light_volume_b, layer);
+            m_backend.beginRenderPass(target);
+            m_backend.bindTexture3D(m_light_volume, 0);
+            m_volumePropagate->use();
+            m_volumePropagate->setUniform("volumeIn", 0);
+            m_volumePropagate->setUniform("texelSize",
+                                          core::vec3{1.0f / static_cast<float>(resolution),
+                                                     1.0f / static_cast<float>(resolution),
+                                                     1.0f / static_cast<float>(resolution)});
+            m_volumePropagate->setUniform(
+                "outSize", core::vec2{static_cast<float>(target->width()),
+                                      static_cast<float>(target->height())});
+            m_volumePropagate->setUniform(
+                "layerCoord", (static_cast<float>(layer) + 0.5f) / static_cast<float>(depth));
+            m_fullscreen_quad->drawIndexed();
+            m_backend.endRenderPass();
+            m_backend.releaseRenderTarget(target);
+        }
+        // The frame's light volume is the last one written: swap the pointers.
+        std::swap(m_light_volume, m_light_volume_b);
     }
     m_backend.setDepthTestEnabled(true);
 }

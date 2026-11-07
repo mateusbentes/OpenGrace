@@ -97,6 +97,15 @@ struct VolumeConfig
     std::uint32_t resolution = 16;         ///< texels along each axis, > 0
     core::vec3 origin{0.0f, 0.0f, 0.0f};   ///< world-space minimum corner
     core::vec3 extent{16.0f, 16.0f, 16.0f};///< world-space size, each component > 0
+    /// Propagation steps per frame (milestone 7, fourth increment). Each step
+    /// is one full pass over the volume: every cell accumulates its six face
+    /// neighbours, weighted by one sixth. One step is one bounce; more steps
+    /// are a configuration change, not a code change (registered decision).
+    /// 0 = injection only (the third increment's behaviour, the default before
+    /// this increment), which is what the third increment's numeric test
+    /// compares against; 1 = the propagation itself, the default this increment
+    /// commits to.
+    std::uint32_t iterations = 1;
 
     void validate() const;
 };
@@ -223,6 +232,7 @@ private:
     void releaseShadowMaps();
     void releaseLightVolume();
     void runVolumeInjection();
+    void runVolumePropagation();
 
     RenderBackend& m_backend;
     RendererConfig m_config;
@@ -259,6 +269,14 @@ private:
     // when the configuration stops asking.
     std::unique_ptr<ShaderProgram> m_volumeInject;
     TextureView* m_light_volume = nullptr;
+    // Fourth increment (milestone 7): the propagation step. The volume is
+    // ping-pong: the frame's light is injected into volume A, then each
+    // iteration reads volume A and writes volume B, and volume B becomes the
+    // frame's light volume. The OpenGL spec forbids sampling a texture bound
+    // as an active framebuffer attachment, so the two volumes are different
+    // objects and the pointers swap at the end of every iteration.
+    std::unique_ptr<ShaderProgram> m_volumePropagate;
+    TextureView* m_light_volume_b = nullptr;
     std::unique_ptr<ShaderProgram> m_postVolumetric;  ///< 6f volumetric in-scattering pass
     RenderTarget* m_vol = nullptr;  ///< 6f linear in-scattering buffer: Rgba16F, full framebuffer size
     std::unique_ptr<ShaderProgram> m_gbuffer_program;

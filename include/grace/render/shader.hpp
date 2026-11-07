@@ -36,6 +36,7 @@ enum class ShaderProgramId : std::uint8_t
                         ///< display target onto the default framebuffer (6e)
     PostVolumetric,     ///< post: volumetric light in-scattering along the view ray (6f)
     VolumeInject,       ///< volume: inject scene light into one layer (7, third increment)
+    VolumePropagate,    ///< volume: one propagation step, six face neighbours (7, fourth increment)
 };
 
 /// Caches uniform locations by name so repeated sets do not re-query the

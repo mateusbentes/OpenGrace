@@ -211,6 +211,7 @@ std::unique_ptr<ShaderProgram> NullRenderBackend::createShaderProgram(ShaderProg
     case ShaderProgramId::PostBlit: name = "PostBlit"; break;
     case ShaderProgramId::PostVolumetric: name = "PostVolumetric"; break;
     case ShaderProgramId::VolumeInject: name = "VolumeInject"; break;
+    case ShaderProgramId::VolumePropagate: name = "VolumePropagate"; break;
     }
     record(std::string("createShaderProgram(") + name + ")");
     if (m_shutdown)

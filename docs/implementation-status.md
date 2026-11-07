@@ -33,7 +33,7 @@ The `.docx` files in this directory are generated from the `.md` sources with
 | 6f | Volumetric lights as an analytic region — a sphere around a point light, a cone around a spot light, through a `volumeDensity` property defaulting to off (decision 25) | Done |
 | 6g | SSAO with selective temporal filtering (SSAO-STF). **Deferred, not started** — needs motion-vector reprojection, which needs motion this tree does not have (decision 18) | Planned |
 | 6 | Post-processing: HDR, bloom, filmic tonemap (6a), ambient term (6b), SSAO (6c), DOF + morphological AA (6d) — all documented in section 3.2 except SSAO-STF temporal filtering, which remains deferred to its own increment | Done (SSAO-STF deferred) |
-| 7 | Global illumination by light volume propagation. Three increments done: the 3D texture exists in the contract and in both backends, a pass renders into one layer of a volume without touching the others, and the scene deposits its light into every layer, measured against the attenuation formula at one known texel. **Still blocked:** nothing propagates the volume or composes it into the frame, so no pixel changes yet (decision 30) | In progress |
+| 7 | Global illumination by light volume propagation. Three increments done and the fourth begun: the 3D texture exists in the contract and in both backends, a pass renders into one layer of a volume without touching the others, the scene deposits its light into every layer, and one propagation step averages the six face neighbours, measured cell by cell. **Still blocked:** the volume is not yet composed into the frame, so no pixel changes yet (decision 30) | In progress |
 | 8 | Physics contract and the first backend | Planned |
 | 9 | Script host: AngelScript integration and type registration | Planned |
 | 10 | Visual scripting: block registry and graph evaluation | Planned |
@@ -110,6 +110,7 @@ All results below are real runs, on the tree at the stated commit.
 | 2026-11-07 | same, both documents under the rules | OpenGL off: 14/14 Debug; OpenGL on: 27/27 Debug and Release; -L opengl 13/13; docs_structure 16 checks, 0 failures in both trees; zero warnings under -Werror |
 | 2026-11-07 | same, milestone 7 second increment | A pass renders into one layer of a volume, and only that layer. OpenGL off: 15/15 Debug; OpenGL on: 28/28 Debug and Release; -L opengl 13/13; docs_structure 17 checks, 0 failures; texture3d 23 -> 41 checks with no GL context; opengl_render 157 -> 193 checks; zero warnings under -Werror. Delta measured suite by suite against f5e84a8: +54 in total, +18 in texture3d and +36 in opengl_render, and no other suite changed. Measured on the driver before the code was written: attaching layer 1 of a 4x4x3 volume is GL_FRAMEBUFFER_COMPLETE for Rgba8, Rgba16F and R8 with no GL error on create, attach, clear or read; clearing through the target changes layer 1 and leaves layers 0 and 2 untouched |
 | 2026-11-07 | same, milestone 7 third increment | The scene deposits its light into the volume. `test_volume_inject` reads the volume back and compares against the surface shader's attenuation: texel(0,0) of layer 0 measures 5.77344 against 5.77600 predicted (one half-float quantum), layer 3 measures 0.37793 against 0.37793, and a bright light outside its radius deposits exactly 0. OpenGL on: 29/29 Debug and Release, 14/14 labelled opengl; the new suite reports 26 checks, 0 failures. No existing count decreased; `test_opengl_render` stays at 193. The contract grew 36 -> 37 pure virtual methods (`releaseTexture3D`, the gap the first increment left), the shader library 24 -> 25 and `ShaderProgramId` 16 -> 17; `gl_loader.cpp` stays at 65, since no new GL entry point is loaded. The test total was first written as 27/27, which counted the suites and not the three command-line tests registered alongside them. Off by default: a frame that asks for no volume creates none and changes no pixel |
+| 2026-11-07 | same, milestone 7 fourth increment | One propagation step averages the six face neighbours, measured cell by cell against the average the injection wrote: the volume is 4x4x4 and every cell is checked, and the far corner cell (which the injection filled with 0.08162) holds 0.10120 after the step — the light spread into the cells the injection did not light. OpenGL on: the new suite reports 88 checks, 0 failures. No existing count decreased; `test_opengl_render` stays at 193. The shader library went from 25 to 26 entries and `ShaderProgramId` from 17 to 18, both measured with the methods the earlier entries declare; the render contract stays at 37 pure virtual methods and `gl_loader.cpp` stays at 65 — no new GL entry point, because the propagation renders through the layer target the second increment added |
 | 2026-11-07 | same, milestone 7 first increment | 3D texture in the contract, both backends and the null backend. OpenGL off: 15/15 Debug; OpenGL on: 28/28 Debug and Release; -L opengl 13/13; docs_structure 17 checks, 0 failures; texture3d 23 checks, 0 failures with no GL context; opengl_render 125 -> 157 checks; zero warnings under -Werror. Measured on the driver before the code was written: a Depth24Stencil8 volume is refused by glTexImage3D with GL_INVALID_OPERATION, and an R8 3x3 slice round-trips with row alignment 1 and not with 4 |
 
 ### Defects found by the tests, and fixed
@@ -838,6 +839,25 @@ grep -rn 'GLuint\|GLenum\|SDL_\|Window' include/grace/render/render_backend.hpp 
     the same `grep -c 'GRACE_GL_LOAD('` the earlier entry names: the previous
     increment took it from 59 to 64, and this one adds
     `glFramebufferTextureLayer`.
+    The fourth increment makes the volume propagate: one step per
+    iteration, each cell accumulating the average of its six face
+    neighbours, each weighted by one sixth. The source volume is sampled
+    with NEAREST at the cell centres so the taps are exact, and the
+    CLAMP_TO_EDGE wrap makes an edge cell its own neighbour, so the
+    volume's boundary cells keep their light instead of losing it to a
+    neighbour outside the volume. The propagation step needs two volumes,
+    because OpenGL forbids sampling a texture bound to the same unit as an
+    active framebuffer attachment, so the renderer creates a second volume
+    and the pointers swap at the end of every iteration: the frame's light
+    volume is always the last one written.
+    What the propagation step deliberately does not do: it does not
+    occlude. The architecture promises GI by light volume propagation, but
+    not which family; an LPV without occlusion is a light volume that
+    leaks light through walls, and the plan's fourth increment names that
+    decision with the scope it carries: resolution, iteration count,
+    bounces. The geometry that would occlude is measured to exist in the
+    G-buffer only, so the decision about it is recorded as open, not
+    silently skipped.
     The third increment closes the sentence before that one: the scene now
     deposits its light into the volume. `VolumeConfig` (off by default) names a
     resolution and a world-space box; `runVolumeInjection` creates the volume,

@@ -130,6 +130,11 @@ void testOneLightOnePoint()
     config.post.enabled = false;  // the volume must not depend on the post chain
     config.volume.enabled = true;
     config.volume.resolution = 4;
+    // The fourth increment's propagation step changes the volume after the
+    // injection fills it, so this test pins the third increment's behaviour:
+    // iterations = 0 is injection only, and the numbers below are the
+    // attenuation formula the injection shader writes.
+    config.volume.iterations = 0;
     // A 4x4x4 volume over [0,4]^3, so texel centres are at 0.5, 1.5, 2.5, 3.5.
     config.volume.origin = {0.0f, 0.0f, 0.0f};
     config.volume.extent = {4.0f, 4.0f, 4.0f};
@@ -228,6 +233,7 @@ void testBeyondRangeDepositsNothing()
     config.post.enabled = false;
     config.volume.enabled = true;
     config.volume.resolution = 2;
+    config.volume.iterations = 0;  // third increment's behaviour, see above
     config.volume.origin = {0.0f, 0.0f, 0.0f};
     config.volume.extent = {2.0f, 2.0f, 2.0f};
     renderer.setConfig(config);

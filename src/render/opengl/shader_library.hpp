@@ -1212,4 +1212,34 @@ void main()
 )";
 
 
+// Volume light propagation (milestone 7, fourth increment). One propagation
+// step: each cell accumulates the radiance of its six face-neighbours, each
+// weighted by one sixth — the six faces of the cell. The source volume is
+// sampled with NEAREST at the cell centres, so the taps are exact and the
+// CLAMP_TO_EDGE wrap makes the volume's edge cells their own neighbours.
+// The destination volume is the layer target being written, so the pass
+// renders into a different volume from the one it samples: the OpenGL spec
+// forbids sampling a texture bound to the same unit as an active framebuffer
+// attachment, and the two volumes are different objects.
+constexpr const char* kVolumePropagateFragmentShader = R"(#version 330 core
+uniform sampler3D volumeIn;      // the volume to propagate from (NEAREST)
+uniform vec3 texelSize;          // 1 / resolution in each axis
+uniform vec2 outSize;            // layer width and height in texels
+uniform float layerCoord;        // 0..1 along the volume's third axis
+out vec4 fragment;
+void main()
+{
+    vec2 uv = gl_FragCoord.xy / outSize;
+    vec3 coord = vec3(uv.x, uv.y, layerCoord);
+    vec3 sum = vec3(0.0);
+    sum += texture(volumeIn, coord + vec3(texelSize.x, 0.0, 0.0)).rgb;
+    sum += texture(volumeIn, coord - vec3(texelSize.x, 0.0, 0.0)).rgb;
+    sum += texture(volumeIn, coord + vec3(0.0, texelSize.y, 0.0)).rgb;
+    sum += texture(volumeIn, coord - vec3(0.0, texelSize.y, 0.0)).rgb;
+    sum += texture(volumeIn, coord + vec3(0.0, 0.0, texelSize.z)).rgb;
+    sum += texture(volumeIn, coord - vec3(0.0, 0.0, texelSize.z)).rgb;
+    fragment = vec4(sum / 6.0, 1.0);  // linear HDR, like the lighting target
+}
+)";
+
 }  // namespace grace::render::opengl
