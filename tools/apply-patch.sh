@@ -16,8 +16,9 @@ set -u
 set -o pipefail
 
 PATCH=${1:-}
+MSG=${2:-}
 if [ -z "$PATCH" ]; then
-    echo "usage: tools/apply-patch.sh <patch>"
+    echo "usage: tools/apply-patch.sh <patch> [commit-message-file]"
     exit 2
 fi
 if [ ! -f "$PATCH" ]; then
@@ -134,7 +135,8 @@ git diff --cached --name-status
 printf 'private material in the patch: '
 git diff --cached --name-only | grep -E 'grace2|sdk|decompiled|ghidra|ida|phys3x' && die "private material staged" || echo "none"
 
-step "next: review, then commit and push"
+if [ -z "$MSG" ]; then
+    step "next: review, then commit and push"
 cat <<'NEXT'
   The change is staged and nothing else. To finish:
 
@@ -144,3 +146,34 @@ cat <<'NEXT'
 
   Nothing was committed, so `git restore --staged --worktree .` undoes all of it.
 NEXT
+    exit 0
+fi
+
+# One command for the whole cycle. The commit itself still needs an explicit
+# yes here: the project's rule is that nothing is published without the
+# person's confirmation, and this prompt is that confirmation.
+step "7. commit, push and verify -- with your answer"
+if [ ! -f "$MSG" ]; then
+    die "no such message file: $MSG"
+fi
+printf -- '--- message (%s) ---\n' "$MSG"
+cat "$MSG"
+printf -- '--- staged ---\n'
+git diff --cached --stat | tail -3
+printf '\ncommit this and push to origin main? [y/N] '
+read -r answer
+case "$answer" in
+    y|Y) ;;
+    *)
+        die "left staged, nothing committed (git restore --staged --worktree . undoes it)"
+        ;;
+esac
+git commit -F "$MSG" || die "commit failed"
+git push origin main || die "push failed; the commit exists locally"
+if [ -x tools/verify-published-tree.sh ]; then
+    tools/verify-published-tree.sh || die "the published tree did not verify"
+else
+    echo "tools/verify-published-tree.sh is not there yet; run it after it lands"
+fi
+step "done"
+git log --oneline -1
