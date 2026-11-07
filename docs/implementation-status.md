@@ -25,11 +25,12 @@ The `.docx` files in this directory are generated from the `.md` sources with
 | 5 | Deferred lighting alongside forward: MRT G-buffer, lighting pass. Light-volume GI remains milestone 7 | Done |
 | 5b | Move frame composition out of the render contract into a renderer layer (`grace::render::Renderer`); the backend is a device again. Closes decision 12 | Done |
 | 5c | Shader sources leave the API-neutral module (decision 14); deferred path consumes the existing shadow maps (G1) | Done |
-| 6a | HDR pipeline: float HDR target, bloom, filmic tonemap + sRGB display encode, owned by the renderer, off by default. DOF, morphological AA and SSAO-STF remain planned (6b/6c) | Done |
 | 6a | HDR pipeline: float HDR target, bloom, filmic tonemap + sRGB display encode, owned by the renderer, off by default | Done |
 | 6b | Ambient (indirect) lighting term in both paths (decision 17 — a documented deviation from the documented light types) | Done |
 | 6c | SSAO: occlusion factor in a second HDR attachment (ambient only), depth-gradient normals, darkens the ambient term at the tonemap (decision 18). SSAO-STF temporal filtering deferred | Done |
 | 6d | Base repair (decision 20: fullscreen passes never write depth; HDR depth = scene depth in both paths) + ambient default 0.2 (decision 21) + DOF with bokeh and morphological AA (decision 22 chain order), both off by default | Done |
+| 6e | Post chain on by default: the chain became the product once its techniques landed (decision 23). Every measured value re-baselined with before/after figures, no tolerance widened | Done |
+| 6f | Volumetric lights as an analytic region — a sphere around a point light, a cone around a spot light, through a `volumeDensity` property defaulting to off (decision 25) | Done |
 | 6 | Post-processing: HDR, bloom, filmic tonemap (6a), ambient term (6b), SSAO (6c), DOF + morphological AA (6d) — all documented in section 3.2 except SSAO-STF temporal filtering, which remains deferred to its own increment | Done (SSAO-STF deferred) |
 | 7 | Global illumination by light volume propagation | Planned |
 | 8 | Physics contract and the first backend | Planned |
