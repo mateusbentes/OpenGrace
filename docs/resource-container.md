@@ -375,7 +375,6 @@ only what it needs, and with one deflated index stream it reads every record
 in the index to find one. The cost of a lookup here is a function of the block
 size and not of the number of entries. Measured by `tools/measure-owd.py`.
 
-
 ### 4.8 Payload blocks
 
 A payload larger than one block is stored as a payload block table followed by
