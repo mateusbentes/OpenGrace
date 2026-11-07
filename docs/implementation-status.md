@@ -103,6 +103,8 @@ All results below are real runs, on the tree at the stated commit.
 | 2026-11-06 | same, milestone 6f | OpenGL off: 13/13 Debug; OpenGL on: 26/26 Debug and Release; `-L opengl` 13/13; zero warnings under `-Werror`. New suite test_volumetric 14/14 with derived expectations: sphere volume centre ray — march mirrored in C++ gives v=0.04163, expected chainPixel(0.2+v)=round(255*sRGB(aces(0.24163)))=162, measured 162; exposure 2 -> derived 204, measured 204 (volume responds to exposure); camera inside the sphere (light at the camera): t0 clamped to 0, derived v=0.02588 -> 157, measured 157; spot cone: derived v=0.05056 + surface light 0.02439 -> 171, measured 171, and outside the outer cone (x=112) the pixel stays 149; shadow along the ray: unshadowed 182 vs occluder 177 (paraboloid tested per sample; pointShadows.near=0.02 so the occluder 0.05 from the light is inside the map); path agreement forward 162 = deferred 162 (diff 0); over-cap (5 volumetric lights, deferred) rejected with invalid_argument; default off: density-0 light 149 = no light 149. No contract change (composed from pass primitives; PostVolumetric is one id + one library entry). Null-backend logs: first frame +2 creation events (m_vol target, PostVolumetric program) and +4 per-frame tonemap events (volTex bind + uniforms) — test_application events_at_step {1,1,115,115,211,211} -> {1,1,121,121,221,221} with the derivation updated (120 = 100 steady-state + 20 one-time creations); test_renderer forward literal regenerated (123 events). CLI unchanged: 110,110,110,255 no args (both paths, visible + xvfb, exit 0), 30,30,30,255 with --no-post — the diagnostic frame has no lights, so the effect does not move the CLI pixel |
 | 2026-11-06 | same, milestone 6c | Check counts (all zero failures): version 4, fixed_step_clock 42, application 26, math 38, lights 36, cascades 133, paraboloid 27, trapezoid 80, shader_source_rule 1, renderer 26, opengl_context 20, opengl_render 125, mesh 13, shader 15, lighting 11, shadows 8, point_shadows 7, tsm 11, deferred 23, post 16, ssao 11, dof_mlaa 40, volumetric 14, application 30. No existing suite decreased (opengl_render grew 115 -> 125 for the new contract checks; ssao 9 -> 11 for the depth proof). shader_source_rule: `#version` only in `src/render/opengl/shader_library.hpp`. `application.cpp` unchanged (git diff empty). R8 occlusion buffer ~1 B/pixel; HDR target 2x Rgba16F + depth (~16.6 MB colour at 1280x720) |
 | 2026-11-05 | same, contract extension | OpenGL off: 7/7 Debug; OpenGL on: 11/11 Debug and Release; `-L opengl` 4/4; zero warnings under `-Werror`; check counts: opengl_context 20, opengl_render 47 |
+| 2026-11-07 | same, container specification | Index blocked and dictionary declined, both measured before being written. The index as one deflated stream against blocks of 256 records: a lookup is 0.4 ms at 10,000 entries and 32.9 ms at 400,000, against 12 us at every size in blocks; the block table is 12 bytes per block, a flat 0.5% of the index at every size measured, 18,756 bytes at 400,000 entries against the 3,513,508 it replaces. Header 28 -> 32 bytes for the block count. The dictionary's first measurement is retracted: its payloads differed in 1.0% of their bytes because the generator never read its seed, so the dictionary contained the payload it was measured against. Re-measured on payloads whose geometry differs, the dictionary makes them 1.8-1.9% larger, gains 0.0% over the filter, and gains 3.2% on an LOD chain, capped at 4.0% by the 32768-byte window. Also corrects a contradiction in section 4.6, whose prose described record transposition (43.1%) where its table measures byte transposition (34.9%). Tools: tools/measure-owd.py, tools/measure-dict.py |
+| 2026-11-07 | same, container specification | Payload blocked so requirement 2 holds in the middle of an entry, not only at its start. One deflate stream cannot be entered part way, so serving a 64 KB read in the middle of an 8.0 MiB vertex buffer inflates 8,400,000 bytes and takes 6.5 ms; with the payload blocked it is 131,072 bytes and 231 us, 64 and 28 times less, and on a 16 MB texture 14.4 ms against 223 us. The payload now uses the index's shape: a payload block table and independently deflated blocks of 256 KiB, reduced to a multiple of the element size. Filtering per block costs +21.55% on the vertex buffer and +91.60% on an index buffer, which is 2.6% of the payload in bytes. No record field was added: block size and count are derived. Sections 4.6.1 and 4.8. Measured by `tools/measure-stream.py` |
 
 ### Defects found by the tests, and fixed
 
@@ -659,6 +661,57 @@ grep -rn 'GLuint\|GLenum\|SDL_\|Window' include/grace/render/render_backend.hpp 
     use a filter, so this is an extension rather than a break. The measurement
     is kept as tools/measure-filter.py, so the numbers in the specification can
     be reproduced rather than taken on trust.
+
+27. **Is the index one deflated stream or a sequence of blocks?** One
+    stream, and the answer is measured rather than argued. Requirement 5
+    promises random access without inflating the archive; with a single index
+    stream, finding one record inflates every record in the index, which was
+    0.4 ms at 10,000 entries and 32.9 ms at 400,000, and grows with the
+    archive. The index is now a block table followed by independently deflated
+    blocks of 256 records: a lookup reads the table, 12 bytes per block, and
+    one block, 12 microseconds at every size measured. The table is a flat
+    0.5% of the index at every size, 18,756 bytes at 400,000 entries against
+    the 3,513,508 it replaces. The header grew from 28 to 32 bytes to carry the
+    block count. Measured by `tools/measure-owd.py`.
+
+28. **Should the container carry a shared dictionary?** No, and the
+    first measurement said yes until its inputs were inspected. A dictionary
+    built from forty other meshes gained 9.7% on a 38 KB mesh and 29.3% on a
+    small one; comparing the payloads byte for byte showed they differed in
+    1.0% of their bytes, because the generator wrote a constant normal and a
+    constant tangent into every vertex and only a noise pass read its seed, so
+    the dictionary contained the payload it was measured against. Re-measured
+    on payloads whose geometry actually differs, a dictionary makes them 1.8 to
+    1.9% larger, gains 0.0% over the filter, and gains 3.2% in the one case
+    that can be constructed to favour it, an LOD chain, where the 32,768-byte
+    deflate window caps the gain at 4.0% of the payload. It would cost a header
+    field, a build step, an invalidation rule and a cross-build compatibility
+    constraint. Section 9 of the specification records its absence. Measured by
+    `tools/measure-dict.py`.
+
+29. **Should the payload be blocked, or is one deflate stream per entry
+    enough?** Blocked, and the measurement is why. Requirement 2 says a loader
+    can stream rather than load whole, and a single deflate stream is
+    enterable only at byte zero: deflate carries its history forward, so a
+    reader that wants bytes in the middle inflates everything before them.
+    Measured on an 8.0 MiB vertex buffer, serving a 64 KB read in the middle
+    inflates 8,400,000 bytes and takes 6.5 ms, against 131,072 bytes and 231
+    microseconds with the payload blocked, 64 and 28 times less. On a 16 MB
+    texture it is 14.4 ms against 223 microseconds. The payload now uses the
+    shape the index already uses: a payload block table and independently
+    deflated blocks, 256 KiB of output each, the size reduced to a multiple of
+    the filter's element size. Two shapes were measured and one was rejected.
+    Filtering the payload whole and blocking only the deflate keeps the
+    filter's full effect, but the transposed stream is `element` planes, so a
+    contiguous output range needs one run per plane and the read cost grows
+    with the element size: 32 blocks against 2 on a 32-byte vertex record.
+    Filtering per block costs compression, +21.55% on that vertex buffer and
+    +91.60% on an index buffer at 256 KiB, and buys a read cost that does not
+    depend on the element size. The penalty is 2.6% of the payload in bytes,
+    against the filter removing 79% of it. No field was added to the record:
+    the block size and the block count are both derivable from fields it
+    already has, and an entry with one block has no table. Measured by
+    `tools/measure-stream.py`.
 
 ## Verification commands
 

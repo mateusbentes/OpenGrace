@@ -42,8 +42,11 @@ of the wrapper and false of the stream.
 zlib is the reference implementation and the only one the build depends on
 today, but the format is defined over Deflate streams rather than over zlib's
 interface: any conforming encoder or decoder satisfies it. The Deflate window
-is at most 32 KiB, so inflating an entry never needs more than that plus the
-output buffer.
+is at most 32 KiB, so inflating a block never needs more than that plus the
+block's output. The output buffer is bounded because the payload is blocked
+(section 4.8): a reader never holds more than the blocks a read touches, which
+is why requirement 2 holds in the middle of an entry and not only at its
+start.
 
 Raw Deflate is chosen over the zlib wrapper for three reasons:
 
@@ -65,7 +68,9 @@ needs, followed by what it forces on the encoding.
 
 2. **A resource kind and declared dependencies.** A loader can answer what a
    resource needs before reading it, and can stream rather than load whole.
-   Forces: a kind field and a dependency list per entry.
+   Forces: a kind field and a dependency list per entry, and a payload that is
+   readable in blocks, because a stream cannot be entered in the middle and
+   "load whole" is what a single stream per entry forces.
 
 3. **A per-entry method, stored or deflated, chosen by the build, with an
    optional byte filter ahead of it.** A payload that is already compressed
@@ -106,15 +111,25 @@ needs, followed by what it forces on the encoding.
 +---------------------------+
 | header                    |  fixed size, at offset 0
 +---------------------------+
-| payload region            |  entries, each aligned
+| payload region            |  per entry: a payload block table when the
+|                           |  entry has more than one block, then the
+|                           |  payload blocks, each aligned
 +---------------------------+
-| index                     |  one record per entry
+| block table               |  the index block table, 12 bytes per block
++---------------------------+
+| index blocks              |  256 records each, deflated independently
 +---------------------------+
 ```
 
 The header is at a fixed offset and states where the index is. The index is not
 at a fixed offset, because requirement 6 forbids reserving a fixed-size region
 for it. All integers are little-endian.
+
+The index block table sits at the head of the index region and is not
+compressed, so locating a block costs one read of the table and one read of the
+block, and neither cost grows with the number of entries. Section 4.7 states
+why. The payload uses the same shape for the same reason, in section 4.8: a
+payload block table, then independently deflated blocks.
 
 This is the one place where the design departs from the obvious archive layout,
 and it departs on purpose. A container that locates its index from the end of
@@ -131,37 +146,49 @@ knows where the index is.
 | 5 | 1 | format minor version |
 | 6 | 2 | flags, reserved, must be zero |
 | 8 | 4 | entry count |
-| 12 | 8 | index offset, absolute |
-| 20 | 4 | index size in bytes |
-| 24 | 4 | index checksum, CRC-32 of the index bytes |
-| 28 | 4 | header checksum, CRC-32 of bytes 0 to 27 |
+| 12 | 4 | block count |
+| 16 | 8 | index offset, absolute, pointing at the block table |
+| 24 | 4 | index size in bytes, the block table and every block |
+| 28 | 4 | index checksum, CRC-32 of the index bytes |
+| 32 | 4 | header checksum, CRC-32 of bytes 0 to 31 |
 
 A reader that cannot read the header cannot read the container, so the header
-carries its own check. The version is major and minor separately: a reader
+carries its own check. The header is 36 bytes in total: the table above and the
+four-byte checksum that covers it.
+ The version is major and minor separately: a reader
 accepts any minor it knows and refuses an unknown major, which is the usual
 rule and is stated here so the first version bump does not have to invent one.
 
 ### 4.3 Index records
 
-The index is a sequence of records, each self-delimiting by its own length, so
-a reader parses until the index size is consumed. A record that would run past
-the index size is corruption.
+The index is a sequence of records, each self-delimiting by its own length.
+Records are grouped into blocks of 256 (section 4.7); the grouping changes no
+record's layout, and a record never spans two blocks. A reader parses until the
+block's inflated size is consumed, and a record that would run past the end of
+its block is corruption.
 
 | size | field |
 | --- | --- |
 | 2 | record length in bytes, including this field |
 | 2 | entry flags, bit 0: payload is deflated, bit 1: has dependencies, bits 2-3: filter |
-| 8 | payload offset, absolute |
-| 8 | payload size on disk |
-| 8 | payload size inflated |
+| 8 | payload offset, absolute, pointing at the payload block table when the payload has more than one block |
+| 8 | payload size on disk, the blocks and not the table |
+| 8 | payload size inflated, the whole payload |
 | 4 | payload checksum, CRC-32 of the inflated, unfiltered bytes |
-| 1 | filter element size in bytes, `0` when no filter is applied |
+| 1 | filter element size in bytes, which is the record size; `0` when no filter is applied |
 | 1 | alignment exponent, `0` meaning no alignment |
 | 2 | resource kind |
 | 1 | name length in bytes |
 | 1 | dependency count |
 | n | name, UTF-8, not NUL-terminated |
 | m | dependency names, each prefixed by a one-byte length |
+
+The payload fields describe the whole payload and not one block: a reader
+derives the block count from `payload size inflated` and the block size, and
+when that count is one the payload has no table and `payload offset` is the
+payload itself. Section 4.8 states the arithmetic. Nothing was added to the
+record for blocking, because everything a reader needs is either already here
+or derivable from it.
 
 Dependencies are stored as names rather than as indices into the index, so a
 record is meaningful on its own and a reader never has to resolve a reference
@@ -207,8 +234,16 @@ interleaving. Two are defined.
 
 **Shuffle** (filter `1`). The payload is treated as an array of records of
 `element size` bytes. The output is every record's first byte, then every
-record's second byte, and so on. A vertex that is eight floats becomes eight
-planes of four-byte values, and each plane compresses on its own.
+record's second byte, and so on: `element size` planes of one byte each. A
+vertex of 32 bytes becomes 32 planes, and each plane compresses on its own.
+
+The element size is the **record** size, not the field size, and the two are
+not interchangeable. On the 32-byte vertex above, transposing at record size
+gives 32 planes of one byte and reaches 34.9% of the payload; grouping the
+eight four-byte fields instead gives 8 planes of four bytes and reaches 43.1%.
+The table below reports the first, which is the filter this section defines.
+The field size is a property of the mesh format, not of this container, which
+is why the container is told the record size and nothing else.
 
 **Delta then shuffle** (filter `2`). Each 32-bit word is replaced by its
 difference from the same word of the previous record, and the result is
@@ -257,13 +292,172 @@ specification described before this section existed, so a reader that
 implements only that case reads any container whose entries do not use a
 filter.
 
+### 4.6.1 The filter is applied per block
+
+Since section 4.8, a filtered payload is filtered one block at a time and each
+block is deflated on its own. The filter is therefore not a property of the
+payload but of each block, and a reader reverses it per block, after inflating
+that block and before handing its bytes on.
+
+This costs compression and the cost is measured. Filtering the payload as a
+whole and blocking only the deflate keeps the filter's full effect, and that
+shape was rejected for a different reason: the transposed stream is `element`
+planes laid end to end, so a contiguous output range needs one run per plane,
+and the read cost grows with the element size. On a 32-byte vertex record a
+64 KB read touches 32 blocks that way against 2 this way. The read cost of the
+shape this specification uses does not depend on the element size.
+
+Measured, `C vs A` being the ratio lost against filtering the payload whole,
+on payloads of the shapes this format carries:
+
+| payload | element | block | A, whole | B, global filter | C, per block | C vs A |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| index buffer, 40k quads | 4 | 256 KiB | 0.62% | 0.58% | 1.19% | +91.60% |
+| vertex buffer, 32-byte records | 32 | 256 KiB | 11.44% | 11.37% | 13.91% | +21.55% |
+| texture 2048x2048 RGBA8 | 4 | 256 KiB | 0.38% | 0.64% | 1.47% | +281.40% |
+
+The penalty is large as a ratio and small in bytes, which is why it is paid.
+On the vertex buffer at 256 KiB it is 22.9% of the compressed size and 2.6% of
+the payload, and the filter still removes 79% of it: without the filter the
+same payload deflates to 63.6% of its size. A payload whose filter matters
+little is a payload where this costs little, because the filter has little to
+rearrange.
+
+The block size is the largest multiple of the element size that fits in the
+format's fixed 256 KiB, and the reader computes it from the element size the
+record already carries. Verified by round trip at every element size from 1 to
+128 against block sizes of 64 KiB, 256 KiB and 1 MiB, 128 combinations, no
+failures.
+
+### 4.7 Index blocks
+
+The index is a block table followed by independently deflated blocks. The table
+is uncompressed, sits at the head of the index region, and has one 12-byte
+entry per block:
+
+| size | field |
+| --- | --- |
+| 8 | block offset, absolute |
+| 4 | block size on disk |
+
+A block holds a fixed 256 records, except the last, which holds
+`entry count - 256 * (block count - 1)`. The count is fixed by the format
+rather than recorded per block, because a reader that wants a record already
+knows which block holds it, and a per-block count would be a field every block
+carries for a value two header fields already determine.
+
+Finding record `k` reads the table and then block `k / 256`, and inflates that
+block alone. A lookup by name uses the same structure: records are sorted by
+name (section 8), so a binary search over blocks converges in
+`log2(block count)` block reads, and each of those reads is one block and not
+one index.
+
+Measured on an index of the shape this format produces, 69 bytes per record on
+average, names included:
+
+| entries | blocks | table | index deflated | table share | one lookup | vs whole |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1,000 | 4 | 48 | 9,671 | 0.5% | 2,758 | 3.5x |
+| 10,000 | 40 | 480 | 90,651 | 0.5% | 3,190 | 28.4x |
+| 100,000 | 391 | 4,692 | 890,459 | 0.5% | 7,402 | 120.3x |
+| 400,000 | 1,563 | 18,756 | 3,513,508 | 0.5% | 21,466 | 163.7x |
+
+The table is a flat 0.5% of the index at every size measured, because it grows
+with the number of blocks and the index grows with the number of records, and
+both are linear in the entry count. What does not grow is the latency.
+Inflating one block is 12 microseconds at every size measured; inflating the
+whole index as a single stream is 0.4 milliseconds at 10,000 entries and
+32.9 milliseconds at 400,000, because that is what a reader must do to find
+one record in it.
+
+That difference is the point. Requirement 5 promises that a level load reads
+only what it needs, and with one deflated index stream it reads every record
+in the index to find one. The cost of a lookup here is a function of the block
+size and not of the number of entries. Measured by `tools/measure-owd.py`.
+
+
+### 4.8 Payload blocks
+
+A payload larger than one block is stored as a payload block table followed by
+independently deflated blocks, the same shape section 4.7 uses for the index.
+
+```
++---------------------------+
+| payload block table       |  12 bytes per block, uncompressed
++---------------------------+
+| block 0                   |  aligned, at most 256 KiB of output
++---------------------------+
+| block 1                   |  aligned
++---------------------------+
+| ...                       |
++---------------------------+
+```
+The table has one 12-byte entry per block, in output order:
+
+| size | field |
+| --- | --- |
+| 8 | block offset, absolute |
+| 4 | block size on disk |
+
+The block size is 256 KiB of uncompressed output, fixed by the format, reduced
+to the largest multiple of the filter's element size that fits. With no filter
+the element size is zero and the block size is exactly 256 KiB. The reader
+computes both the block size and the block count,
+`ceil(payload size inflated / block size)`, from the record, so neither is
+stored.
+
+The reduction is a tidiness rule and not a correctness rule, and the
+distinction is worth stating because it is easy to overclaim. A block whose
+size is not a multiple of the element size still reverses: the bytes past the
+last whole element are copied rather than transposed, and a reader that copies
+them the same way on the way back recovers them, which was verified. What the
+reduction buys is that no block carries an unshuffled tail. 256 KiB is 2^18, so
+an element size that is a power of two divides it exactly, and only the others
+leave a remainder at all: a 12-byte record leaves 4 bytes of 262,144 and a
+24-byte record leaves 16. The reduction costs nothing because the reader
+derives it from a field it already has.
+
+An entry whose payload fits in one block has no table and its payload sits at
+`payload offset`, which is the case for every small resource and needs no
+branch in a writer: the writer emits a table only when it emits more than one
+block.
+
+A range read reads the table, then the blocks that cover the range. Its cost
+does not grow with the payload:
+
+| payload | shape | blocks | compressed | output |
+| --- | --- | ---: | ---: | ---: |
+| index buffer, 938 KiB, element 4 | one stream | 1 | 5,950 | 960,000 |
+| | blocks | 1 | 2,955 | 65,536 |
+| vertex buffer, 8.0 MiB, element 32 | one stream | 1 | 961,311 | 8,400,000 |
+| | blocks | 2 | 69,117 | 65,536 |
+| texture 16.0 MiB, element 4 | one stream | 1 | 64,470 | 16,777,216 |
+| | blocks | 2 | 7,665 | 65,536 |
+
+Serving a 64 KB read in the middle of the 8.0 MiB vertex buffer inflates
+8,400,000 bytes as one stream and 131,072 in blocks, 64 times less, and takes
+6.5 ms against 231 microseconds, 28 times less. On the 16 MB texture it is
+14.4 ms against 223 microseconds, 65 times less. For a 200 MB payload the read
+window is two blocks whatever the payload size, 512 KiB at the format's block
+size, and the block count grows while the cost of a read does not.
+
+The table costs 12 bytes per block, which is 9,600 bytes for a 200 MB payload,
+0.005% of it. Alignment applies to the table and to each block, so a block can
+still be uploaded without an intermediate copy (requirement 4), and the padding
+it implies is bounded by the alignment per block and not per payload.
+
+Measured by `tools/measure-stream.py`.
+
 ## 5. Appending and compaction
 
-Appending an entry writes its payload after the current payload region, writes
-a new index after that, and patches the header's entry count, index offset,
-index size, index checksum and header checksum in place. The patch touches 28
-bytes at a known offset, which is why the header carries its own checksum: a
-reader can tell a half-written patch from a complete one.
+Appending an entry writes its payload block table and its payload blocks after
+the current payload region, writes
+a new index after that, and patches the header's entry count, block count,
+index offset, index size, index checksum and header checksum in place. The
+patch touches 36 bytes at a known offset, which is why the header carries its
+own checksum: a reader can tell a half-written patch from a complete one. The
+rewritten index is written in blocks like any other, so the append path and the
+create path produce the same structure.
 
 The previous index is not removed, so it becomes unreachable space. This is the
 honest cost of an appendable index and it is bounded: it is proportional to the
@@ -294,7 +488,7 @@ produce it.
 ## 7. Integrity
 
 Two checks exist and they cover different things. The header checksum covers
-the 28 bytes that tell a reader where everything is, so a truncated or half-
+the 36 bytes that tell a reader where everything is, so a truncated or half-
 patched file is rejected before any payload is touched. The per-entry checksum
 covers the inflated payload, so corruption is attributed to an entry.
 
@@ -312,7 +506,10 @@ any other tool's output.
 
 Determinism is achieved by making the index canonical: records are sorted by
 name in byte order, padding bytes are a fixed value, and no field depends on
-hash iteration order or on a timestamp. The payload bytes are whatever the
+hash iteration order or on a timestamp. The block structure is deterministic
+for the same reason: 256 records per block with the remainder in the last one,
+so the block boundaries are a function of the entry count and not of the order
+the writer happened to visit its inputs. The payload bytes are whatever the
 configured compressor produces at the configured level, so the compressor and
 its version are part of the build's reproducibility contract and are recorded
 alongside it. The filter choice is part of the same contract: it is a build
@@ -342,8 +539,22 @@ project has:
 - **A filter that is chosen by the writer.** Filtering is recorded, never
   inferred. A writer that guessed would be wrong on exactly the payloads where
   the choice matters, as the permuted case above shows.
+- **A per-entry payload block size.** The block size is fixed by the
+  format and derived from the element size, so a reader computes it from a
+  field it already has. Recording it would be a field per entry for a value
+  that is either the format's constant or arithmetic on the record.
 - **A self-extracting or executable form.** The container is read by the
   engine, not by the operating system.
+- **A shared dictionary.** Measured and declined. The deflate window bounds it
+  to 32,768 bytes, so it can supply matches for a fraction of any payload large
+  enough to want one, and it does not compose with the filter, which already
+  captures the repetition a dictionary would have matched: on payloads whose
+  geometry actually differs it gains 0.0% over the filter and makes the
+  unfiltered payload 1.8 to 1.9% larger. Its one favourable case, an LOD chain
+  where the coarser level is a subsequence of the finer one, gains 3.2%, and
+  the window caps that at 4.0% of the payload. It would cost a header field, a
+  build step, an invalidation rule, and a cross-build compatibility constraint.
+  Measured by `tools/measure-dict.py`.
 
 ## 10. Boundaries
 
