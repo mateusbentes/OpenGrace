@@ -487,6 +487,20 @@ not exist before GL 3.2, so "3.0 core" is not a valid request.
     default OFF and leave every pixel unchanged when off (test_dof_mlaa:
     flat ambient-1.0 surface reads 232 with both off, matching the pre-6d
     tree).
+
+    **Updated in 6e (decision 22 resolved): the chain now ends in an
+    offscreen 8-bit display target, which IS sampleable through the contract,
+    so MLAA runs AFTER the tonemap on the display-encoded image — the
+    departure above is removed. The final order is now: lighting -> HDR ->
+    SSAO -> DOF(linear HDR) -> bloom -> tonemap+sRGB [DISPLAY BOUNDARY] ->
+    offscreen 8-bit display target -> MLAA(display-encoded) -> present
+    (PostBlit fullscreen copy) -> default framebuffer -> swapBuffers. The
+    MLAA luminance threshold now measures display-code contrast, uniform
+    across exposure (on linear HDR the same threshold was generous in the
+    dark and stingy in the light — edges in shadowed regions were missed).
+    Cost: +2 Rgba8 full-res targets (~7.4 MB at 1280x720), +1-2 fullscreen
+    passes, +1 shader (PostBlit); the contract needed no new method — present
+    composes from beginRenderPass(nullptr) + bindTexture + draw.
 23. **What does the engine do when nobody asks for anything (defaults)?**
     **Resolved 2026-11-06 (milestone 6e).** Default render path: forward
     (decision 1 unchanged — forward is the primary path). Default post state:
@@ -609,23 +623,6 @@ not exist before GL 3.2, so "3.0 core" is not a valid request.
     reads 110,110,110,255 with and without the effect (application.cpp submits
     nothing).
 
-```sh
-# Default configuration, no graphics dependency
-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
-cmake --build build --parallel
-ctest --test-dir build --output-on-failure
-
-# With the OpenGL backend
-cmake -S . -B build-gl -G Ninja -DCMAKE_BUILD_TYPE=Debug -DGRACE_ENABLE_OPENGL=ON
-cmake --build build-gl --parallel
-ctest --test-dir build-gl --output-on-failure
-ctest --test-dir build-gl -L opengl --output-on-failure
-
-# Release must stay warning-free under -Werror
-cmake -S . -B build-rel -G Ninja -DCMAKE_BUILD_TYPE=Release -DGRACE_ENABLE_OPENGL=ON
-cmake --build build-rel --parallel
-```
-
 Boundary checks that must keep passing:
 
 ```sh
@@ -652,17 +649,20 @@ grep -rn 'GLuint\|GLenum\|SDL_\|Window' include/grace/render/render_backend.hpp 
     be reproduced rather than taken on trust.
 
 ## Verification commands
-    **Updated in 6e (decision 22 resolved): the chain now ends in an
-    offscreen 8-bit display target, which IS sampleable through the contract,
-    so MLAA runs AFTER the tonemap on the display-encoded image — the
-    departure above is removed. The final order is now: lighting -> HDR ->
-    SSAO -> DOF(linear HDR) -> bloom -> tonemap+sRGB [DISPLAY BOUNDARY] ->
-    offscreen 8-bit display target -> MLAA(display-encoded) -> present
-    (PostBlit fullscreen copy) -> default framebuffer -> swapBuffers. The
-    MLAA luminance threshold now measures display-code contrast, uniform
-    across exposure (on linear HDR the same threshold was generous in the
-    dark and stingy in the light — edges in shadowed regions were missed).
-    Cost: +2 Rgba8 full-res targets (~7.4 MB at 1280x720), +1-2 fullscreen
-    passes, +1 shader (PostBlit); the contract needed no new method — present
-    composes from beginRenderPass(nullptr) + bindTexture + draw.
 
+```sh
+# Default configuration, no graphics dependency
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
+cmake --build build --parallel
+ctest --test-dir build --output-on-failure
+
+# With the OpenGL backend
+cmake -S . -B build-gl -G Ninja -DCMAKE_BUILD_TYPE=Debug -DGRACE_ENABLE_OPENGL=ON
+cmake --build build-gl --parallel
+ctest --test-dir build-gl --output-on-failure
+ctest --test-dir build-gl -L opengl --output-on-failure
+
+# Release must stay warning-free under -Werror
+cmake -S . -B build-rel -G Ninja -DCMAKE_BUILD_TYPE=Release -DGRACE_ENABLE_OPENGL=ON
+cmake --build build-rel --parallel
+```
