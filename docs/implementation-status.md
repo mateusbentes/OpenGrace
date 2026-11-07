@@ -3,9 +3,9 @@
 Running record of milestone progress, validation results and open decisions.
 The architectural baseline is [grace-architecture.md](grace-architecture.md).
 
-The `.docx` files in this directory are generated from the `.md` sources
-with `pandoc` and are committed for convenience. Edit the Markdown, then
-regenerate: `pandoc docs/implementation-status.md -o docs/implementation-status.docx`.
+The `.docx` files in this directory are generated from the `.md` sources with
+`pandoc` and are committed for convenience. Edit the Markdown, then regenerate:
+`pandoc docs/implementation-status.md -o docs/implementation-status.docx`.
 
 ---
 
@@ -104,8 +104,6 @@ All results below are real runs, on the tree at the stated commit.
 | 2026-11-06 | same, milestone 6c | Check counts (all zero failures): version 4, fixed_step_clock 42, application 26, math 38, lights 36, cascades 133, paraboloid 27, trapezoid 80, shader_source_rule 1, renderer 26, opengl_context 20, opengl_render 125, mesh 13, shader 15, lighting 11, shadows 8, point_shadows 7, tsm 11, deferred 23, post 16, ssao 11, dof_mlaa 40, volumetric 14, application 30. No existing suite decreased (opengl_render grew 115 -> 125 for the new contract checks; ssao 9 -> 11 for the depth proof). shader_source_rule: `#version` only in `src/render/opengl/shader_library.hpp`. `application.cpp` unchanged (git diff empty). R8 occlusion buffer ~1 B/pixel; HDR target 2x Rgba16F + depth (~16.6 MB colour at 1280x720) |
 | 2026-11-05 | same, contract extension | OpenGL off: 7/7 Debug; OpenGL on: 11/11 Debug and Release; `-L opengl` 4/4; zero warnings under `-Werror`; check counts: opengl_context 20, opengl_render 47 |
 
-| Published tree did not build with `GRACE_ENABLE_OPENGL=ON` | The lighting commit left the shader header unstaged and published half of a `const` change, so `drawIndexed() const` in the null backend had no matching override | Complete the change set and verify by building a fresh clone |
-
 ### Defects found by the tests, and fixed
 
 | Defect | Cause | Resolution |
@@ -115,6 +113,7 @@ All results below are real runs, on the tree at the stated commit.
 | OpenGL readback returned alpha 255 while the null backend returned the clear colour's alpha | The context was created without an alpha channel | Request `SDL_GL_ALPHA_SIZE` 8 |
 | `describe()` reported "not running" after shutdown | Runtime state reported instead of historical fact | Version, vendor and renderer reported whenever a context was obtained |
 | Mesh/shader tests drew with a uniform set before the program was active (`GL_INVALID_OPERATION`) | `glUniform*` requires a current program | Documented precondition in `shader.hpp` (setUniform requires `use()`); tests activate the program first |
+| Published tree did not build with `GRACE_ENABLE_OPENGL=ON` | The lighting commit left the shader header unstaged and published half of a `const` change, so `drawIndexed() const` in the null backend had no matching override | Complete the change set and verify by building a fresh clone |
 
 The first defect is worth noting as a design signal: the contract uses its own
 enumeration rather than GL constants, which is what keeps the null backend
@@ -161,8 +160,6 @@ not exist before GL 3.2, so "3.0 core" is not a valid request.
 
 ## Open decisions
 
-
-
 1. **Forward or deferred rendering as the primary path?** **Resolved
    2026-11-06: forward is the primary path.** The original supported both
    (forward with up to four dynamic lights per object plus sunlight, deferred
@@ -178,9 +175,10 @@ not exist before GL 3.2, so "3.0 core" is not a valid request.
    contents through the null backend. Promoting it to an optional capability
    would let both backends be verified identically.
 
-3. **Fidelity of the visual scripting block set.** The original block vocabulary
-   is not publicly documented. A functionally equivalent set may be acceptable,
-   but the decision affects the AngelScript type registration interface.
+3. **Fidelity of the visual scripting block set.** The original block
+    vocabulary is not publicly documented. A functionally equivalent set may be
+    acceptable, but the decision affects the AngelScript type registration
+    interface.
 
 4. **Save format and script state.** AngelScript has no built-in object
    serialisation. Game state should live in engine-owned structures wherever
@@ -193,26 +191,28 @@ not exist before GL 3.2, so "3.0 core" is not a valid request.
    deformable features depend on GPU execution.
 
 6. **Engine name.** OpenGrace follows the convention of OpenMW, OpenRCT2,
-   OpenTTD and OpenSAGE, all of which take their name from the original product.
-   The closest precedent is OpenSAGE, which reimplements an internal EA engine.
+    OpenTTD and OpenSAGE, all of which take their name from the original
+    product. The closest precedent is OpenSAGE, which reimplements an internal
+    EA engine.
 
 7. **Shadow-pass contract shape: technique-named method or generic render-pass
-   composition?** The 4b contract method `renderShadowMap(target, sun, bounds,
-   submissions)` could not carry several cascades without becoming a different
-   method. **Resolved 2026-11-06: option (b), generic render-pass composition.**
-   The contract now exposes `beginRenderPass(target)` / `endRenderPass()` with
-   `clear()`/`draw()`/`submit()` operating on the pass target, and no longer
-   knows what a shadow is; `renderShadowMap` was removed and the cascaded pass
-   is built from those primitives in the render module (`renderShadowCascades`),
-   with the shadow map crossing `DrawSubmission` as plain data (`ShadowMap`).
-   Reasoning: it serves a deferred shading path equally, and there was only one
-   consumer to migrate. This was preferred over widening a technique-named
-   method (option (a)), which would have kept the contract shadow-aware.
-   **Validated by milestone 4d (2026-11-06): the dual paraboloid point-light
-   shadow pass was assembled entirely from beginRenderPass/endRenderPass/
-   clear/draw plus plain data on DrawSubmission — no technique-specific method
-   was added to the contract, and no contract method changed.** Decision 7 was
-   correct: the second shadow technique needed zero contract changes.
+    composition?** The 4b contract method `renderShadowMap(target, sun, bounds,
+    submissions)` could not carry several cascades without becoming a different
+    method. **Resolved 2026-11-06: option (b), generic render-pass
+    composition.** The contract now exposes `beginRenderPass(target)` /
+    `endRenderPass()` with `clear()`/`draw()`/`submit()` operating on the pass
+    target, and no longer knows what a shadow is; `renderShadowMap` was removed
+    and the cascaded pass is built from those primitives in the render module
+    (`renderShadowCascades`), with the shadow map crossing `DrawSubmission` as
+    plain data (`ShadowMap`). Reasoning: it serves a deferred shading path
+    equally, and there was only one consumer to migrate. This was preferred
+    over widening a technique-named method (option (a)), which would have kept
+    the contract shadow-aware. **Validated by milestone 4d (2026-11-06): the
+    dual paraboloid point-light shadow pass was assembled entirely from
+    beginRenderPass/endRenderPass/ clear/draw plus plain data on DrawSubmission
+    — no technique-specific method was added to the contract, and no contract
+    method changed.** Decision 7 was correct: the second shadow technique
+    needed zero contract changes.
 
 ---
 
@@ -253,10 +253,10 @@ not exist before GL 3.2, so "3.0 core" is not a valid request.
 
 10. **Should the trapezoidal fallback be silent?** When the containment check
     rejects a trapezoid, the builder falls back to the fitted matrix without
-    saying so. A silent fallback means a test can pass while the technique under
-    test never runs, which is what happened in 4e. The fallback is currently
-    documented but not observable; making it countable would have surfaced the
-    situation in the first measurement instead of the second.
+    saying so. A silent fallback means a test can pass while the technique
+    under test never runs, which is what happened in 4e. The fallback is
+    currently documented but not observable; making it countable would have
+    surfaced the situation in the first measurement instead of the second.
 
 11. **Multiple render targets in the contract, or several single-attachment
    passes?** **Resolved 2026-11-06 (milestone 5): the contract gains multiple
@@ -301,15 +301,16 @@ not exist before GL 3.2, so "3.0 core" is not a valid request.
     is a device. The renderer is not a god object — resource management, scene
     storage, culling and asset loading are explicitly out of its scope.
 
-14. **Where do shader sources live?** **Resolved 2026-11-06 (milestone 5c): only
-    in the OpenGL backend's shader library** (`src/render/opengl/shader_library.hpp`).
-    The contract's shader factory takes a closed, API-neutral `ShaderProgramId`
-    enum and the backend resolves it to its own source; callers (renderer,
-    shadow passes, tests) never hold shading-language text. Rule for every
-    future shader, stated once: a new shader = one `ShaderProgramId` entry + one
-    entry in the backend library; the API-neutral render module must never
-    contain shading-language source (enforced by the `shader_source_rule` test,
-    which scans the tree and fails on any hit outside `src/render/opengl/`).
+14. **Where do shader sources live?** **Resolved 2026-11-06 (milestone 5c):
+    only in the OpenGL backend's shader library**
+    (`src/render/opengl/shader_library.hpp`). The contract's shader factory
+    takes a closed, API-neutral `ShaderProgramId` enum and the backend resolves
+    it to its own source; callers (renderer, shadow passes, tests) never hold
+    shading-language text. Rule for every future shader, stated once: a new
+    shader = one `ShaderProgramId` entry + one entry in the backend library;
+    the API-neutral render module must never contain shading-language source
+    (enforced by the `shader_source_rule` test, which scans the tree and fails
+    on any hit outside `src/render/opengl/`).
 
 15. **Where is the linear-to-display boundary?** **Resolved 2026-11-06
     (milestone 6a).** Before 6a the pipeline wrote linear values straight into
@@ -317,12 +318,21 @@ not exist before GL 3.2, so "3.0 core" is not a valid request.
     (0.5 linear measured as 128, where sRGB would give ~188). The boundary now
     sits at the end of the post chain: the HDR target (Rgba16F) holds linear,
     and the final 8-bit target receives sRGB(filmic tonemap(linear)). With the
-    chain OFF every existing pixel value is bit-identical (legacy linear->8-bit,
-    documented); with it ON the same scene measures 0.5 -> 206. Measured
-    tonemap response (exposure 1): 0.0->0, 0.18->141, 0.5->206, 1.0->232,
-    2.0->245, 4.0->252. Bloom halo measured at 4 px from a 4.0-bright source:
-    61 with bloom on, 0 with it off.
-    The default remained the legacy path through 6a-6d so that no existing pixel value changed. **The flip happened in 6e (2026-11-06, decision 23): the chain is now the default**, and every measured value was re-baselined with before/after figures (see the 6e validation records): chain pixel = round(255 * sRGB(aces(x))) with aces(x) = x(2.51x+0.03)/(x(2.43x+0.59)+0.14) and srgb(c) = 1.055*c^(1/2.4)-0.055 for c > 0.0031308; legacy was round(255*x). Example rows: 0.5 linear 128 -> 206, ambient 0.2 51 -> 149, clear colour 30 30 -> 110, 6-light centre 253 -> 231. The legacy linear->8-bit path survives only as an explicit opt-out (CLI `--no-post`), documented as a compatibility path.
+    chain OFF every existing pixel value is bit-identical (legacy
+    linear->8-bit, documented); with it ON the same scene measures 0.5 -> 206.
+    Measured tonemap response (exposure 1): 0.0->0, 0.18->141, 0.5->206,
+    1.0->232, 2.0->245, 4.0->252. Bloom halo measured at 4 px from a 4.0-bright
+    source: 61 with bloom on, 0 with it off. The default remained the legacy
+    path through 6a-6d so that no existing pixel value changed. **The flip
+    happened in 6e (2026-11-06, decision 23): the chain is now the default**,
+    and every measured value was re-baselined with before/after figures (see
+    the 6e validation records): chain pixel = round(255 * sRGB(aces(x))) with
+    aces(x) = x(2.51x+0.03)/(x(2.43x+0.59)+0.14) and srgb(c) =
+    1.055*c^(1/2.4)-0.055 for c > 0.0031308; legacy was round(255*x). Example
+    rows: 0.5 linear 128 -> 206, ambient 0.2 51 -> 149, clear colour 30 30 ->
+    110, 6-light centre 253 -> 231. The legacy linear->8-bit path survives only
+    as an explicit opt-out (CLI `--no-post`), documented as a compatibility
+    path.
 
 16. **Is presentation a device operation or a side effect of clearing?** It was
     a side effect. `clear()` read back queued pixels and swapped the buffer, so
@@ -397,22 +407,23 @@ not exist before GL 3.2, so "3.0 core" is not a valid request.
 
 19. **Volumetric light types are documented and not implemented.** Section 3.3
     lists the supported light types as point, spot, directional and volumetric.
-    The first three exist as `DirectionalLight`, `PointLight` and `SpotLight` with
-    documented units and validation; nothing in `light.hpp` or the lighting
-    shaders represents a volumetric light, and no shader in this tree scatters
-    through a medium. This is a deviation from a documented capability and is
-    recorded as one, per the rule section 3 now states.
+    The first three exist as `DirectionalLight`, `PointLight` and `SpotLight`
+    with documented units and validation; nothing in `light.hpp` or the
+    lighting shaders represents a volumetric light, and no shader in this tree
+    scatters through a medium. This is a deviation from a documented capability
+    and is recorded as one, per the rule section 3 now states.
 
-    Deferring it was defensible on sequencing: a volumetric light is a scattering
-    integral along a view ray, which needs shadowed space to march through.
-    **Resolved 2026-11-06 (milestone 6f): implemented** as an analytic region
-    (sphere for point-style, cone for spot-style) realized by a `volumeDensity`
-    property on `PointLight`/`SpotLight` (default 0 = off, so no existing pixel
-    changed). The documentation does not state whether "volumetric" is a
-    distinct light type or a property of point/spot, nor which representation
-    the original used — both recorded as deviations (decision 25). What was
-    NOT implemented: directional (half-space) volumes, and shadowing of
-    spot-style cone volumes (no spot shadow maps exist in this tree).
+    Deferring it was defensible on sequencing: a volumetric light is a
+    scattering integral along a view ray, which needs shadowed space to march
+    through. **Resolved 2026-11-06 (milestone 6f): implemented** as an analytic
+    region (sphere for point-style, cone for spot-style) realized by a
+    `volumeDensity` property on `PointLight`/`SpotLight` (default 0 = off, so
+    no existing pixel changed). The documentation does not state whether
+    "volumetric" is a distinct light type or a property of point/spot, nor
+    which representation the original used — both recorded as deviations
+    (decision 25). What was NOT implemented: directional (half-space) volumes,
+    and shadowing of spot-style cone volumes (no spot shadow maps exist in this
+    tree).
 
 20. **Do fullscreen passes write depth, and where does scene depth live?**
     **Resolved 2026-11-06 (milestone 6d base repair): fullscreen passes never
@@ -520,8 +531,9 @@ not exist before GL 3.2, so "3.0 core" is not a valid request.
 24. **Resource container: define one, or adopt an existing format?** The engine
     needs one: the documented feature set lists a resource manager among the
     core components. Two ways to get one, adopt an existing format or define
-    one, and this project defines its own, the OWD format, specified in [resource-
-    container.md](resource-container.md). Its payloads are DEFLATE streams (RFC
+    one, and this project defines its own, the OWD format, specified in
+    [resource- container.md](resource-container.md). Its payloads are DEFLATE
+    streams (RFC
     1951) produced and consumed through zlib, which is a published IETF
     standard under the zlib licence and already a transitive dependency through
     SDL2, so the compression half of the problem is not invented here.
