@@ -59,6 +59,12 @@ GlShaderProgram::GlShaderProgram(GlLoader& gl, ShaderProgramId id)
         vertexSource = kDeferredLightVertexShader;
         fragmentSource = kPostSSAOFragmentShader;
         break;
+    case ShaderProgramId::PostSSAOStf:
+        // Fullscreen pass over the occlusion buffer: the same neutral vertex
+        // stage every other post pass uses (milestone 6g, decision 31).
+        vertexSource = kDeferredLightVertexShader;
+        fragmentSource = kPostSSAOStfFragmentShader;
+        break;
     case ShaderProgramId::PostMLAA:
         vertexSource = kDeferredLightVertexShader;
         fragmentSource = kPostMLAAFragmentShader;

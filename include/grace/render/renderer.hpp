@@ -41,14 +41,32 @@ inline constexpr std::uint32_t kMaxVolumetricLights = 4;
 /// renderer, and is path-independent (forward and deferred feed it).
 /// SSAO configuration (milestone 6c), part of the post chain. The occlusion
 /// factor multiplies the ambient term only (decision 18). Temporal filtering
-/// (SSAO-STF) is NOT implemented — recorded deferred to its own increment.
+/// (SSAO-STF, 6g): selective temporal filtering of the occlusion buffer.
+/// Off by default: with it off, every pixel value is bit-identical to before
+/// the filter existed (the same rule the post chain follows). When on, the
+/// SSAO pass's raw output is blended with the previous frame's filtered
+/// result after a camera-reprojection validation: the current pixel's world
+/// position is projected with the previous frame's view-projection matrix,
+/// and the history is rejected when the reprojected position falls outside
+/// the screen or the history's depth disagrees with the current depth (the
+/// selective part: a disoccluded or off-screen pixel gets raw occlusion,
+/// not ghosted history).
 struct SSAOConfig
 {
     bool enabled = true;          ///< on when the post chain is on
     float radius = 0.5f;          ///< world units
     std::uint32_t samples = 8;    ///< hemisphere samples (max 8 in the shader)
     float bias = 0.02f;           ///< world units along the normal (self-occlusion guard)
-
+    /// 6g SSAO-STF configuration: history weight, the depth rejection threshold
+    /// and the enable flag. Defaults are measured in the 6g increment.
+    struct SSAOStfConfig
+    {
+        bool enabled = false;         ///< off by default (decision: explicit opt-in)
+        float blend = 0.5f;           ///< history weight: 0 = raw only, <1 = blend
+        float depthRejection = 0.05f; ///< NDC depth delta that invalidates history
+        void validate() const;
+    };
+    SSAOStfConfig stf;             ///< SSAO-STF (6g), part of SSAO config
     void validate() const;
 };
 
@@ -191,6 +209,14 @@ public:
 
     /// Clear colour — device-level state, forwarded to the backend.
     void setClearColor(ClearColor color);
+    /// 6g prerequisite: per-frame camera. Changes the camera for the NEXT
+    /// frame without releasing the shadow maps (setConfig releases them when
+    /// cascades move, so a per-frame camera through setConfig would rebuild
+    /// the shadow maps every frame). The camera is validated like setConfig.
+    /// A frame in flight keeps the camera it was opened with; the new camera
+    /// takes effect at the next beginFrame(). Throws std::invalid_argument on
+    /// invalid values.
+    void setCamera(const CameraParams& camera);
 
     /// Begins a frame. Throws std::logic_error when a frame is already open.
     void beginFrame();
@@ -266,6 +292,18 @@ private:
     std::unique_ptr<ShaderProgram> m_postTonemap;
     std::unique_ptr<ShaderProgram> m_postSSAO;
     RenderTarget* m_ssao = nullptr;  ///< R8 occlusion buffer, full framebuffer size
+    // SSAO-STF resources (milestone 6g): two ping-pong history targets, each
+    // 2x R8 (attachment 0 = filtered occlusion for the tonemap, attachment 1 =
+    // quantised NDC depth of that pixel for the reprojection validation).
+    // Created with the rest of the post chain resources when STF is enabled,
+    // released by releasePostResources like every other target. The index
+    // toggles at the end of every frame's chain so the next frame's previous
+    // frame is the one this frame wrote.
+    std::unique_ptr<ShaderProgram> m_postSSAOStf;
+    RenderTarget* m_ssao_history[2] = {nullptr, nullptr};
+    std::uint32_t m_ssao_history_index = 0;
+    bool m_has_prev_camera = false;
+    CameraParams m_prev_camera{};
     std::unique_ptr<ShaderProgram> m_postMLAA;  ///< 6d morphological AA pass (display domain since 6e)
     std::unique_ptr<ShaderProgram> m_postDOF;   ///< 6d depth-of-field pass
     std::unique_ptr<ShaderProgram> m_postBlit;  ///< 6e present pass (display target -> default FB)

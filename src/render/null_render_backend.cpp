@@ -206,6 +206,7 @@ std::unique_ptr<ShaderProgram> NullRenderBackend::createShaderProgram(ShaderProg
     case ShaderProgramId::PostBlur: name = "PostBlur"; break;
     case ShaderProgramId::PostTonemap: name = "PostTonemap"; break;
     case ShaderProgramId::PostSSAO: name = "PostSSAO"; break;
+    case ShaderProgramId::PostSSAOStf: name = "PostSSAOStf"; break;
     case ShaderProgramId::PostMLAA: name = "PostMLAA"; break;
     case ShaderProgramId::PostDOF: name = "PostDOF"; break;
     case ShaderProgramId::PostBlit: name = "PostBlit"; break;

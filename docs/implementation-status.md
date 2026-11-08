@@ -27,12 +27,12 @@ The `.docx` files in this directory are generated from the `.md` sources with
 | 5c | Shader sources leave the API-neutral module (decision 14); deferred path consumes the existing shadow maps (G1) | Done |
 | 6a | HDR pipeline: float HDR target, bloom, filmic tonemap + sRGB display encode, owned by the renderer, off by default | Done |
 | 6b | Ambient (indirect) lighting term in both paths (decision 17 — a documented deviation from the documented light types) | Done |
-| 6c | SSAO: occlusion factor in a second HDR attachment (ambient only), depth-gradient normals, darkens the ambient term at the tonemap (decision 18). SSAO-STF temporal filtering deferred | Done |
+| 6c | SSAO: occlusion factor in a second HDR attachment (ambient only), depth-gradient normals, darkens the ambient term at the tonemap (decision 18). SSAO-STF temporal filtering deferred to its own increment (6g, decision 31) | Done |
 | 6d | Base repair (decision 20: fullscreen passes never write depth; HDR depth = scene depth in both paths) + ambient default 0.2 (decision 21) + DOF with bokeh and morphological AA (decision 22 chain order), both off by default | Done |
 | 6e | Post chain on by default: the chain became the product once its techniques landed (decision 23). Every measured value re-baselined with before/after figures, no tolerance widened | Done |
 | 6f | Volumetric lights as an analytic region — a sphere around a point light, a cone around a spot light, through a `volumeDensity` property defaulting to off (decision 25) | Done |
-| 6g | SSAO with selective temporal filtering (SSAO-STF). **Deferred, not started** — needs motion-vector reprojection, which needs motion this tree does not have (decision 18) | Planned |
-| 6 | Post-processing: HDR, bloom, filmic tonemap (6a), ambient term (6b), SSAO (6c), DOF + morphological AA (6d) — all documented in section 3.2 except SSAO-STF temporal filtering, which remains deferred to its own increment | Done (SSAO-STF deferred) |
+| 6g | SSAO with selective temporal filtering (SSAO-STF), camera-only scope (decision 31): the scene is static, so the history is validated by camera reprojection — the current pixel's world position is projected with the previous frame's view-projection matrix, and the history is rejected when the reprojected position falls outside the screen or the history's depth disagrees with the current depth | Done |
+| 6 | Post-processing: HDR, bloom, filmic tonemap (6a), ambient term (6b), SSAO (6c), DOF + morphological AA (6d) — all documented in section 3.2; SSAO-STF temporal filtering landed in its own increment (6g) | Done |
 | 7 | Global illumination by light volume propagation. Four increments, all measured: the 3D texture exists in the contract and in both backends, a pass renders into one layer of a volume without touching the others, the scene deposits its light into every layer, one propagation step averages the six face neighbours, and the volume composes into the frame — the ambient term of both paths (decision 30, decision 17(d)) | Done |
 | 8 | Physics contract and the first backend | Planned |
 | 9 | Script host: AngelScript integration and type registration | Planned |
@@ -113,6 +113,7 @@ All results below are real runs, on the tree at the stated commit.
 | 2026-11-07 | same, milestone 7 fourth increment | One propagation step averages the six face neighbours, measured cell by cell against the average the injection wrote: the volume is 4x4x4 and every cell is checked, and the far corner cell (which the injection filled with 0.08162) holds 0.10120 after the step — the light spread into the cells the injection did not light. OpenGL on: the new suite reports 88 checks, 0 failures. No existing count decreased; `test_opengl_render` stays at 193. The shader library went from 25 to 26 entries and `ShaderProgramId` from 17 to 18, both measured with the methods the earlier entries declare; the render contract stays at 37 pure virtual methods and `gl_loader.cpp` stays at 65 — no new GL entry point, because the propagation renders through the layer target the second increment added |
 | 2026-11-07 | same, milestone 7 first increment | 3D texture in the contract, both backends and the null backend. OpenGL off: 15/15 Debug; OpenGL on: 28/28 Debug and Release; -L opengl 13/13; docs_structure 17 checks, 0 failures; texture3d 23 checks, 0 failures with no GL context; opengl_render 125 -> 157 checks; zero warnings under -Werror. Measured on the driver before the code was written: a Depth24Stencil8 volume is refused by glTexImage3D with GL_INVALID_OPERATION, and an R8 3x3 slice round-trips with row alignment 1 and not with 4 |
 | 2026-11-08 | same, milestone 7 fourth increment | The volume composes into the frame: the lighting pass samples the volume at the fragment's world position and adds the sampled radiance to the ambient term (decision 17(d)), in both paths. One point light inside the volume, one ground quad, the centre pixel measured with compose on and off: forward 149,149,149,255 (off) and 205,205,205,255 (on); deferred 149,149,149,255 (off) and 205,205,205,255 (on) — the two paths agree, which is what decision 17(d) demands. The compose responds to exposure (2.0 gives 231,231,231,255) and to the legacy path (post off: 51,51,51,255 off, 124,124,124,255 on). `test_volume_compose` reports 19 checks, 0 failures: the numeric half on OpenGL, the structural half on the null backend (a compose flag on a disabled volume is rejected, the submit record carries volume=1 when compose is on, and the volume passes run before the lighting submit). The same commit builds the cross-reference rule (R13): a source line naming a milestone and a decision must name a decision the milestone's row records — 14 of the 71 decision references in the source name a milestone and seven of those were wrong, all caught by the rule; the rule reads include/, src/ and tests/ (a scope change from the two documents the rules read before), verified against the real tree (23 checks on docs_structure, 0 failures) and by an injected defect that the rule catches. OpenGL off: 15/15 Debug; OpenGL on: 31/31 Debug and Release; `-L opengl` 16/16; docs_structure 17→23 checks, 0 failures; zero warnings under -Werror. No existing count decreased; the shader library stays at 26 entries and ShaderProgramId at 18, the contract stays at 37 pure virtual methods, and gl_loader.cpp stays at 65 — no new GL entry point, because the compose adds no new GL entry point. The test files go from 27 to 28 |
+| 2026-11-08 | same, milestone 6g | SSAO-STF (selective temporal filtering), camera-only scope (decision 31). The scene is static, so the history is validated by camera reprojection: the current pixel's world position is reconstructed from the current frame's scene depth (decision 20), projected with the previous frame's view-projection matrix, and the history is rejected when the reprojected position falls outside the screen, the reprojected position is behind the previous eye, or the history's depth disagrees with the current depth by more than the configured threshold (0.05 NDC). The history is a two-attachment ping-pong pair (attachment 0 = filtered occlusion, attachment 1 = this frame's NDC depth for the next frame's validation); the tonemap samples the filtered buffer when STF is on and the raw buffer when off. The filter is OFF by default: with it off, every pixel value is bit-identical to before the filter existed (the same rule the post chain follows). The per-frame camera exists (`setCamera`), which validates the camera and changes the NEXT frame without releasing the shadow maps — the prerequisite decision 18 recorded. The numeric half on OpenGL: camera move with a static scene keeps the corner occlusion stable within tolerance (206, 206, 206 across three frames), a disoccluded pixel gets raw occlusion (212 vs raw 206), and the first frame is the raw buffer. The structural half on the null backend: STF off by default (no STF pass, no history target), STF on creates the two-attachment ping-pong pair, `setCamera` does not release the shadow maps, and the config validation rejects blend outside [0,1) and depthRejection outside (0,1]. OpenGL off: 15/15 Debug; OpenGL on: 28/28 Debug and Release; `-L opengl` 16/16; docs_structure 23 checks, 0 failures; ssao 11 -> 15 checks, renderer 26 -> 41 checks; zero warnings under -Werror. No existing count decreased. The shader library goes from 26 to 27 entries and `ShaderProgramId` from 18 to 19 (PostSSAOStf); the contract stays at 37 pure virtual methods and gl_loader.cpp stays at 65 — no new GL entry point, because the STF pass renders through the same fullscreen-pass primitives the chain already uses. The STF pass is one more pass in the chain: the render contract gains no new method |
 
 ### Defects found by the tests, and fixed
 
@@ -417,6 +418,10 @@ not exist before GL 3.2, so "3.0 core" is not a valid request.
     version does
     that a temporal one would not: it is deterministic (fixed sample pattern,
     no per-frame noise rotation), so tests are reproducible byte-for-byte.
+    Resolved 2026-11-08 (milestone 6g, decision 31): the temporal filter is
+    built, camera-only — the scene is static, so the history is validated by
+    camera reprojection, and a per-frame camera exists (`setCamera`, which
+    does not release the shadow maps). The 6g row records the scope.
     Path agreement (A4): forward and deferred read the same scene depth and
     run the same pass; measured near-corner pixel forward 206 = deferred 206
     (diff 0), open-area 232 = 232.
@@ -950,6 +955,48 @@ grep -rn 'GLuint\|GLenum\|SDL_\|Window' include/grace/render/render_backend.hpp 
     itself cannot fail on its own text. The real tree passes with 23 checks
     and 0 failures on docs_structure, and an injected defect (a source line
     naming milestone 5 and decision 9) is caught by the rule.
+
+31. **What does SSAO-STF validate its history against, and how much of the
+    frame does it reproject?** Decision 18 (6c) deferred SSAO-STF because the
+    tree had no motion to reproject: nothing in the project supplies per-frame
+    motion vectors. The 6g row records the state that closes it: the camera is
+    the only motion, and the camera is known, so the temporal filter is
+    **camera-only** — a documented deviation from the documented capability
+    list, which promises selective temporal filtering without naming the motion
+    it reprojects.
+    The history is validated against the current frame's camera reprojection:
+    the current pixel's world position is reconstructed from the current
+    frame's scene depth (decision 20: the HDR depth is the scene depth in both
+    paths), projected with the previous frame's view-projection matrix, and
+    the history is rejected when the reprojected position falls outside the
+    screen or the history's depth disagrees with the current depth (the
+    selective part: a disoccluded or off-screen pixel gets raw occlusion, not
+    ghosted history). A pixel whose world position is unchanged between the
+    frames (the camera did not move it) reads the previous frame's filtered
+    occlusion; the blend is a linear mix between raw and history with the
+    configured history weight.
+    The history carries the occlusion factor in attachment 0 and the frame's
+    NDC depth in attachment 1, so the validation is a texture lookup, not a
+    second buffer: the depth comparison is a straight
+    `abs(histDepth - d) > depthRejection`, and the history is written by the
+    same pass that reads the previous frame's, so the two-attachment
+    ping-pong target is the mechanism the decision records.
+    The deviations are documented and measured: the camera is the only motion,
+    so the world position is reconstructed by inverting the current frame's
+    projection and view and reprojecting with the previous frame's
+    view-projection; the scene is static, so the same scene point is the same
+    world position in both frames. Geometry that moves would need motion
+    vectors, which this tree does not have — the 6g row records the
+    camera-only scope as a deviation, not an omission.
+    The filter is OFF by default (the same rule the post chain follows: with
+    it off, every pixel value is bit-identical to before it existed), and the
+    cold start is the raw buffer (no history, so no history is read).
+    The filter is validated by the numeric half of test_ssao: a camera move
+    with a static scene keeps the corner occlusion stable within tolerance
+    while the raw buffer would flicker, a disoccluded pixel gets raw
+    occlusion, and the first frame is the raw buffer. The structural half
+    (off by default, `setCamera` does not recreate the shadow maps) runs on
+    the null backend.
 
 ## Verification commands
 

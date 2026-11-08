@@ -32,6 +32,22 @@ void SSAOConfig::validate() const
         throw std::invalid_argument("ssao config: samples must be in [1, 8]");
     if (!(bias >= 0.0f))
         throw std::invalid_argument("ssao config: bias must be >= 0");
+    stf.validate();
+}
+
+void SSAOConfig::SSAOStfConfig::validate() const
+{
+    // Milestone 6g: the temporal filter is a blend, not a filter kernel —
+    // blend = 0 means raw only, and the upper bound is open (exactly 1 would
+    // mean the raw buffer is ignored, which is not a temporal filter).
+    if (!(blend >= 0.0f) || !(blend < 1.0f))
+        throw std::invalid_argument("ssao stf config: blend must be in [0, 1)");
+    // NDC depth threshold: 0 means every pixel is rejected (the filter is
+    // never applied), so the lower bound is open; 1 is the whole NDC range
+    // and is accepted (never rejects on depth).
+    if (!(depthRejection > 0.0f) || !(depthRejection <= 1.0f))
+        throw std::invalid_argument(
+            "ssao stf config: depthRejection must be in (0, 1] NDC");
 }
 
 void MlaaConfig::validate() const
@@ -112,6 +128,17 @@ void Renderer::setClearColor(ClearColor color)
     m_backend.setClearColor(color);  // device-level state, forwarded
 }
 
+void Renderer::setCamera(const CameraParams& camera)
+{
+    // Milestone 6g prerequisite: the camera is a per-frame property, not a
+    // resource. setConfig releases the shadow maps when the cascades move, so
+    // a per-frame camera through setConfig would rebuild them every frame;
+    // this path only changes the camera, and the shadow maps are recomputed
+    // from the current camera at endFrame as they always were.
+    camera.validate();
+    m_config.camera = camera;
+}
+
 void Renderer::beginFrame()
 {
     if (m_frame_open)
@@ -122,6 +149,9 @@ void Renderer::beginFrame()
     m_frame_sun.reset();
     m_shadow_maps_valid = false;
 
+    // The camera is snapshot at beginFrame: a frame in flight keeps the
+    // camera it was opened with, so setCamera() during a frame changes the
+    // NEXT frame, not the one in flight. (6g prerequisite: per-frame camera.)
     m_backend.setCamera(m_config.camera);
     if (m_config.path != RenderPath::Deferred)
     {
@@ -264,6 +294,24 @@ RenderTarget* Renderer::ensureHdrTarget()
         sdesc.depthAttachment = false;
         m_ssao = m_backend.createRenderTarget(sdesc);
 
+        // SSAO-STF (milestone 6g): two history targets when the filter is on,
+        // each 2x R8 (0 = filtered occlusion, 1 = quantised NDC depth for the
+        // reprojection validation). The history is written at the framebuffer
+        // resolution, so the reprojected uv is sampled at its pixel centre.
+        if (m_config.post.ssao.stf.enabled)
+        {
+            RenderTargetDesc hdesc;
+            hdesc.width = m_backend.width();
+            hdesc.height = m_backend.height();
+            hdesc.colorAttachmentCount = 2;
+            hdesc.colorFormats[0] = PixelFormat::R8;
+            hdesc.colorFormats[1] = PixelFormat::R8;
+            hdesc.depthAttachment = false;
+            m_ssao_history[0] = m_backend.createRenderTarget(hdesc);
+            m_ssao_history[1] = m_backend.createRenderTarget(hdesc);
+            m_postSSAOStf = m_backend.createShaderProgram(ShaderProgramId::PostSSAOStf);
+        }
+
         // 6d ping-pong target: 2x Rgba16F (colour + ambient), full framebuffer
         // size (~16.6 MB colour at 1280x720). The MLAA/DOF passes read one
         // HDR image and write the other; depth always stays in m_hdr.
@@ -365,6 +413,16 @@ void Renderer::releasePostResources()
         m_backend.releaseRenderTarget(m_ssao);
         m_ssao = nullptr;
     }
+    for (RenderTarget* target : m_ssao_history)
+    {
+        if (target != nullptr)
+            m_backend.releaseRenderTarget(target);
+    }
+    m_ssao_history[0] = nullptr;
+    m_ssao_history[1] = nullptr;
+    m_ssao_history_index = 0;
+    m_has_prev_camera = false;
+    m_postSSAOStf.reset();
     if (m_postA != nullptr)
     {
         m_backend.releaseRenderTarget(m_postA);
@@ -711,6 +769,58 @@ void Renderer::runPostChain()
         m_backend.endRenderPass();
     }
 
+    // SSAO-STF (milestone 6g, decision 31): selective temporal filtering. The
+    // raw SSAO pass writes its occlusion into m_ssao (the raw buffer, which
+    // the next frame's STF pass reads); this pass reads it, validates the
+    // previous frame's filtered history against the CURRENT camera, and
+    // writes the filtered result into m_ssao_history[write] attachment 0,
+    // with the frame's quantised NDC depth in attachment 1. The tonemap
+    // samples the filtered buffer when STF is on; m_ssao stays raw.
+    const std::uint32_t stfWrite = m_ssao_history_index;
+    const std::uint32_t stfRead = 1u - m_ssao_history_index;
+    if (m_config.post.ssao.enabled && m_config.post.ssao.stf.enabled &&
+        m_ssao_history[0] != nullptr && m_ssao_history[1] != nullptr)
+    {
+        const core::mat4 view = core::lookAt(m_config.camera.eye, m_config.camera.target,
+                                             m_config.camera.up);
+        const core::mat4 invView = core::inverseAffine(view);
+        const core::mat4 prevView = m_has_prev_camera
+            ? core::lookAt(m_prev_camera.eye, m_prev_camera.target, m_prev_camera.up)
+            : view;
+        const core::mat4 prevProj = core::perspective(
+            m_prev_camera.fovYRad, m_prev_camera.aspect, m_prev_camera.near, m_prev_camera.far);
+        m_backend.beginRenderPass(m_ssao_history[stfWrite]);
+        m_backend.bindTexture(m_backend.renderTargetTexture(m_hdr, kDepthAttachment), 0);
+        m_backend.bindTexture(m_backend.renderTargetTexture(m_ssao, 0), 1);
+        m_backend.bindTexture(
+            m_backend.renderTargetTexture(m_ssao_history[stfRead], 0), 2);
+        m_backend.bindTexture(
+            m_backend.renderTargetTexture(m_ssao_history[stfRead], 1), 3);
+        m_postSSAOStf->use();
+        m_postSSAOStf->setUniform("depthTex", 0);
+        m_postSSAOStf->setUniform("ssaoRawTex", 1);
+        m_postSSAOStf->setUniform("historyTex", 2);
+        m_postSSAOStf->setUniform("historyDepthTex", 3);
+        m_postSSAOStf->setUniform("invProj", core::perspectiveInverse(
+            m_config.camera.fovYRad, m_config.camera.aspect,
+            m_config.camera.near, m_config.camera.far));
+        m_postSSAOStf->setUniform("invView", invView);
+        m_postSSAOStf->setUniform("prevViewProj", prevProj * prevView);
+        m_postSSAOStf->setUniform("outSize",
+                                  core::vec2{static_cast<float>(m_ssao_history[stfWrite]->width()),
+                                             static_cast<float>(m_ssao_history[stfWrite]->height())});
+        m_postSSAOStf->setUniform("blend", m_config.post.ssao.stf.blend);
+        m_postSSAOStf->setUniform("depthRejection", m_config.post.ssao.stf.depthRejection);
+        // hasHistory covers the cold start (first frame after the resources
+        // were created) and the case where the config is on but the previous
+        // frame's history is invalid — both are the same: the raw buffer is
+        // the output, and the history target is written either way so the
+        // next frame's cold start disappears.
+        m_postSSAOStf->setUniform("hasHistory", m_has_prev_camera ? 1 : 0);
+        m_fullscreen_quad->drawIndexed();
+        m_backend.endRenderPass();
+    }
+
     // DOF pass (6d): bokeh-disc blur of the linear HDR, src -> the other target.
     if (m_config.post.dof.enabled && m_postA != nullptr)
     {
@@ -775,7 +885,15 @@ void Renderer::runPostChain()
     m_backend.bindTexture(m_backend.renderTargetTexture(src, 0), 0);
     m_backend.bindTexture(m_backend.renderTargetTexture(src, 1), 1);
     m_backend.bindTexture(m_backend.renderTargetTexture(m_bloom.back(), 0), 2);
-    m_backend.bindTexture(m_backend.renderTargetTexture(m_ssao, 0), 3);
+    // SSAO-STF (milestone 6g): when the filter is on, the tonemap samples the
+    // FILTERED occlusion (the last frame's STF output), not the raw buffer.
+    // The STF pass runs after the raw SSAO pass, so the filtered buffer holds
+    // this frame's filtered result. The raw buffer is the fallback when STF
+    // is off (the pre-6g behaviour).
+    const bool stfOn = m_config.post.ssao.enabled && m_config.post.ssao.stf.enabled &&
+                       m_ssao_history[0] != nullptr && m_ssao_history[1] != nullptr;
+    m_backend.bindTexture(m_backend.renderTargetTexture(
+        stfOn ? m_ssao_history[m_ssao_history_index] : m_ssao, 0), 3);
     m_backend.bindTexture(m_backend.renderTargetTexture(m_vol, 0), 4);
     m_postTonemap->use();
     m_postTonemap->setUniform("hdrTex", 0);
@@ -826,6 +944,17 @@ void Renderer::runPostChain()
     m_backend.endRenderPass();
     m_displaySrc = displaySrc;
     m_backend.setDepthTestEnabled(true);  // restore for the next frame's geometry
+    // SSAO-STF (milestone 6g): the history target just written becomes the
+    // next frame's read history, so the index toggles at the end of every
+    // chain that ran the STF pass. The previous frame's camera is recorded
+    // AFTER the pass, so the next frame's STF pass can reproject with it.
+    if (m_config.post.ssao.enabled && m_config.post.ssao.stf.enabled &&
+        m_ssao_history[0] != nullptr && m_ssao_history[1] != nullptr)
+    {
+        m_ssao_history_index = 1u - m_ssao_history_index;
+        m_prev_camera = m_config.camera;
+        m_has_prev_camera = true;
+    }
 }
 
 std::uint32_t Renderer::volumetricLightCount() const

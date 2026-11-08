@@ -862,6 +862,106 @@ void main()
 }
 )";
 
+// SSAO-STF (milestone 6g, decision 31): selective temporal filtering of the
+// occlusion buffer. The raw SSAO pass writes its occlusion into m_ssaoRaw;
+// this pass reads it, validates the previous frame's filtered history against
+// the CURRENT camera, and writes the filtered result into m_ssao (the buffer
+// the tonemap already samples). The camera-only scope is the documented
+// deviation: the scene is static, so a pixel's world position this frame
+// equals the previous frame's world position at the same scene point —
+// reprojection moves the world position through the previous frame's
+// view-projection matrix and the history is valid only when the reprojected
+// position stays inside the screen and the history's depth agrees with the
+// current one (the selective part: a disoccluded or off-screen pixel gets
+// raw occlusion, not ghosted history). The history carries the occlusion
+// factor in attachment 0 and its quantised NDC depth in attachment 1
+// (two-attachment ping-pong target). The history is written at the same
+// resolution as the framebuffer, so no bilinear filtering is needed: the
+// reprojected uv is sampled at the pixel centre, so history is sampled
+// NEAREST at that pixel. blend = 0 means history is ignored entirely; the
+// temporal blend is a linear mix between raw and history.
+constexpr const char* kPostSSAOStfFragmentShader = R"(#version 330 core
+uniform sampler2D depthTex;      // HDR scene depth (NDC [0,1]), from the HDR target
+uniform sampler2D ssaoRawTex;    // raw occlusion buffer (R8, [0,1]), from the SSAO pass
+uniform sampler2D historyTex;    // previous frame's filtered occlusion (R8, [0,1])
+uniform sampler2D historyDepthTex; // previous frame's depth, quantised NDC [0,1]
+uniform mat4 invProj;
+uniform mat4 invView;
+uniform mat4 prevViewProj;
+uniform vec2 outSize;
+uniform float blend;             // history weight: 0 = raw, 1 = history
+uniform float depthRejection;    // NDC depth delta that invalidates history
+uniform int hasHistory;          // 1 = the previous frame exists, 0 = cold start
+layout(location = 0) out float filteredOcc;  // filtered occlusion factor
+layout(location = 1) out float historyDepth; // the current frame's NDC depth,
+                                             // validated by the next frame's pass
+
+vec3 viewPos(vec2 uv, float d)
+{
+    vec4 clip = vec4(uv * 2.0 - 1.0, d * 2.0 - 1.0, 1.0);
+    vec4 v = invProj * clip;
+    return v.xyz / v.w;
+}
+
+void main()
+{
+    vec2 uv = gl_FragCoord.xy / outSize;
+    float raw = texture(ssaoRawTex, uv).r;
+    // Cold start: the first frame has no history, so the output is the raw
+    // buffer. The history target is written either way, so the next frame's
+    // cold start disappears.
+    if (hasHistory == 0)
+    {
+        // The cold start still writes the current depth, so the next frame's
+        // validation has a history to validate against.
+        float coldDepth = texture(depthTex, uv).r;
+        filteredOcc = raw;
+        historyDepth = coldDepth;
+        return;
+    }
+    float d = texture(depthTex, uv).r;
+    if (d >= 1.0)
+    {
+        // Background: the raw buffer is 1.0 and there is no history to
+        // validate — the raw value is the output.
+        filteredOcc = raw;
+        historyDepth = d;
+        return;
+    }
+    // Reproject: current pixel's world position, projected with the previous
+    // frame's view-projection matrix.
+    vec3 view = viewPos(uv, d);
+    vec4 world = invView * vec4(view, 1.0);
+    vec4 prevClip = prevViewProj * world;
+    if (prevClip.w <= 0.0)
+    {
+        // Behind the previous eye: the history is invalid.
+        filteredOcc = raw;
+        historyDepth = d;
+        return;
+    }
+    vec2 prevUv = prevClip.xy / prevClip.w * 0.5 + 0.5;
+    if (prevUv.x < 0.0 || prevUv.x > 1.0 || prevUv.y < 0.0 || prevUv.y > 1.0)
+    {
+        // Off-screen in the previous frame: the history is invalid.
+        filteredOcc = raw;
+        historyDepth = d;
+        return;
+    }
+    float histOcc = texture(historyTex, prevUv).r;
+    float histDepth = texture(historyDepthTex, prevUv).r;
+    if (abs(histDepth - d) > depthRejection)
+    {
+        // Disoccluded or a different surface: the history is invalid.
+        filteredOcc = raw;
+        historyDepth = d;
+        return;
+    }
+    filteredOcc = mix(raw, histOcc, blend);
+    historyDepth = d;
+}
+)";
+
 // Morphological anti-aliasing (milestone 6d; moved to the display-encoded
 // image in 6e, decision 22 update). The post chain ends in an offscreen 8-bit
 // target (the display target), which IS sampleable, so MLAA runs here on the

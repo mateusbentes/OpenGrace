@@ -37,6 +37,8 @@ enum class ShaderProgramId : std::uint8_t
     PostVolumetric,     ///< post: volumetric light in-scattering along the view ray (6f)
     VolumeInject,       ///< volume: inject scene light into one layer (7, third increment)
     VolumePropagate,    ///< volume: one propagation step, six face neighbours (7, fourth increment)
+    PostSSAOStf,        ///< post: selective temporal filtering of the occlusion buffer
+                        ///< (milestone 6g, decision 31) — camera-reprojection validated history
 };
 
 /// Caches uniform locations by name so repeated sets do not re-query the
