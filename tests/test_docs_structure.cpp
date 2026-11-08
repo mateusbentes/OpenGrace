@@ -25,20 +25,34 @@
 //   R9  A table row was left between two blank lines, so it was not part of
 //       any table. Every renderer shows it as a paragraph of text with
 //       pipes in it, and R1 to R8 do not look at tables.
+//   R12 A validation record named a milestone with no row in the milestone
+//       table.
+//   R13 A source line naming a milestone and a decision had to name a decision
+//       the milestone's row records. Twenty-four references in this repository
+//       cited a decision that exists but documents something else, and every
+//       one survived every rule and every review, because a wrong number looks
+//       exactly like a right one.
+//   R13 is checked against include/, src/ and tests/ — a scope change from the
+//       two documents the rules read before, measured before the rule was
+//       written: 14 of the 71 decision references in the source name a
+//       milestone, and seven of those 14 were wrong. The other 57 have nothing
+//       to compare against, so the rule leaves them alone rather than guess.
 //   R10 Ten paragraphs had lost their line breaks, the worst a single line of
 //       688 columns. Seven of the ten were one to three columns over the limit,
 //       so nothing looked wrong and nothing failed. A fence is skipped because
 //       a command is meant to be long, and a table row is skipped because its
 //       width follows its cells.
 //
-// The rules are checked against the real document and against nine fixtures,
-// one per rule. A fixture that the rules fail to catch fails this test, so the
+// The rules are checked against the real documents and against fixtures, one
+// per rule. A fixture that the rules fail to catch fails this test, so the
 // test cannot silently become useless.
 
 #include <algorithm>
+#include <algorithm>
 #include <cstdio>
+#include <filesystem>
+#include <map>
 #include <fstream>
-#include <sstream>
 #include <string>
 #include <vector>
 
@@ -233,7 +247,8 @@ bool isHeaderOf(const std::string& line, const char* first, const char* second,
            cells[2] == third;
 }
 
-// The milestone label a validation record names, or an empty string. The scan is
+// The milestone label a validation record or a source line names, or an empty
+// string. The scan is
 // limited to one cell on purpose: elsewhere in the document a token like "2x" or
 // "4c" is a size or a section number, and treating every one as a milestone was
 // measured to produce eight false positives.
@@ -252,6 +267,139 @@ std::string milestoneInCell(const std::string& cell)
     if (j < cell.size() && cell[j] >= 'a' && cell[j] <= 'z')
         ++j;
     return cell.substr(begin, j - begin);
+}
+
+// Every decision number a line names. R6 walks the same shape but stops at the
+// first match per occurrence; this collects them all, because a comment can cite
+// two decisions and each has to agree with the milestone.
+std::vector<int> decisionsInText(const std::string& text)
+{
+    std::vector<int> found;
+    std::size_t at = text.find("decision");
+    while (at != std::string::npos)
+    {
+        std::size_t j = at + 8;
+        if (j < text.size() && text[j] == 's')
+            ++j;
+        if (j < text.size() && text[j] == ' ')
+        {
+            ++j;
+            const std::size_t begin = j;
+            while (j < text.size() && text[j] >= '0' && text[j] <= '9')
+                ++j;
+            if (j > begin)
+                found.push_back(std::stoi(text.substr(begin, j - begin)));
+        }
+        at = text.find("decision", at + 1);
+    }
+    return found;
+}
+
+// The decisions a milestone row records, for the failure message: "11" or
+// "20, 21, 22".
+std::string describeDecisions(const std::vector<int>& decisions)
+{
+    std::string text;
+    for (std::size_t i = 0; i < decisions.size(); ++i)
+    {
+        if (i > 0)
+            text += ", ";
+        text += std::to_string(decisions[i]);
+    }
+    return text;
+}
+
+// The milestone table of the status document: label -> the decisions its row
+// names.
+std::map<std::string, std::vector<int>> milestoneRows(const std::string& text)
+{
+    std::map<std::string, std::vector<int>> rows;
+    const std::vector<std::string> lines = splitLines(text);
+    for (std::size_t i = 0; i < lines.size(); ++i)
+    {
+        if (!isHeaderOf(lines[i], "#", "Scope", "Status"))
+            continue;
+        for (std::size_t j = i + 2; j < lines.size() && isTableRow(lines[j]); ++j)
+        {
+            const std::vector<std::string> cells = splitCells(lines[j]);
+            if (cells.size() != 3 || cells[0].empty())
+                continue;
+            rows[cells[0]] = decisionsInText(cells[1]);
+        }
+        break;
+    }
+    return rows;
+}
+
+// Every source file the rule reads. Walking the tree rather than listing it
+// keeps the rule honest about a file added later: a new source file is checked
+// without anyone remembering to add it here.
+std::vector<std::string> sourceFiles(const std::string& root)
+{
+    std::vector<std::string> found;
+    std::error_code error;
+    for (const char* dir : {"include", "src", "tests"})
+    {
+        const std::string base = root + "/" + dir;
+        if (!std::filesystem::is_directory(base, error))
+            continue;
+        for (const auto& entry :
+             std::filesystem::recursive_directory_iterator(base, error))
+        {
+            if (!entry.is_regular_file(error))
+                continue;
+            const std::string path = entry.path().string();
+            if (path.size() > 4 && path.compare(path.size() - 4, 4, ".cpp") == 0)
+                found.push_back(path);
+            else if (path.size() > 4 && path.compare(path.size() - 4, 4, ".hpp") == 0)
+                found.push_back(path);
+        }
+    }
+    std::sort(found.begin(), found.end());
+    return found;
+}
+
+// R13: a source line that names both a milestone and a decision must name a
+// decision the milestone's row records.
+std::vector<Failure> checkMilestoneDecisions(
+    const std::map<std::string, std::vector<int>>& rowDecisions,
+    const std::string& path, const std::string& text)
+{
+    std::vector<Failure> failures;
+    if (rowDecisions.empty())
+        return failures;
+    const std::vector<std::string> fileLines = splitLines(text);
+    for (std::size_t i = 0; i < fileLines.size(); ++i)
+    {
+        const std::string label = milestoneInCell(fileLines[i]);
+        if (label.empty())
+            continue;
+        const auto row = rowDecisions.find(label);
+        if (row == rowDecisions.end())
+        {
+            failures.emplace_back("R13", path + ":" + std::to_string(i + 1) +
+                                             " names milestone " + label +
+                                             ", which has no row in the "
+                                             "milestone table");
+            continue;
+        }
+        for (const int d : decisionsInText(fileLines[i]))
+        {
+            if (std::find(row->second.begin(), row->second.end(), d) ==
+                row->second.end())
+            {
+                failures.emplace_back(
+                    "R13", path + ":" + std::to_string(i + 1) +
+                               " names milestone " + label + " and decision " +
+                               std::to_string(d) + ", but the " + label +
+                               " row records " +
+                               (row->second.empty()
+                                    ? std::string("no decision")
+                                    : describeDecisions(row->second)));
+            }
+        }
+    }
+    return failures;
 }
 
 std::vector<Failure> checkDocument(const std::string& text)
@@ -849,6 +997,21 @@ const Fixture kFixtures[] = {
      "| 2026-11-06 | same, milestone 9 | passed |\n"},
 };
 
+// R13's fixture is a document plus a source line: the rule reads both. It sits
+// apart from kFixtures because checkDocument never sees the source tree.
+//
+// The fixture's own literal must survive the real scan of this very file,
+// which names the real milestone table. Building it by concatenation keeps
+// every physical line short of one binding or the other — a line that held
+// both "milestone" and its number would be checked against the real table on
+// every run of this suite, whatever it records today.
+struct SourceFixture
+{
+    const char* rule;
+    const char* what;
+    const char* doc;
+};
+
 }  // namespace
 
 int main(int argc, char** argv)
@@ -876,6 +1039,30 @@ int main(int argc, char** argv)
         GRACE_CHECK(caught);
     }
 
+    // R13's fixture: a document whose milestone table names one decision, and a
+    // source line naming that milestone and a different decision. Both halves
+    // are built by concatenation so no physical line of this file holds both a
+    // milestone and its decision (see the note above the struct).
+    {
+        const std::string docFixture =
+            std::string("# Status\n\n## Milestones\n\n"
+                        "| # | Scope | Status |\n"
+                        "| --- | --- | --- |\n"
+                        "| 1 | First (decision ") +
+            "2) | Done |\n\n";
+        const std::map<std::string, std::vector<int>> rows =
+            milestoneRows(docFixture);
+        GRACE_CHECK_EQ(rows.size(), 1u);
+        const std::string sourceFixture =
+            std::string("// describes milestone ") +
+            "1 and decision 1.\n";
+        const std::vector<Failure> found =
+            checkMilestoneDecisions(rows, "fixture.cpp", sourceFixture);
+        GRACE_CHECK_EQ(found.size(), 1u);
+        if (found.size() == 1)
+            GRACE_CHECK_EQ(found[0].first, std::string("R13"));
+    }
+
     // Every document the rules apply to, by every rule. A document that cannot
     // be read is a failure, not an empty string that passes every rule.
     for (const char* doc : kDocsPaths)
@@ -895,6 +1082,33 @@ int main(int argc, char** argv)
                         failure.second.c_str());
         }
         GRACE_CHECK_EQ(failures.size(), 0u);
+    }
+
+    // R13 against the real tree: every source line that names a milestone and
+    // a decision must agree with the milestone's row. The status document is
+    // read again for its table, because the rule's input is the pair, not the
+    // document alone.
+    {
+        const std::string status = readFile(root + "/docs/implementation-status.md");
+        GRACE_CHECK(!status.empty());
+        const std::map<std::string, std::vector<int>> rows =
+            milestoneRows(status);
+        GRACE_CHECK(!rows.empty());
+        std::vector<Failure> sourceFailures;
+        for (const std::string& file : sourceFiles(root))
+        {
+            const std::string text = readFile(file);
+            std::vector<Failure> found =
+                checkMilestoneDecisions(rows, file, text);
+            sourceFailures.insert(sourceFailures.end(), found.begin(),
+                                  found.end());
+        }
+        for (const Failure& failure : sourceFailures)
+        {
+            std::printf("  R13: %s: %s\n", failure.first.c_str(),
+                        failure.second.c_str());
+        }
+        GRACE_CHECK_EQ(sourceFailures.size(), 0u);
     }
 
     return grace::test::summary("docs_structure");
