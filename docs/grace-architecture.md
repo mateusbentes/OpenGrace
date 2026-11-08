@@ -244,7 +244,12 @@ Backend candidates, by licence fit:
 Given the Linux CPU-only target, Bullet is the natural first backend, with
 PhysX 3.4 as a second if cloth and soft body fidelity is required. PhysX 5 is
 not a candidate: its deformable features depend on GPU execution.
-
+The implementation follows this table: Bullet, Box2D 3 and PhysX 3.4 are the
+three real backends behind the contract (milestone 8, decision 32), and
+PhysX 3.4 is the extra-physics capability the engine describes — CPU cloth and
+soft body, reported through the contract's capability flags rather than
+folded into the classical layer. The classical layer is identical across
+backends, and the null backend is its deterministic reference implementation.
 The abstraction boundary matters more than the first backend. No `bt*`, `Px*`,
 or `b2*` type may appear outside its adapter.
 

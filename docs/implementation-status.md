@@ -34,7 +34,7 @@ The `.docx` files in this directory are generated from the `.md` sources with
 | 6g | SSAO with selective temporal filtering (SSAO-STF), camera-only scope (decision 31): the scene is static, so the history is validated by camera reprojection — the current pixel's world position is projected with the previous frame's view-projection matrix, and the history is rejected when the reprojected position falls outside the screen or the history's depth disagrees with the current depth | Done |
 | 6 | Post-processing: HDR, bloom, filmic tonemap (6a), ambient term (6b), SSAO (6c), DOF + morphological AA (6d) — all documented in section 3.2; SSAO-STF temporal filtering landed in its own increment (6g) | Done |
 | 7 | Global illumination by light volume propagation. Four increments, all measured: the 3D texture exists in the contract and in both backends, a pass renders into one layer of a volume without touching the others, the scene deposits its light into every layer, one propagation step averages the six face neighbours, and the volume composes into the frame — the ambient term of both paths (decision 30, decision 17(d)) | Done |
-| 8 | Physics contract and the first backend | Planned |
+| 8 | Physics contract and the first backend: the contract (8a), the null backend (8b), and the Bullet, Box2D and PhysX 3.4 adapters (8c) (decision 32) | Done |
 | 9 | Script host: AngelScript integration and type registration | Planned |
 | 10 | Visual scripting: block registry and graph evaluation | Planned |
 | 11 | Animation: skeletal, state machines, blending, events | Planned |
@@ -52,7 +52,7 @@ The `.docx` files in this directory are generated from the `.md` sources with
 | core | Partial | Version, fixed-step clock, header-only math (vec/mat4/transform/camera). Dependency-free, enforced by grep in review. |
 | app | Partial | Application lifecycle driver and the CLI entry point. |
 | render | Partial | Contract, null backend, OpenGL backend, loader, API-neutral mesh/shader/material plus their OpenGL implementations; diagnostic triangle rebuilt on the foundation. |
-| physics | Not started | Contract designed, no backend linked. |
+| physics | Partial | Contract (8a), null backend (8b), and the Bullet, Box2D and PhysX 3.4 adapters (8c) behind build options. PhysX is the extra-physics capability (decision 32); the classical layer is backend-neutral. |
 | script | Not started | AngelScript and the visual block system are in scope. |
 | audio, video, gui, motion, ai, game | Not started | |
 
@@ -114,6 +114,7 @@ All results below are real runs, on the tree at the stated commit.
 | 2026-11-07 | same, milestone 7 first increment | 3D texture in the contract, both backends and the null backend. OpenGL off: 15/15 Debug; OpenGL on: 28/28 Debug and Release; -L opengl 13/13; docs_structure 17 checks, 0 failures; texture3d 23 checks, 0 failures with no GL context; opengl_render 125 -> 157 checks; zero warnings under -Werror. Measured on the driver before the code was written: a Depth24Stencil8 volume is refused by glTexImage3D with GL_INVALID_OPERATION, and an R8 3x3 slice round-trips with row alignment 1 and not with 4 |
 | 2026-11-08 | same, milestone 7 fourth increment | The volume composes into the frame: the lighting pass samples the volume at the fragment's world position and adds the sampled radiance to the ambient term (decision 17(d)), in both paths. One point light inside the volume, one ground quad, the centre pixel measured with compose on and off: forward 149,149,149,255 (off) and 205,205,205,255 (on); deferred 149,149,149,255 (off) and 205,205,205,255 (on) — the two paths agree, which is what decision 17(d) demands. The compose responds to exposure (2.0 gives 231,231,231,255) and to the legacy path (post off: 51,51,51,255 off, 124,124,124,255 on). `test_volume_compose` reports 19 checks, 0 failures: the numeric half on OpenGL, the structural half on the null backend (a compose flag on a disabled volume is rejected, the submit record carries volume=1 when compose is on, and the volume passes run before the lighting submit). The same commit builds the cross-reference rule (R13): a source line naming a milestone and a decision must name a decision the milestone's row records — 14 of the 71 decision references in the source name a milestone and seven of those were wrong, all caught by the rule; the rule reads include/, src/ and tests/ (a scope change from the two documents the rules read before), verified against the real tree (23 checks on docs_structure, 0 failures) and by an injected defect that the rule catches. OpenGL off: 15/15 Debug; OpenGL on: 31/31 Debug and Release; `-L opengl` 16/16; docs_structure 17→23 checks, 0 failures; zero warnings under -Werror. No existing count decreased; the shader library stays at 26 entries and ShaderProgramId at 18, the contract stays at 37 pure virtual methods, and gl_loader.cpp stays at 65 — no new GL entry point, because the compose adds no new GL entry point. The test files go from 27 to 28 |
 | 2026-11-08 | same, milestone 6g | SSAO-STF (selective temporal filtering), camera-only scope (decision 31). The scene is static, so the history is validated by camera reprojection: the current pixel's world position is reconstructed from the current frame's scene depth (decision 20), projected with the previous frame's view-projection matrix, and the history is rejected when the reprojected position falls outside the screen, the reprojected position is behind the previous eye, or the history's depth disagrees with the current depth by more than the configured threshold (0.05 NDC). The history is a two-attachment ping-pong pair (attachment 0 = filtered occlusion, attachment 1 = this frame's NDC depth for the next frame's validation); the tonemap samples the filtered buffer when STF is on and the raw buffer when off. The filter is OFF by default: with it off, every pixel value is bit-identical to before the filter existed (the same rule the post chain follows). The per-frame camera exists (`setCamera`), which validates the camera and changes the NEXT frame without releasing the shadow maps — the prerequisite decision 18 recorded. The numeric half on OpenGL: camera move with a static scene keeps the corner occlusion stable within tolerance (206, 206, 206 across three frames), a disoccluded pixel gets raw occlusion (212 vs raw 206), and the first frame is the raw buffer. The structural half on the null backend: STF off by default (no STF pass, no history target), STF on creates the two-attachment ping-pong pair, `setCamera` does not release the shadow maps, and the config validation rejects blend outside [0,1) and depthRejection outside (0,1]. OpenGL off: 15/15 Debug; OpenGL on: 28/28 Debug and Release; `-L opengl` 16/16; docs_structure 23 checks, 0 failures; ssao 11 -> 15 checks, renderer 26 -> 41 checks; zero warnings under -Werror. No existing count decreased. The shader library goes from 26 to 27 entries and `ShaderProgramId` from 18 to 19 (PostSSAOStf); the contract stays at 37 pure virtual methods and gl_loader.cpp stays at 65 — no new GL entry point, because the STF pass renders through the same fullscreen-pass primitives the chain already uses. The STF pass is one more pass in the chain: the render contract gains no new method |
+| 2026-11-08 | same, milestone 8 | The physics contract (8a), the null backend (8b) and the three real backends (8c): Bullet, Box2D 3 and PhysX 3.4 (decision 32). The contract is the classical layer only — rigid bodies, collision shapes, forces, gravity, joints, buoyancy and force fields, in SI units, Y-up — and carries no physics-API type: no Px*, bt* or b2* type leaves an adapter. The extra physics (PhysX 3.4's CPU cloth and soft body) is a backend capability, reported through capabilityFlags() (decision 32): PhysX reports cloth and soft body, Box2D reports 2D-only, the null backend and Bullet report none. The null backend is the exact reference: deterministic semi-implicit Euler over the world's fixed step. The real backends are measured against it: Bullet and PhysX reproduce the null's single-step scenarios bit-for-bit (fall velocity, fall position, force velocity, impulse, buoyancy), Box2D matches the velocities exactly and integrates positions inside its internal substeps, so its position tolerance is measured (0.219 m of difference against the null's 0.5 m for the force scenario). The adapters live in their own libraries behind the GRACE_ENABLE_PHYSX/BULLET/BOX2D options; the SDKs are external dependencies, cloned git-ignored, never committed. The PhysX adapter instantiates the default allocator and error callback, the default CPU dispatcher, and the null backend's protocol (shutdown, violations, double release). Suites: physics (null backend) 32 checks, physics_adapters 54 checks, 0 failures; the full default build 17/17 Debug; zero warnings under -Werror. All three adapter libraries build with zero warnings under -Werror |
 
 ### Defects found by the tests, and fixed
 
@@ -146,7 +147,9 @@ Build options:
 | `GRACE_BUILD_TESTS` | `ON` | Build and register the deterministic tests. |
 | `GRACE_WARNINGS_AS_ERRORS` | `ON` | Treat warnings as errors. |
 | `GRACE_ENABLE_OPENGL` | `OFF` | Build the Linux OpenGL backend. |
-| `GRACE_ENABLE_PHYSX` | `OFF` | Reserved; no backend is linked yet. |
+| `GRACE_ENABLE_PHYSX` | `OFF` | Build the PhysX 3.4 physics backend. |
+| `GRACE_ENABLE_BULLET` | `OFF` | Build the Bullet physics backend. |
+| `GRACE_ENABLE_BOX2D` | `OFF` | Build the Box2D physics backend. |
 
 ---
 
@@ -997,6 +1000,37 @@ grep -rn 'GLuint\|GLenum\|SDL_\|Window' include/grace/render/render_backend.hpp 
     occlusion, and the first frame is the raw buffer. The structural half
     (off by default, `setCamera` does not recreate the shadow maps) runs on
     the null backend.
+
+32. **Which physics SDKs, and what is the contract's scope?** The documented
+    physics layer was explicitly plugin-based, supporting PhysX, Bullet and
+    Box2D behind one abstraction (architecture §3.6, §4.1). The contract is
+    the classical layer only — rigid bodies, collision shapes, forces,
+    gravity, joints, buoyancy and force fields, in SI units, Y-up, stepped
+    from the engine's fixed-step clock — and carries no physics-API type: no
+    Px*, bt* or b2* type leaves an adapter. That is the rule the original
+    engine's plugin architecture implies, and it is what makes the null
+    backend (8b) the exact reference implementation of the contract's
+    semantics rather than a mock.
+    PhysX is the "extra physics" the documented architecture describes: the
+    PhysX 3.4-BSD release (the last BSD-licensed one; PhysX 5's cloth and
+    soft body are GPU-exclusive) carries CPU cloth and soft body, which the
+    classical layer does not cover. The contract therefore reports the extra
+    layer through capabilityFlags() instead of pretending it is part of the
+    classical layer: PhysX reports cloth and soft body, Box2D reports
+    2D-only, the null backend and Bullet report none. The classical layer is
+    identical across all four backends, and the real backends are measured
+    against the null backend's deterministic integration (the milestone 8
+    validation row records the agreement).
+    The SDKs are external dependencies, cloned git-ignored, never committed:
+    the repository stays source-only, and the NOTICE records the licences
+    (BSD-3-Clause for PhysX 3.4, zlib for Bullet, MIT for Box2D). Havok is
+    rejected on licence: it is proprietary, and the documented architecture
+    is open-source-first.
+    The three adapters are built behind the GRACE_ENABLE_PHYSX, BULLET and
+    BOX2D options, so the default build stays free of every SDK. The
+    protocol (shutdown, violation counts, double release) follows the null
+    backend's, and each adapter is measured for the same scenario battery
+    the null suite defines.
 
 ## Verification commands
 

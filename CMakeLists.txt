@@ -29,6 +29,8 @@ option(GRACE_BUILD_TESTS        "Build and register the deterministic tests" ON)
 option(GRACE_WARNINGS_AS_ERRORS "Treat compiler warnings as errors"         ON)
 option(GRACE_ENABLE_OPENGL      "Build the Linux OpenGL backend"            OFF)
 option(GRACE_ENABLE_PHYSX       "Build the PhysX 3.4 physics backend"       OFF)
+option(GRACE_ENABLE_BULLET      "Build the Bullet physics backend"          OFF)
+option(GRACE_ENABLE_BOX2D       "Build the Box2D physics backend"           OFF)
 
 # ---------------------------------------------------------------------------
 # Warning set
@@ -108,11 +110,89 @@ target_link_libraries(grace_render PUBLIC grace_core PRIVATE grace_warnings)
 # Headless render backend: records the call sequence and counts protocol
 # violations. No windowing or graphics dependency.
 # ---------------------------------------------------------------------------
-
 add_library(grace_null_render STATIC
     src/render/null_render_backend.cpp)
-
 target_link_libraries(grace_null_render PUBLIC grace_render PRIVATE grace_warnings)
+
+# ---------------------------------------------------------------------------
+# grace_physics
+#
+# The platform-neutral physics module: the classical-physics contract plus
+# the API-neutral body/joint/field front-end. The headers carry no physics
+# API types; concrete backends live in their own modules behind the contract
+# (decision 32).
+# ---------------------------------------------------------------------------
+add_library(grace_physics STATIC
+    src/physics/physics_types.cpp)
+target_include_directories(grace_physics PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
+target_link_libraries(grace_physics PUBLIC grace_core PRIVATE grace_warnings)
+
+# ---------------------------------------------------------------------------
+# grace_null_physics
+#
+# Headless physics backend: deterministic manual integration at the world's
+# fixed step. No physics SDK dependency.
+# ---------------------------------------------------------------------------
+add_library(grace_null_physics STATIC
+    src/physics/null_physics_backend.cpp)
+target_link_libraries(grace_null_physics PUBLIC grace_physics PRIVATE grace_warnings)
+
+# ---------------------------------------------------------------------------
+# Optional physics adapters (8c)
+#
+# Each adapter maps the contract onto one SDK and lives behind its own
+# option. The SDK path is set through GRACE_PHYSX_DIR / GRACE_BULLET_DIR /
+# GRACE_BOX2D_DIR, the same pattern the OpenGL backend uses for SDL2.
+# ---------------------------------------------------------------------------
+
+set(GRACE_PHYSX_DIR "" CACHE PATH "PhysX 3.4 root (Include/, Lib/, PxShared/)")
+set(GRACE_BULLET_DIR "" CACHE PATH "Bullet source root (src/ headers)")
+set(GRACE_BULLET_BUILD_DIR "" CACHE PATH "Bullet build output (lib*.a)")
+set(GRACE_BOX2D_DIR "" CACHE PATH "Box2D source root (include/box2d)")
+set(GRACE_BOX2D_BUILD_DIR "" CACHE PATH "Box2D build output (libbox2d.a)")
+
+if(GRACE_ENABLE_PHYSX)
+    add_library(grace_physx_physics STATIC
+        src/physics/physx_physics_backend.cpp)
+    target_include_directories(grace_physx_physics SYSTEM PRIVATE
+        ${GRACE_PHYSX_DIR}/Include
+        ${GRACE_PHYSX_DIR}/../PxShared/include)
+    target_link_libraries(grace_physx_physics PUBLIC grace_physics
+        PRIVATE grace_warnings
+        ${GRACE_PHYSX_DIR}/Lib/linux64/libPhysX3Extensions.a
+        ${GRACE_PHYSX_DIR}/Lib/linux64/libSimulationController.a
+        ${GRACE_PHYSX_DIR}/Lib/linux64/libSceneQuery.a
+        ${GRACE_PHYSX_DIR}/Lib/linux64/libLowLevelDynamics.a
+        ${GRACE_PHYSX_DIR}/Lib/linux64/libLowLevelAABB.a
+        ${GRACE_PHYSX_DIR}/Lib/linux64/libLowLevel.a
+        ${GRACE_PHYSX_DIR}/Bin/linux64/libPhysX3_x64.so
+        ${GRACE_PHYSX_DIR}/Bin/linux64/libPhysX3Common_x64.so
+        ${GRACE_PHYSX_DIR}/../PxShared/bin/linux64/libPxFoundation_x64.so
+        ${GRACE_PHYSX_DIR}/../PxShared/lib/linux64/libPxTask.a)
+endif()
+
+if(GRACE_ENABLE_BULLET)
+    add_library(grace_bullet_physics STATIC
+        src/physics/bullet_physics_backend.cpp)
+    target_include_directories(grace_bullet_physics SYSTEM PRIVATE
+        ${GRACE_BULLET_DIR}/src)
+    target_link_libraries(grace_bullet_physics PUBLIC grace_physics
+        PRIVATE grace_warnings
+        ${GRACE_BULLET_BUILD_DIR}/src/BulletDynamics/libBulletDynamics.a
+        ${GRACE_BULLET_BUILD_DIR}/src/BulletCollision/libBulletCollision.a
+        ${GRACE_BULLET_BUILD_DIR}/src/LinearMath/libLinearMath.a)
+endif()
+
+if(GRACE_ENABLE_BOX2D)
+    add_library(grace_box2d_physics STATIC
+        src/physics/box2d_physics_backend.cpp)
+    target_include_directories(grace_box2d_physics SYSTEM PRIVATE
+        ${GRACE_BOX2D_DIR}/include)
+    target_link_libraries(grace_box2d_physics PUBLIC grace_physics
+        PRIVATE grace_warnings
+        ${GRACE_BOX2D_BUILD_DIR}/src/libbox2d.a)
+endif()
 
 # ---------------------------------------------------------------------------
 # OpenGL render backend (Linux only)

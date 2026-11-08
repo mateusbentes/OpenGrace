@@ -5,10 +5,11 @@ This product includes software developed by third parties. Each component
 listed below remains under its own licence; the Apache License 2.0 that covers
 this project's original source code does not alter those terms.
 
-The build links SDL2 and OpenGL/GLVND when GRACE_ENABLE_OPENGL is enabled.
-No other third-party library is linked yet. Entries marked "planned" are
+The build links SDL2 and OpenGL/GLVND when GRACE_ENABLE_OPENGL is enabled,
+and the physics SDKs when their GRACE_ENABLE_PHYSX / GRACE_ENABLE_BULLET /
+GRACE_ENABLE_BOX2D options are enabled. Entries marked "planned" are
 recorded here so that attribution is in place before the dependency is
-integrated; their licence texts will be added to third_party/ when the
+integrated; their licence texts are added to third_party/ when the
 corresponding backend is actually built.
 
 ===============================================================================
@@ -24,7 +25,8 @@ NVIDIA PhysX SDK 3.4
   https://github.com/NVIDIAGameWorks/PhysX-3.4
   Copyright (c) 2018 NVIDIA Corporation. All rights reserved.
   Licence: 3-Clause BSD
-  Status: planned, as a physics backend.
+  Status: linked when GRACE_ENABLE_PHYSX is enabled, as the extra-physics
+  backend (CPU cloth and soft body).
 
   Not vendored. The SDK is cloned into a local, git-ignored directory and
   linked as an external dependency; no part of it is redistributed from this
@@ -36,16 +38,19 @@ NVIDIA PhysX SDK 3.4
 ===============================================================================
 
 Bullet Physics SDK
-  Copyright (c) 2003-2026 Erwin Coumans and contributors
+  https://github.com/bulletphysics/bullet3
+  Copyright (c) 2003-2006 Erwin Coumans and contributors
   Licence: zlib
-  Status: planned, as a physics backend.
+  Status: linked when GRACE_ENABLE_BULLET is enabled, as a physics backend.
 
 ===============================================================================
 
 Box2D
-  Copyright (c) Erin Catto and contributors
+  https://github.com/erincatto/box2d
+  Copyright (c) 2022 Erin Catto
   Licence: MIT
-  Status: planned, as the 2D physics backend.
+  Status: linked when GRACE_ENABLE_BOX2D is enabled, as the 2D physics
+  backend.
 
 ===============================================================================
 

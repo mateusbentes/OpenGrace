@@ -30,6 +30,26 @@ target_include_directories(test_math PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
 add_test(NAME math COMMAND test_math)
 
+# Physics contract (8a) and null backend (8b): deterministic manual
+# integration, no physics SDK.
+add_executable(test_physics test_physics.cpp)
+target_link_libraries(test_physics PRIVATE grace_physics grace_null_physics grace_warnings)
+target_include_directories(test_physics PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME physics COMMAND test_physics)
+
+# Runtime tests for the real backends (8c). Each adapter target is only
+# built when its SDK option is on, so this suite exists only when all of
+# them are (the sandbox build is; the SDKs live outside the repo).
+if(GRACE_ENABLE_PHYSX AND GRACE_ENABLE_BULLET AND GRACE_ENABLE_BOX2D)
+    add_executable(test_physics_adapters test_physics_adapters.cpp)
+    target_link_libraries(test_physics_adapters PRIVATE
+        grace_physics grace_null_physics grace_bullet_physics
+        grace_box2d_physics grace_physx_physics grace_warnings)
+    target_include_directories(test_physics_adapters PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR})
+    add_test(NAME physics_adapters COMMAND test_physics_adapters)
+endif()
+
 add_executable(test_lights test_lights.cpp)
 
 target_link_libraries(test_lights PRIVATE grace_render grace_null_render grace_warnings)
