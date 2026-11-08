@@ -31,6 +31,7 @@ option(GRACE_ENABLE_OPENGL      "Build the Linux OpenGL backend"            OFF)
 option(GRACE_ENABLE_PHYSX       "Build the PhysX 3.4 physics backend"       OFF)
 option(GRACE_ENABLE_BULLET      "Build the Bullet physics backend"          OFF)
 option(GRACE_ENABLE_BOX2D       "Build the Box2D physics backend"           OFF)
+option(GRACE_ENABLE_ANGELSCRIPT "Build the AngelScript script backend"      OFF)
 
 # ---------------------------------------------------------------------------
 # Warning set
@@ -139,6 +140,48 @@ add_library(grace_null_physics STATIC
 target_link_libraries(grace_null_physics PUBLIC grace_physics PRIVATE grace_warnings)
 
 # ---------------------------------------------------------------------------
+# grace_script
+#
+# The platform-neutral script-host contract: engine/module/function/context
+# handles and the registration surface. The headers carry no scripting-language
+# types; concrete backends live in their own modules behind the contract
+# (decision 32).
+# ---------------------------------------------------------------------------
+add_library(grace_script STATIC
+    src/script/script_types.cpp)
+target_include_directories(grace_script PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
+target_link_libraries(grace_script PUBLIC grace_core PRIVATE grace_warnings)
+
+# ---------------------------------------------------------------------------
+# grace_null_script
+#
+# Headless script backend: the contract's protocol reference. It records the
+# registration surface and the execution requests and counts protocol
+# violations; it cannot compile or run scripts (it has no language).
+# ---------------------------------------------------------------------------
+add_library(grace_null_script STATIC
+    src/script/null_script_backend.cpp)
+target_link_libraries(grace_null_script PUBLIC grace_script PRIVATE grace_warnings)
+
+# ---------------------------------------------------------------------------
+# grace_angelscript_script
+#
+# The script contract's real implementation (decision 33): the AngelScript
+# adapter, the execution reference. It maps the contract onto the SDK's
+# engine/module/function/context and registration surface.
+# ---------------------------------------------------------------------------
+if(GRACE_ENABLE_ANGELSCRIPT)
+    add_library(grace_angelscript_script STATIC
+        src/script/angelscript_backend.cpp)
+    target_include_directories(grace_angelscript_script SYSTEM PRIVATE
+        ${GRACE_ANGELSCRIPT_DIR}/include)
+    target_link_libraries(grace_angelscript_script PUBLIC grace_script
+        PRIVATE grace_warnings
+        ${GRACE_ANGELSCRIPT_BUILD_DIR}/libangelscript.a)
+endif()
+
+# ---------------------------------------------------------------------------
 # Optional physics adapters (8c)
 #
 # Each adapter maps the contract onto one SDK and lives behind its own
@@ -151,6 +194,11 @@ set(GRACE_BULLET_DIR "" CACHE PATH "Bullet source root (src/ headers)")
 set(GRACE_BULLET_BUILD_DIR "" CACHE PATH "Bullet build output (lib*.a)")
 set(GRACE_BOX2D_DIR "" CACHE PATH "Box2D source root (include/box2d)")
 set(GRACE_BOX2D_BUILD_DIR "" CACHE PATH "Box2D build output (libbox2d.a)")
+
+set(GRACE_ANGELSCRIPT_DIR "" CACHE PATH
+    "AngelScript source root (sdk/angelscript/include/)")
+set(GRACE_ANGELSCRIPT_BUILD_DIR "" CACHE PATH
+    "AngelScript build output (libangelscript.a)")
 
 if(GRACE_ENABLE_PHYSX)
     add_library(grace_physx_physics STATIC

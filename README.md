@@ -124,6 +124,7 @@ Build options:
 | `GRACE_ENABLE_PHYSX` | `OFF` | Build the PhysX 3.4 physics backend from a local SDK clone. |
 | `GRACE_ENABLE_BULLET` | `OFF` | Build the Bullet physics backend from a local SDK clone. |
 | `GRACE_ENABLE_BOX2D` | `OFF` | Build the Box2D physics backend from a local SDK clone. |
+| `GRACE_ENABLE_ANGELSCRIPT` | `OFF` | Build the AngelScript script backend from a local SDK clone. |
 
 ## Dependencies
 
@@ -138,7 +139,7 @@ attribution entries and their licence terms.
 | [NVIDIA PhysX SDK 3.4](https://github.com/NVIDIAGameWorks/PhysX-3.4) | 3-Clause BSD | Physics backend (extra physics: cloth, soft body) | linked when `GRACE_ENABLE_PHYSX=ON` |
 | [Bullet Physics SDK](https://github.com/bulletphysics/bullet3) | zlib | Physics backend | linked when `GRACE_ENABLE_BULLET=ON` |
 | [Box2D](https://github.com/erincatto/box2d) | MIT | 2D physics backend | linked when `GRACE_ENABLE_BOX2D=ON` |
-| AngelScript | zlib | Text scripting host | planned |
+| [AngelScript](https://github.com/anjo76/angelscript) | zlib | Text scripting host | linked when `GRACE_ENABLE_ANGELSCRIPT=ON` |
 | OpenAL Soft | LGPL-2.0-or-later | Audio backend, linked dynamically | planned |
 | FreeType | FreeType License | Font rendering in the UI module | planned |
 

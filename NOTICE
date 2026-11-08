@@ -15,9 +15,11 @@ corresponding backend is actually built.
 ===============================================================================
 
 AngelScript (AngelCode Scripting Library)
+  https://github.com/anjo76/angelscript
   Copyright (c) 2003-2026 Andreas Jonsson
   Licence: zlib
-  Status: planned, as the text-scripting host.
+  Status: linked when GRACE_ENABLE_ANGELSCRIPT is enabled, as the
+  text-scripting host.
 
 ===============================================================================
 
