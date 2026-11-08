@@ -89,8 +89,10 @@ struct DofConfig
 /// volume existed: a frame that enables nothing must not change (the same rule
 /// the post chain follows). When on, one pass per frame writes the scene's
 /// light into every layer of a volume, so the volume holds the light the
-/// surfaces are lit by. Nothing reads it back yet — propagation is the next
-/// increment — so enabling this alone does not change a rendered frame.
+/// surfaces are lit by; one propagation step averages the six face neighbours
+/// per frame. The volume stays off the frame until compose is on: the compose
+/// flag is the fourth increment's switch, and with it off the volume is
+/// still invisible to the lighting pass.
 struct VolumeConfig
 {
     bool enabled = false;                  ///< off by default
@@ -106,6 +108,14 @@ struct VolumeConfig
     /// compares against; 1 = the propagation itself, the default this increment
     /// commits to.
     std::uint32_t iterations = 1;
+    /// Compose the volume into the frame (milestone 7, fourth increment):
+    /// when on, the lighting pass samples the volume at the fragment's world
+    /// position and adds albedo * radiance to the ambient term (decision
+    /// 17(d)). Off by default, so a frame that does not ask for it is
+    /// unchanged. Requires the volume to be enabled: the compose flag is a
+    /// request to change the frame, and the volume must be filled first —
+    /// validate() rejects a compose flag on a disabled volume.
+    bool compose = false;
 
     void validate() const;
 };
@@ -277,6 +287,10 @@ private:
     // objects and the pointers swap at the end of every iteration.
     std::unique_ptr<ShaderProgram> m_volumePropagate;
     TextureView* m_light_volume_b = nullptr;
+    // Fourth increment (milestone 7, the compose): the frame's light volume as
+    // plain data, handed to the lighting pass through the submission. The
+    // renderer owns the volume; the submission borrows the pointer.
+    LightVolume m_frame_volume;
     std::unique_ptr<ShaderProgram> m_postVolumetric;  ///< 6f volumetric in-scattering pass
     RenderTarget* m_vol = nullptr;  ///< 6f linear in-scattering buffer: Rgba16F, full framebuffer size
     std::unique_ptr<ShaderProgram> m_gbuffer_program;

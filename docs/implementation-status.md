@@ -33,7 +33,7 @@ The `.docx` files in this directory are generated from the `.md` sources with
 | 6f | Volumetric lights as an analytic region — a sphere around a point light, a cone around a spot light, through a `volumeDensity` property defaulting to off (decision 25) | Done |
 | 6g | SSAO with selective temporal filtering (SSAO-STF). **Deferred, not started** — needs motion-vector reprojection, which needs motion this tree does not have (decision 18) | Planned |
 | 6 | Post-processing: HDR, bloom, filmic tonemap (6a), ambient term (6b), SSAO (6c), DOF + morphological AA (6d) — all documented in section 3.2 except SSAO-STF temporal filtering, which remains deferred to its own increment | Done (SSAO-STF deferred) |
-| 7 | Global illumination by light volume propagation. Three increments done and the fourth begun: the 3D texture exists in the contract and in both backends, a pass renders into one layer of a volume without touching the others, the scene deposits its light into every layer, and one propagation step averages the six face neighbours, measured cell by cell. **Still blocked:** the volume is not yet composed into the frame, so no pixel changes yet (decision 30) | In progress |
+| 7 | Global illumination by light volume propagation. Four increments, all measured: the 3D texture exists in the contract and in both backends, a pass renders into one layer of a volume without touching the others, the scene deposits its light into every layer, one propagation step averages the six face neighbours, and the volume composes into the frame — the ambient term of both paths (decision 30, decision 17(d)) | Done |
 | 8 | Physics contract and the first backend | Planned |
 | 9 | Script host: AngelScript integration and type registration | Planned |
 | 10 | Visual scripting: block registry and graph evaluation | Planned |
@@ -112,6 +112,7 @@ All results below are real runs, on the tree at the stated commit.
 | 2026-11-07 | same, milestone 7 third increment | The scene deposits its light into the volume. `test_volume_inject` reads the volume back and compares against the surface shader's attenuation: texel(0,0) of layer 0 measures 5.77344 against 5.77600 predicted (one half-float quantum), layer 3 measures 0.37793 against 0.37793, and a bright light outside its radius deposits exactly 0. OpenGL on: 29/29 Debug and Release, 14/14 labelled opengl; the new suite reports 26 checks, 0 failures. No existing count decreased; `test_opengl_render` stays at 193. The contract grew 36 -> 37 pure virtual methods (`releaseTexture3D`, the gap the first increment left), the shader library 24 -> 25 and `ShaderProgramId` 16 -> 17; `gl_loader.cpp` stays at 65, since no new GL entry point is loaded. The test total was first written as 27/27, which counted the suites and not the three command-line tests registered alongside them. Off by default: a frame that asks for no volume creates none and changes no pixel |
 | 2026-11-07 | same, milestone 7 fourth increment | One propagation step averages the six face neighbours, measured cell by cell against the average the injection wrote: the volume is 4x4x4 and every cell is checked, and the far corner cell (which the injection filled with 0.08162) holds 0.10120 after the step — the light spread into the cells the injection did not light. OpenGL on: the new suite reports 88 checks, 0 failures. No existing count decreased; `test_opengl_render` stays at 193. The shader library went from 25 to 26 entries and `ShaderProgramId` from 17 to 18, both measured with the methods the earlier entries declare; the render contract stays at 37 pure virtual methods and `gl_loader.cpp` stays at 65 — no new GL entry point, because the propagation renders through the layer target the second increment added |
 | 2026-11-07 | same, milestone 7 first increment | 3D texture in the contract, both backends and the null backend. OpenGL off: 15/15 Debug; OpenGL on: 28/28 Debug and Release; -L opengl 13/13; docs_structure 17 checks, 0 failures; texture3d 23 checks, 0 failures with no GL context; opengl_render 125 -> 157 checks; zero warnings under -Werror. Measured on the driver before the code was written: a Depth24Stencil8 volume is refused by glTexImage3D with GL_INVALID_OPERATION, and an R8 3x3 slice round-trips with row alignment 1 and not with 4 |
+| 2026-11-08 | same, milestone 7 fourth increment | The volume composes into the frame: the lighting pass samples the volume at the fragment's world position and adds the sampled radiance to the ambient term (decision 17(d)), in both paths. One point light inside the volume, one ground quad, the centre pixel measured with compose on and off: forward 149,149,149,255 (off) and 205,205,205,255 (on); deferred 149,149,149,255 (off) and 205,205,205,255 (on) — the two paths agree, which is what decision 17(d) demands. The compose responds to exposure (2.0 gives 231,231,231,255) and to the legacy path (post off: 51,51,51,255 off, 124,124,124,255 on). `test_volume_compose` reports 19 checks, 0 failures: the numeric half on OpenGL, the structural half on the null backend (a compose flag on a disabled volume is rejected, the submit record carries volume=1 when compose is on, and the volume passes run before the lighting submit). OpenGL off: 15/15 Debug; OpenGL on: 31/31 Debug and Release; `-L opengl` 16/16; docs_structure 17 checks, 0 failures; zero warnings under -Werror. No existing count decreased; the shader library stays at 26 entries and ShaderProgramId at 18, the contract stays at 37 pure virtual methods, and gl_loader.cpp stays at 65 — no new GL entry point, because the compose adds no new GL entry point. The test files go from 27 to 28 |
 
 ### Defects found by the tests, and fixed
 
@@ -910,6 +911,26 @@ grep -rn 'GLuint\|GLenum\|SDL_\|Window' include/grace/render/render_backend.hpp 
     65 functions: this increment loads no new
     GL entry point, because the layer target it renders through was loaded by
     the second one.
+    The fourth increment's second half composes the volume into the frame.
+    `VolumeConfig` gained a `compose` flag (off by default), the submission
+    carries the volume as plain data — a `LightVolume` struct with the texture,
+    the origin, the extent and the resolution, the ShadowMap pattern, so the
+    backend never reaches into the renderer — and the frame order inverts when
+    compose is on: the volume passes run before the lighting pass, because the
+    lighting pass samples the volume the volume passes filled. The compose
+    sits in the lighting pass in both paths (decision 17(d)): the shader
+    samples the volume at the fragment's world position and adds the sampled
+    radiance to the ambient term.
+    The first measured compose ran the forward path and left the deferred path
+    dark, and the reason is a defect worth recording. The deferred shader
+    declares `uniform sampler3D volumeTex`, but only the forward path set the
+    sampler's unit, so with compose off the sampler defaulted to unit 0, which
+    already carried a sampler2D. Two samplers of different types on one unit
+    is GL_INVALID_OPERATION on the draw, and the entire draw is silently
+    ignored, so every deferred lighting read came back with the clear colour
+    and the compose looked like it did nothing. The fix sets the sampler's
+    unit in both branches, on or off, and the same rule is now written in both
+    paths: the sampler is set every frame.
 
 ## Verification commands
 

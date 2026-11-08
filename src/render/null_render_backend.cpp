@@ -249,11 +249,13 @@ void NullRenderBackend::submit(const DrawSubmission& submission)
 {
     submission.validate();  // same rejection behaviour as a real backend
     char buffer[96];
-    std::snprintf(buffer, sizeof(buffer), "submit(lights=%u,sun=%d,shadow=%d,pointShadows=%d)",
+    std::snprintf(buffer, sizeof(buffer),
+                  "submit(lights=%u,sun=%d,shadow=%d,pointShadows=%d,volume=%d)",
                   static_cast<unsigned int>(submission.lights.size()),
                   submission.sun.has_value() ? 1 : 0,
                   submission.shadow != nullptr ? 1 : 0,
-                  submission.pointShadows != nullptr ? 1 : 0);
+                  submission.pointShadows != nullptr ? 1 : 0,
+                  submission.volume != nullptr ? 1 : 0);
     record(std::string(buffer));
     if (submission.shadowLightRequests > kMaxShadowCastingPointLights)
         ++m_violations;  // documented: over-budget request, excess lights unshadowed

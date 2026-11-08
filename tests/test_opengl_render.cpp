@@ -117,7 +117,7 @@ int main()
         "clear(1,2,3,4)", "clear(1,2,3,4)", "clear(1,2,3,4)",
         "queueReadback(1,1)", "clear(1,2,3,4)", "readback",
         "createShaderProgram(FlatUnlit)", "createGpuMesh", "upload", "draw", "use", "drawIndexed",
-        "submit(lights=1,sun=0,shadow=0,pointShadows=0)",
+        "submit(lights=1,sun=0,shadow=0,pointShadows=0,volume=0)",
         "createRenderTarget(64x64,color=0,depth=1)",
         "setCamera",
         "createRenderTarget(32x32,color=1,depth=1)",
@@ -178,12 +178,12 @@ int main()
         "createRenderTarget(64x64,color=0,depth=1)", "beginRenderPass(64x64)", "clear(1,2,3,4)",
         "use", "setUniform(lightView)", "setUniform(nearRange)", "setUniform(farRange)",
         "setUniform(hemisphere)", "setUniform(model)", "drawIndexed", "endRenderPass",
-        "submit(lights=1,sun=0,shadow=0,pointShadows=1)",
-        "submit(lights=1,sun=0,shadow=0,pointShadows=1)",
+        "submit(lights=1,sun=0,shadow=0,pointShadows=1,volume=0)",
+        "submit(lights=1,sun=0,shadow=0,pointShadows=1,volume=0)",
         "releaseRenderTarget", "releaseRenderTarget",
         "shutdown",
         "draw", "readback", "clear(1,2,3,4)",
-        "submit(lights=1,sun=0,shadow=0,pointShadows=0)"};  // post-shutdown: violation
+        "submit(lights=1,sun=0,shadow=0,pointShadows=0,volume=0)"};  // post-shutdown: violation
     {   // Report the first divergence instead of comparing two vectors
         // wholesale: equal-or-not says nothing about which event differs.
         const std::vector<std::string>& actual = null_backend.events();

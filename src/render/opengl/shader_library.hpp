@@ -95,6 +95,16 @@ uniform float pointShadowBias[2];  // [0,1] linear depth units
 uniform float pointFilterTolerance;
 uniform float pointShadowMapSize;
 uniform int pointLightSlot[4];
+
+// Light volume compose (milestone 7, fourth increment): the volume, sampled
+// at the fragment's world position, adds albedo * radiance to the ambient
+// term (decision 17(d)). hasVolume = 0 keeps the frame unchanged (the compose
+// flag is off by default).
+uniform int hasVolume;
+uniform sampler3D volumeTex;
+uniform vec3 volumeOrigin;
+uniform vec3 volumeExtent;
+
 out vec4 fragment;
 
 float rangeAtten(float intensity, float range, float d)
@@ -205,6 +215,18 @@ void main()
 {
     vec3 N = normalize(vNormal);
     vec3 V = normalize(cameraPos - vWorldPos);
+    // Light volume compose (decision 17(d)): albedo * radiance, sampled at the
+    // fragment's world position. The volume covers [origin, origin+extent];
+    // a fragment outside it is unchanged.
+    vec3 volumeRadiance = vec3(0.0);
+    if (hasVolume == 1)
+    {
+        vec3 vc = (vWorldPos - volumeOrigin) / volumeExtent;
+        if (all(greaterThanEqual(vc, vec3(-0.001))) &&
+            all(lessThanEqual(vc, vec3(1.001))))
+            volumeRadiance = texture(volumeTex, vc).rgb;
+    }
+    vec3 ambientTerm = vec3(ambient) + volumeRadiance;
 
     // Cascade selection (documented): first cascade whose far split exceeds
     // the fragment's view depth; clamped to the last cascade.
@@ -222,8 +244,8 @@ void main()
         return;
     }
 
-    vec3 result = emissive + albedo * vec3(ambient);
-    outAmbient = vec4(albedo * vec3(ambient), 1.0);
+    vec3 result = emissive + albedo * ambientTerm;
+    outAmbient = vec4(albedo * ambientTerm, 1.0);
     if (hasSun == 1)
     {
         vec3 L = normalize(-sunDirection);
@@ -448,6 +470,15 @@ uniform float lightIntensity[16];
 uniform float lightRange[16];
 uniform float lightInner[16];
 uniform float lightOuter[16];
+
+// Light volume compose (milestone 7, fourth increment): the volume, sampled
+// at the fragment's world position, adds albedo * radiance to the ambient
+// term (decision 17(d)). hasVolume = 0 keeps the frame unchanged.
+uniform int hasVolume;
+uniform sampler3D volumeTex;
+uniform vec3 volumeOrigin;
+uniform vec3 volumeExtent;
+
 out vec4 fragment;
 
 float rangeAtten(float intensity, float range, float d)
@@ -555,6 +586,19 @@ void main()
 
     float vViewDepth = -(invView * world).z;
 
+    // Light volume compose (decision 17(d)): albedo * radiance, sampled at the
+    // fragment's world position. The volume covers [origin, origin+extent];
+    // a fragment outside it is unchanged.
+    vec3 volumeRadiance = vec3(0.0);
+    if (hasVolume == 1)
+    {
+        vec3 vc = (world.xyz - volumeOrigin) / volumeExtent;
+        if (all(greaterThanEqual(vc, vec3(-0.001))) &&
+            all(lessThanEqual(vc, vec3(1.001))))
+            volumeRadiance = texture(volumeTex, vc).rgb;
+    }
+    vec3 ambientTerm = vec3(ambient) + volumeRadiance;
+
     // Cascade selection (same rule as forward): first cascade whose far split
     // exceeds the view depth, clamped to the last.
     int idx = 0;
@@ -567,8 +611,8 @@ void main()
         }
     }
 
-    vec3 result = albedo * vec3(ambient);
-    outAmbient = vec4(albedo * vec3(ambient), 1.0);
+    vec3 result = albedo * ambientTerm;
+    outAmbient = vec4(albedo * ambientTerm, 1.0);
     if (hasSun == 1)
     {
         vec3 L = normalize(-sunDirection);

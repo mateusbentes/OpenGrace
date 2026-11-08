@@ -8,6 +8,7 @@
 #include "grace/render/light.hpp"
 #include "grace/render/material.hpp"
 #include "grace/render/mesh.hpp"
+#include "grace/render/render_target.hpp"
 
 namespace grace::render {
 
@@ -19,6 +20,20 @@ struct PointShadowMaps;  // defined in grace/render/shadow.hpp
 /// (docs/grace-architecture.md section 3.3). Enforced exactly; the sun is not
 /// counted against it.
 inline constexpr std::uint32_t kMaxDynamicLightsPerObject = 4;
+
+/// The frame's light volume, as plain data (milestone 7, fourth increment:
+/// the compose). The renderer owns the volume and hands it to the lighting
+/// pass the same way the shadow maps are handed over: plain data with a
+/// backend-owned handle, no graphics-API types. The lighting pass samples
+/// the volume at the fragment's world position and adds albedo * radiance
+/// to the ambient term (decision 17(d)).
+struct LightVolume
+{
+    TextureView* texture = nullptr;  ///< backend-owned volume texture handle
+    core::vec3 origin;               ///< world-space minimum corner
+    core::vec3 extent;               ///< world-space size, each component > 0
+    std::uint32_t resolution = 0;    ///< texels along each axis, > 0
+};
 
 /// One draw submission: a mesh, a transform, surface parameters, an optional
 /// sun (directional light, handled separately) and the dynamic lights.
@@ -39,6 +54,12 @@ struct DrawSubmission
     float ambient = 0.0f;
     const ShadowMap* shadow = nullptr;           ///< optional cascaded sun shadow map (4c)
     const PointShadowMaps* pointShadows = nullptr;  ///< optional paraboloid maps (4d)
+    /// Optional light volume (milestone 7, fourth increment): when set, the
+    /// lighting pass adds albedo * radiance to the ambient term (decision
+    /// 17(d)). Filled by the renderer from the frame's light volume; the
+    /// compose flag is off by default, so a frame that does not ask for it
+    /// is unchanged.
+    const LightVolume* volume = nullptr;
     /// How many leading point lights in `lights` request a shadow map. More
     /// than kMaxShadowCastingPointLights is not rejected: the excess lights
     /// are lit WITHOUT a shadow map (documented), and submit() counts a

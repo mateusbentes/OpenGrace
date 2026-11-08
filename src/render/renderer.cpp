@@ -71,6 +71,9 @@ void VolumeConfig::validate() const
         throw std::invalid_argument("volume config: resolution must be > 0");
     if (!(extent.x > 0.0f) || !(extent.y > 0.0f) || !(extent.z > 0.0f))
         throw std::invalid_argument("volume config: every extent component must be > 0");
+    if (compose && !enabled)
+        throw std::invalid_argument(
+            "volume config: compose requires the volume to be enabled");
 }
 
 void RendererConfig::validate() const
@@ -165,18 +168,37 @@ void Renderer::endFrame()
 {
     if (!m_frame_open)
         throw std::logic_error("Renderer::endFrame: no frame open");
+    // Fourth increment (milestone 7), the compose: the volume must be filled
+    // BEFORE the lighting pass samples it, so the injection and propagation
+    // run first. The forward path opens the lighting pass in beginFrame, which
+    // the volume passes must not draw over — the forward path reopens the
+    // lighting pass in renderForwardFrame, and the deferred path opens its
+    // passes in renderDeferredFrame. The volume passes run with the depth test
+    // off and restore it.
+    const bool compose = m_config.volume.enabled && m_config.volume.compose;
+    if (compose)
+    {
+        if (m_config.path != RenderPath::Deferred)
+            m_backend.endRenderPass();  // close the lighting pass begun in beginFrame
+        if (m_config.volume.enabled)
+            runVolumeInjection();
+        if (m_config.volume.enabled && m_config.volume.iterations > 0)
+            runVolumePropagation();
+    }
     if (m_config.path == RenderPath::Deferred)
         renderDeferredFrame();
     else
         renderForwardFrame();
-    // Volume injection (milestone 7, third increment): after lighting, because
-    // it consumes the frame's light list, and before the post chain, which
-    // reads the scene depth this pass does not touch. Off by default, so a
-    // frame that does not ask for it is unchanged.
-    if (m_config.volume.enabled)
-        runVolumeInjection();
-    if (m_config.volume.enabled && m_config.volume.iterations > 0)
-        runVolumePropagation();
+    // Volume injection (milestone 7, third increment): when compose is off,
+    // the volume passes run after lighting, as before the fourth increment —
+    // the same order the third increment's tests verify.
+    if (!compose)
+    {
+        if (m_config.volume.enabled)
+            runVolumeInjection();
+        if (m_config.volume.enabled && m_config.volume.iterations > 0)
+            runVolumePropagation();
+    }
     if (m_config.post.enabled)
         runPostChain();  // after lighting, before frame completion (H4)
     m_backend.endRenderPass();
@@ -853,7 +875,11 @@ void Renderer::renderForwardFrame()
     // on the lighting target — the HDR target with the chain on, the default
     // framebuffer otherwise (6e fix: exposed when the chain became the
     // default; with post off this is the same binding as before).
-    if (m_shadow_map.cascadeCount > 0 || !m_point_shadow_maps.entries.empty())
+    // Fourth increment: the volume passes run before lighting and end on the
+    // last layer target, so the lighting pass must also be reopened when the
+    // volume ran this frame.
+    if (m_config.volume.compose || m_shadow_map.cascadeCount > 0 ||
+        !m_point_shadow_maps.entries.empty())
         m_backend.beginRenderPass(lightingTarget());
     for (DrawSubmission& submission : m_pending)
     {
@@ -864,6 +890,18 @@ void Renderer::renderForwardFrame()
             submission.shadow = &m_shadow_map;
         if (!m_point_shadow_maps.entries.empty())
             submission.pointShadows = &m_point_shadow_maps;
+        if (m_config.volume.enabled && m_config.volume.compose)
+        {
+            // Fourth increment: the volume was filled before lighting ran
+            // (endFrame fills it first), so the frame's light volume is the
+            // last one written. Handed over as plain data, the same way the
+            // shadow maps are.
+            m_frame_volume.texture = m_light_volume;
+            m_frame_volume.origin = m_config.volume.origin;
+            m_frame_volume.extent = m_config.volume.extent;
+            m_frame_volume.resolution = m_config.volume.resolution;
+            submission.volume = &m_frame_volume;
+        }
         m_backend.submit(submission);
     }
 }
@@ -946,6 +984,14 @@ void Renderer::renderDeferredFrame()
         m_backend.bindTexture(m_backend.renderTargetTexture(entry.back, kDepthAttachment),
                               8u + 2u * static_cast<std::uint32_t>(k));
     }
+    // Fourth increment (the compose): the light volume, sampled at the
+    // fragment's world position. Bound after the point shadows, which use
+    // units 7..8; the volume takes unit 9 (the first free unit).
+    const bool compose = m_config.volume.enabled && m_config.volume.compose;
+    if (compose)
+    {
+        m_backend.bindTexture3D(m_light_volume, 9u);
+    }
 
     const core::mat4 invView = core::inverseAffine(view);
     const core::mat4 invProj = core::perspectiveInverse(m_config.camera.fovYRad,
@@ -956,6 +1002,16 @@ void Renderer::renderDeferredFrame()
     m_deferred_program->setUniform("gbufAlbedo", 0);
     m_deferred_program->setUniform("gbufNormal", 1);
     m_deferred_program->setUniform("gbufDepth", 2);
+    if (compose)
+    {
+        m_deferred_program->setUniform("volumeOrigin", m_config.volume.origin);
+        m_deferred_program->setUniform("volumeExtent", m_config.volume.extent);
+    }
+    m_deferred_program->setUniform("volumeTex", 9);
+    // hasVolume is set in BOTH branches every frame, the same rule the forward
+    // path follows: a stale uniform from a previous config would otherwise be
+    // honoured, and an off compose would depend on the GLSL default.
+    m_deferred_program->setUniform("hasVolume", compose ? 1 : 0);
     m_deferred_program->setUniform("invProj", invProj);
     m_deferred_program->setUniform("invView", invView);
     m_deferred_program->setUniform("cameraPos", m_config.camera.eye);

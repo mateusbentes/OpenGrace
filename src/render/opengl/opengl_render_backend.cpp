@@ -1036,6 +1036,27 @@ void OpenGLRenderBackend::submitImpl(const DrawSubmission& submission)
         program.setUniform("pointShadowCount", 0);
     }
 
+    // Light volume compose (milestone 7, fourth increment): the volume, sampled
+    // at the fragment's world position. Texture unit 9 (the first free unit:
+    // the cascades use 0..3, the point shadows 4..7). hasVolume = 0 keeps the
+    // frame unchanged (the compose flag is off by default). The sampler unit
+    // is set in BOTH branches: the GLSL default is unit 0, and a sampler3D
+    // pointing at a unit that already carries a sampler2D makes the draw
+    // invalid even when hasVolume = 0 keeps the sampling code path out.
+    if (submission.volume != nullptr && submission.volume->texture != nullptr)
+    {
+        program.setUniform("hasVolume", 1);
+        bindTexture3D(submission.volume->texture, 9u);
+        program.setUniform("volumeTex", 9);
+        program.setUniform("volumeOrigin", submission.volume->origin);
+        program.setUniform("volumeExtent", submission.volume->extent);
+    }
+    else
+    {
+        program.setUniform("hasVolume", 0);
+        program.setUniform("volumeTex", 9);
+    }
+
     const int light_count = static_cast<int>(submission.lights.size());
     program.setUniform("lightCount", light_count);
     for (int i = 0; i < light_count; ++i)

@@ -50,6 +50,17 @@ void DrawSubmission::validate(std::uint32_t maxDynamicLights) const
                 throw std::invalid_argument("draw submission: point shadow entry without maps");
         }
     }
+    if (volume != nullptr)
+    {
+        if (volume->texture == nullptr)
+            throw std::invalid_argument("draw submission: light volume without a texture");
+        if (volume->resolution == 0)
+            throw std::invalid_argument("draw submission: light volume resolution must be > 0");
+        if (!(volume->extent.x > 0.0f) || !(volume->extent.y > 0.0f) ||
+            !(volume->extent.z > 0.0f))
+            throw std::invalid_argument(
+                "draw submission: light volume extent components must be > 0");
+    }
 }
 
 }  // namespace grace::render

@@ -128,7 +128,7 @@ int main()
             "upload",
             "beginRenderPass(128x96)",
             "clear(0,0,0,255)",
-            "submit(lights=0,sun=0,shadow=0,pointShadows=0)",
+            "submit(lights=0,sun=0,shadow=0,pointShadows=0,volume=0)",
             "endRenderPass",
             "setDepthTestEnabled(0)",
             "beginRenderPass(128x96)",
