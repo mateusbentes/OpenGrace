@@ -1,0 +1,31 @@
+[submodule "physx-3.4"]
+	path = physx-3.4
+	url = https://github.com/NVIDIAGameWorks/PhysX-3.4
+	ignore = dirty
+[submodule "bullet3"]
+	path = bullet3
+	url = https://github.com/bulletphysics/bullet3
+[submodule "box2d"]
+	path = box2d
+	url = https://github.com/erincatto/box2d
+[submodule "angelscript"]
+	path = angelscript
+	url = https://github.com/anjo76/angelscript
+[submodule "sdl2"]
+	path = sdl2
+	url = https://github.com/libsdl-org/SDL
+[submodule "openal-soft"]
+	path = openal-soft
+	url = https://github.com/kcat/openal-soft
+[submodule "freetype"]
+	path = freetype
+	url = https://github.com/freetype/freetype
+[submodule "libogg"]
+	path = libogg
+	url = https://github.com/xiph/ogg
+[submodule "libvorbis"]
+	path = libvorbis
+	url = https://github.com/xiph/vorbis
+[submodule "libtheora"]
+	path = libtheora
+	url = https://github.com/xiph/theora

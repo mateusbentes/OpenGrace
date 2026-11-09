@@ -40,11 +40,6 @@ compile_commands.json
 *.d
 
 # Third-party SDKs, cloned locally and never committed
-/physx-3.4/
-/bullet3/
-/box2d/
-/angelscript/
-/sdl2/
 /steamworks-sdk/
 
 # Local research and proprietary data
