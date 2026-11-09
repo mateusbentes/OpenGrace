@@ -61,6 +61,11 @@ add_test(NAME game COMMAND test_game)
 add_executable(test_gui test_gui.cpp)
 target_link_libraries(test_gui PRIVATE grace_gui grace_warnings)
 target_include_directories(test_gui PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_executable(test_video test_video.cpp)
+target_link_libraries(test_video PRIVATE grace_video grace_warnings)
+target_include_directories(test_video PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME video COMMAND test_video)
+
 add_test(NAME gui COMMAND test_gui)
 
 add_executable(test_motion test_motion.cpp)
@@ -94,6 +99,15 @@ if(GRACE_ENABLE_FREETYPE)
         ${CMAKE_CURRENT_SOURCE_DIR})
     add_test(NAME gui_adapters COMMAND test_gui_adapters)
     set_tests_properties(gui_adapters PROPERTIES SKIP_RETURN_CODE 77)
+endif()
+
+if(GRACE_ENABLE_THEORA)
+    add_executable(test_video_adapters test_video_adapters.cpp)
+    target_link_libraries(test_video_adapters PRIVATE
+        grace_theora_video grace_warnings)
+    target_include_directories(test_video_adapters PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR})
+    add_test(NAME video_adapters COMMAND test_video_adapters)
 endif()
 
 # Runtime tests for the real backends (8c). Each adapter target is only

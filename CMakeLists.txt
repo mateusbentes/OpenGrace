@@ -34,6 +34,7 @@ option(GRACE_ENABLE_BOX2D       "Build the Box2D physics backend"          OFF)
 option(GRACE_ENABLE_ANGELSCRIPT "Build the AngelScript script backend"     OFF)
 option(GRACE_ENABLE_OPENAL      "Build the OpenAL Soft audio backend"      OFF)
 option(GRACE_ENABLE_FREETYPE    "Build the FreeType GUI font adapter"     OFF)
+option(GRACE_ENABLE_THEORA      "Build the Theora video decode adapter"    OFF)
 
 # ---------------------------------------------------------------------------
 # Warning set
@@ -519,6 +520,45 @@ add_library(grace_game STATIC
 target_include_directories(grace_game PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
 target_link_libraries(grace_game PUBLIC grace_core PRIVATE grace_warnings)
+# ---------------------------------------------------------------------------
+# grace_video
+#
+# The video module (docs/grace-architecture.md section 2's module table):
+# the playback service. The contract is the frame stepper; the null
+# backend is the deterministic reference; the Theora decode layer is
+# built only when its SDK option is on.
+# ---------------------------------------------------------------------------
+add_library(grace_video STATIC
+    src/video/video_types.cpp
+    src/video/video_decode.cpp
+    src/video/null_video_backend.cpp)
+target_include_directories(grace_video PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
+target_link_libraries(grace_video PUBLIC grace_core PRIVATE grace_warnings)
+
+if(GRACE_ENABLE_THEORA)
+    find_package(PkgConfig QUIET)
+    if(PKG_CONFIG_FOUND)
+        pkg_check_modules(THEORA QUIET theoradec)
+    endif()
+    if(NOT THEORA_FOUND)
+        message(FATAL_ERROR
+            "GRACE_ENABLE_THEORA=ON requires Theora: pkg-config theora "
+            "did not locate it. Install libtheora-dev or configure with "
+            "-DGRACE_ENABLE_THEORA=OFF.")
+    endif()
+    add_library(grace_theora_video STATIC
+        src/video/video_decode_theora.cpp)
+    target_include_directories(grace_theora_video PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
+    target_include_directories(grace_theora_video SYSTEM PRIVATE
+        ${THEORA_INCLUDE_DIRS})
+    target_link_libraries(grace_theora_video PUBLIC grace_video
+        PRIVATE grace_warnings ${THEORA_LIBRARIES})
+    target_link_directories(grace_theora_video PRIVATE
+        ${THEORA_LIBRARY_DIRS})
+endif()
+
 # ---------------------------------------------------------------------------
 # owdtool
 #

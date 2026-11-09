@@ -43,7 +43,7 @@ The `.docx` files in this directory are generated from the `.md` sources with
 | 13 | Audio: 2D/3D playback, streaming, reverb -- the contract (13a), the deterministic null backend (13b) and the OpenAL Soft adapter with the WAV and Ogg Vorbis decoders (13c) (decision 37) | Done |
 | 14 | UI: retained controls, the UTF-8 event path and the font contract (14a), the deterministic null backend (14b) and the FreeType adapter behind GRACE_ENABLE_FREETYPE (14c) (decision 39) | Done |
 | 15 | AI and gameplay services: the agent behaviours (idle, patrol, seek, flee) with the deterministic steering, the timers, the named properties, the event queue and the seeded random source (15a, 15b) (decision 40) | Done |
-
+| 16 | Video: the playback service -- the contract (16a), the deterministic null backend (16b) and the Ogg Theora decode layer behind GRACE_ENABLE_THEORA (16c) (decision 41) | Done |
 ---
 
 ## Module status
@@ -61,7 +61,7 @@ The `.docx` files in this directory are generated from the `.md` sources with
 | motion | Partial | Skeletal clips, the deterministic sampler with lerp/slerp and FK, the blendshapes, the events, the state-machine layer with the cross-fade and the look-at and foot placement controllers (decision 38). |
 | gui | Partial | The retained control tree, the hit test and focus, the event dispatch with the UTF-8 text path and the font contract (14a); the deterministic null backend (14b) and the FreeType adapter behind GRACE_ENABLE_FREETYPE (14c) (decision 39). |
 | ai, game | Partial | The agent behaviours (idle, patrol, seek, flee) with the deterministic steering and the gameplay-level services: timers, named properties, the event queue and the seeded random source (decision 40). |
-| video | Not started | |
+| video | Partial | The playback service: the frame-stepper contract (16a), the deterministic null backend (16b) and the Ogg Theora decode layer behind GRACE_ENABLE_THEORA (16c) (decision 41). |
 
 ---
 
@@ -128,6 +128,7 @@ All results below are real runs, on the tree at the stated commit.
 | 2026-11-09 | same, milestone 11 | The motion module (decision 38): the data types (11a: skeletons, clips, tracks, events, blendshapes), the deterministic sampler (11b: the lerp on the positions, the slerp on the rotations, the forward kinematics, the blend, the events in (from, to] with the loop wrap) and the state-machine layer (11c: the trigger and exit-time transitions, the cross-fade from the previous state's pose, the look-at and foot placement controllers). The slerp entered the core math module, where the quaternion header's comment already promised it. Suites: motion 85 checks, 0 failures; the default build 22/22 Debug; zero warnings under -Werror |
 | 2026-11-09 | same, milestone 14 | The GUI module (decision 39): the retained control tree with the hit test, the focus and the event dispatch carrying UTF-8 text (14a), the deterministic null backend with the fixed-metric font backend (14b) and the FreeType adapter behind GRACE_ENABLE_FREETYPE, measured against the system's DejaVu Sans face (14c). The UTF-8 decoder lives in the data layer (the two- to four-byte forms, the replacement code point on an invalid lead). Suites: gui 82 checks, gui_adapters 21 checks, 0 failures; the default build 23/23 Debug, the FreeType build 24 tests; zero warnings under -Werror |
 | 2026-11-09 | same, milestone 15 | The game module (decision 40): the agent behaviours idle, patrol, seek and flee with the deterministic steering (the patrol walks its waypoints in order and wraps, the seek stops at the target, the flee moves away), the timers with the repeating fire and the timer events on the queue, the named properties whose kind is fixed by the first set, the event queue and the xorshift64* random source the application seeds explicitly (a zero seed and an unseeded draw throw). Suites: game 129 checks, 0 failures; the default build 24/24 Debug, the full-SDK build 28/28; zero warnings under -Werror |
+| 2026-11-09 | same, milestone 16 | The video module (decision 41): the playback service as a deterministic frame stepper (the cursor advances by the delta seconds at the video's frame rate scaled by the playback's rate, the loop wraps, the playback stops at the last frame), the packed Yuv420 payload the application uploads, and the Ogg Theora decode layer behind GRACE_ENABLE_THEORA, measured against a real file (16 frames, 64x64, 16 fps). Suites: video 66 checks, video_adapters 11 checks, 0 failures; the default build 25/25 Debug, the Theora build 26/26, the full-SDK build 30/30; zero warnings under -Werror |
 
 ## Defects found by the tests, and fixed
 
@@ -1193,6 +1194,24 @@ grep -rn 'GLuint\|GLenum\|SDL_\|Window' include/grace/render/render_backend.hpp 
     module names a navigation mesh, a path finder or a scheduler:
     the documented material names none, and the module stays the
     deterministic core the higher layers build on.
+
+41. **What does the "Playback service" cover, and which codec
+    carries it?** The module table names the Video module's scope
+    in one phrase, playback service, and the documented capability
+    list says nothing about video at all: section 3 has no video
+    entry, and the vendor's own material (the engine ran Bink,
+    a proprietary codec) names none this project can use. This
+    project reads the module as the scene module's pattern once
+    again: a playback is a deterministic frame stepper over a
+    decoded frame payload the application uploads, and the codec
+    question lives entirely in the data layer. The open codec is
+    Ogg Theora, the same ecosystem as the audio module's OpenAL
+    Soft and Ogg Vorbis; the decode layer behind
+    `GRACE_ENABLE_THEORA` is the execution reference, measured
+    against a real file, and the backend never sees a codec. The
+    packed payload is planar YCbCr, the format the decoder
+    produces; the RGB conversion is the renderer's sampling
+    concern, not a backend call.
 
 ## Verification commands
 
