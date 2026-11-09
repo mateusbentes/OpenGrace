@@ -33,6 +33,7 @@ option(GRACE_ENABLE_BULLET      "Build the Bullet physics backend"          OFF)
 option(GRACE_ENABLE_BOX2D       "Build the Box2D physics backend"          OFF)
 option(GRACE_ENABLE_ANGELSCRIPT "Build the AngelScript script backend"     OFF)
 option(GRACE_ENABLE_OPENAL      "Build the OpenAL Soft audio backend"      OFF)
+option(GRACE_ENABLE_FREETYPE    "Build the FreeType GUI font adapter"     OFF)
 
 # ---------------------------------------------------------------------------
 # Warning set
@@ -466,6 +467,42 @@ add_library(grace_motion STATIC
 target_include_directories(grace_motion PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
 target_link_libraries(grace_motion PUBLIC grace_core PRIVATE grace_warnings)
+# ---------------------------------------------------------------------------
+# grace_gui
+#
+# The GUI module (docs/grace-architecture.md section 3.9): the retained
+# control tree, the hit test and focus, the event dispatch with the UTF-8
+# text path, and the font contract. The null backend is the deterministic
+# reference; the FreeType adapter is built only when its SDK option is on.
+# ---------------------------------------------------------------------------
+add_library(grace_gui STATIC
+    src/gui/gui_types.cpp
+    src/gui/null_gui_backend.cpp)
+target_include_directories(grace_gui PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
+target_link_libraries(grace_gui PUBLIC grace_core PRIVATE grace_warnings)
+if(GRACE_ENABLE_FREETYPE)
+    find_package(PkgConfig QUIET)
+    if(PKG_CONFIG_FOUND)
+        pkg_check_modules(FREETYPE QUIET freetype2)
+    endif()
+    if(NOT FREETYPE_FOUND)
+        message(FATAL_ERROR
+            "GRACE_ENABLE_FREETYPE=ON requires FreeType: pkg-config "
+            "freetype2 did not locate it. Install libfreetype-dev or "
+            "configure with -DGRACE_ENABLE_FREETYPE=OFF.")
+    endif()
+    add_library(grace_freetype_gui STATIC
+        src/gui/freetype_gui_backend.cpp)
+    target_include_directories(grace_freetype_gui PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
+    target_include_directories(grace_freetype_gui SYSTEM PRIVATE
+        ${FREETYPE_INCLUDE_DIRS})
+    target_link_libraries(grace_freetype_gui PUBLIC grace_gui
+        PRIVATE grace_warnings ${FREETYPE_LIBRARIES})
+    target_link_directories(grace_freetype_gui PRIVATE
+        ${FREETYPE_LIBRARY_DIRS})
+endif()
 # ---------------------------------------------------------------------------
 # owdtool
 #

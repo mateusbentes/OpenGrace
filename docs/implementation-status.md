@@ -41,7 +41,7 @@ The `.docx` files in this directory are generated from the `.md` sources with
 | 11 | Animation: skeletal clips, the deterministic sampler (11a, 11b), the state-machine layer with the cross-fade (11c) and the look-at and foot placement controllers (11c) (decision 38); blendshapes in 11a | Done |
 | 12 | Scene management: data-driven entities, selectable spatial partitioning (flat, grid, octree, quadtree), scene queries and LOD (12a), plus the serialisation strategy writing the scene's state into the OWD container (12b) (decision 36) | Done |
 | 13 | Audio: 2D/3D playback, streaming, reverb -- the contract (13a), the deterministic null backend (13b) and the OpenAL Soft adapter with the WAV and Ogg Vorbis decoders (13c) (decision 37) | Done |
-| 14 | UI: controls, FreeType fonts, unicode input | Planned |
+| 14 | UI: retained controls, the UTF-8 event path and the font contract (14a), the deterministic null backend (14b) and the FreeType adapter behind GRACE_ENABLE_FREETYPE (14c) (decision 39) | Done |
 | 15 | AI and gameplay services | Planned |
 
 ---
@@ -59,7 +59,8 @@ The `.docx` files in this directory are generated from the `.md` sources with
 | scene | Partial | Data-driven entities, selectable spatial partitioning (flat, grid, octree, quadtree), scene queries and LOD (12a); the serialisation strategy writes the scene's state into the OWD container (12b) (decision 36). |
 | audio | Partial | The contract (13a), the deterministic null backend (13b) and the OpenAL Soft adapter behind GRACE_ENABLE_OPENAL (13c), with hand-written WAV and libvorbisfile Ogg Vorbis decoders in the data layer. |
 | motion | Partial | Skeletal clips, the deterministic sampler with lerp/slerp and FK, the blendshapes, the events, the state-machine layer with the cross-fade and the look-at and foot placement controllers (decision 38). |
-| video, gui, ai, game | Not started | |
+| gui | Partial | The retained control tree, the hit test and focus, the event dispatch with the UTF-8 text path and the font contract (14a); the deterministic null backend (14b) and the FreeType adapter behind GRACE_ENABLE_FREETYPE (14c) (decision 39). |
+| video, ai, game | Not started | |
 
 ---
 
@@ -124,6 +125,7 @@ All results below are real runs, on the tree at the stated commit.
 | 2026-11-08 | same, milestone 10 | The visual scripting contract (10a), the null backend (10a) and the graph compiler (10b) (decision 34). The contract is the vocabulary and the graph as data: a registry holds block descriptions (an execution block has at least one flow pin; an expression block has none), a graph references registry blocks by name and connects pins by name, and compile() is the only language-dependent operation. The null backend proves the registry and the graph validation; the graph compiler generates a deterministic AngelScript source for the graph, hands it to the script backend through the contract's addScriptSource/build/findFunction surface, and the entry point resolves by declaration and runs the flow chain on execute. The blocks are native functions registered into the script backend through the contract's registerFunction surface, so the visual layer registers through the same surface the application already uses (architecture 4.2). Suites: visual (null backend) 38 checks, visual_adapters 31 checks, 0 failures; the default build 18/18 Debug (SDK-free), the AngelScript build 20/20; zero warnings under -Werror. The adapter library builds behind GRACE_ENABLE_ANGELSCRIPT, so the default build stays SDK-free |
 | 2026-11-09 | same, milestone 13 | The audio contract (13a), the deterministic null backend (13b) and the OpenAL Soft adapter (13c) (decision 37). The contract is the vocabulary and the backend is the mixer: buffers, voices (2D and 3D), per-voice reverb as a property, the listener and the streaming queue. The null backend is the deterministic reference: mix() advances every voice's cursor by the pitch rule, accumulates the mixed samples, and the 3D attenuation is a straight line from 1.0 at the reference distance to 0.0 at the maximum, so the same calls produce the same samples every run. The OpenAL Soft adapter opens the device lazily, queues the streaming chunks as AL buffers on the voice's source, and registers the reverb as a property (no EFX extension). The codecs are in the data layer, not in the backend calls: the WAV decoder is hand-written, the Ogg Vorbis decoder links libvorbisfile with callbacks over a memory span, and both turn file bytes into the PCM data the backend uploads. Suites: audio (null backend) 97 checks, audio_adapters 32 checks, 0 failures; the default build 21/21 Debug (SDK-free), the OpenAL build 22 tests (the adapter skips without a device, 77); zero warnings under -Werror |
 | 2026-11-09 | same, milestone 11 | The motion module (decision 38): the data types (11a: skeletons, clips, tracks, events, blendshapes), the deterministic sampler (11b: the lerp on the positions, the slerp on the rotations, the forward kinematics, the blend, the events in (from, to] with the loop wrap) and the state-machine layer (11c: the trigger and exit-time transitions, the cross-fade from the previous state's pose, the look-at and foot placement controllers). The slerp entered the core math module, where the quaternion header's comment already promised it. Suites: motion 85 checks, 0 failures; the default build 22/22 Debug; zero warnings under -Werror |
+| 2026-11-09 | same, milestone 14 | The GUI module (decision 39): the retained control tree with the hit test, the focus and the event dispatch carrying UTF-8 text (14a), the deterministic null backend with the fixed-metric font backend (14b) and the FreeType adapter behind GRACE_ENABLE_FREETYPE, measured against the system's DejaVu Sans face (14c). The UTF-8 decoder lives in the data layer (the two- to four-byte forms, the replacement code point on an invalid lead). Suites: gui 82 checks, gui_adapters 21 checks, 0 failures; the default build 23/23 Debug, the FreeType build 24 tests; zero warnings under -Werror |
 
 ## Defects found by the tests, and fixed
 
@@ -1157,6 +1159,21 @@ grep -rn 'GLuint\|GLenum\|SDL_\|Window' include/grace/render/render_backend.hpp 
     slerp, which the quaternion header's comment already promised,
     landed in the core math module as the rotation interpolation the
     key tracks and the cross-fade share.
+
+39. **Is the GUI a device contract or a service, and where does the
+    font rasterisation live?** A service with one backend surface for
+    the fonts and none for the tree, the scene module's pattern once
+    again: the retained controls, the hit test, the focus and the
+    event dispatch are plain deterministic data, so the null backend
+    is the protocol reference and no device abstraction exists for
+    the tree. The fonts are the one real-world boundary (the
+    documented architecture names FreeType), so the font backend is
+    a contract of its own: the null implementation's fixed metrics
+    are the deterministic reference, the FreeType adapter behind
+    `GRACE_ENABLE_FREETYPE` is the execution reference, measured
+    against the system's DejaVu Sans. Text is UTF-8 through the
+    whole contract; the decoder lives in the data layer, not in the
+    backend calls.
 
 ## Verification commands
 

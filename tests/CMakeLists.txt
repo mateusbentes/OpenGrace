@@ -53,6 +53,11 @@ add_test(NAME visual COMMAND test_visual)
 
 # Audio (13a): the contract and the null backend, the protocol reference.
 # No audio SDK: the null backend is the deterministic mixer.
+add_executable(test_gui test_gui.cpp)
+target_link_libraries(test_gui PRIVATE grace_gui grace_warnings)
+target_include_directories(test_gui PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME gui COMMAND test_gui)
+
 add_executable(test_motion test_motion.cpp)
 target_link_libraries(test_motion PRIVATE grace_motion grace_warnings)
 target_include_directories(test_motion PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -75,6 +80,15 @@ if(GRACE_ENABLE_OPENAL)
     add_test(NAME audio_adapters COMMAND test_audio_adapters)
     set_tests_properties(audio_adapters PROPERTIES
         SKIP_RETURN_CODE 77)
+endif()
+if(GRACE_ENABLE_FREETYPE)
+    add_executable(test_gui_adapters test_gui_adapters.cpp)
+    target_link_libraries(test_gui_adapters PRIVATE
+        grace_freetype_gui grace_warnings)
+    target_include_directories(test_gui_adapters PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR})
+    add_test(NAME gui_adapters COMMAND test_gui_adapters)
+    set_tests_properties(gui_adapters PROPERTIES SKIP_RETURN_CODE 77)
 endif()
 
 # Runtime tests for the real backends (8c). Each adapter target is only

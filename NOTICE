@@ -91,6 +91,17 @@ OpenAL Soft
   Not vendored. The SDK is installed as a system dependency and linked
   as an external library; no part of it is redistributed from this
   repository.
+
+FreeType
+  https://freetype.org
+  Copyright (c) The FreeType Project (www.freetype.org)
+  Licence: FTL (FreeType Licence, BSD-style) or GPL-2.0-or-later, the
+  project's dual licence
+  Status: linked when GRACE_ENABLE_FREETYPE is enabled, as the GUI
+  module's font rasteriser. Linked dynamically.
+  Not vendored. The library is installed as a system dependency and
+  linked as an external library; no part of it is redistributed from
+  this repository.
 ===============================================================================
 libvorbisfile (with libvorbis and libogg)
   https://github.com/xiph/vorbis
