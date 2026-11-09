@@ -37,6 +37,7 @@ The `.docx` files in this directory are generated from the `.md` sources with
 | 8 | Physics contract and the first backend: the contract (8a), the null backend (8b), and the Bullet, Box2D and PhysX 3.4 adapters (8c) (decision 32) | Done |
 | 9 | Script host: the contract (9a), the null backend (8b) and the AngelScript adapter (9b) (decision 33); serialisation strategy is milestone 12 | Done |
 | 10 | Visual scripting: block registry and graph evaluation — the contract (10a), the null backend (10a) and the adapter (10b) (decision 34) | Done (10a, 10b) |
+| 10c | The OWD resource container: the writer, the reader, the filters, the checksums, the overlay loader (11a) and the `owdtool` command line (11b), implementing the specification the decisions 24 and 26 to 29 shaped (decision 35) | Done |
 | 11 | Animation: skeletal, state machines, blending, events | Planned |
 | 12 | Scene management: entities, spatial partitioning, queries, LOD | Planned |
 | 13 | Audio: 2D/3D playback, streaming, reverb | Planned |
@@ -53,6 +54,7 @@ The `.docx` files in this directory are generated from the `.md` sources with
 | app | Partial | Application lifecycle driver and the CLI entry point. |
 | render | Partial | Contract, null backend, OpenGL backend, loader, API-neutral mesh/shader/material plus their OpenGL implementations; diagnostic triangle rebuilt on the foundation. |
 | physics | Partial | Contract (8a), null backend (8b), and the Bullet, Box2D and PhysX 3.4 adapters (8c) behind build options. PhysX is the extra-physics capability (decision 32); the classical layer is backend-neutral. |
+| owd | Partial | The OWD container (11a): the writer, the reader, the filters, the checksums and the overlay loader, plus the `owdtool` command line (11b), on zlib's Deflate. |
 | script | Not started | AngelScript and the visual block system are in scope. |
 | audio, video, gui, motion, ai, game | Not started | |
 
@@ -1078,6 +1080,27 @@ grep -rn 'GLuint\|GLenum\|SDL_\|Window' include/grace/render/render_backend.hpp 
     passes it in with setScriptBackend(); the visual layer registers its
     blocks through the same surface the application already uses
     (architecture §4.2).
+35. **Is the container a specification or an implementation?** Both, and the
+    order matters. The specification (decisions 24 and 26 to 29) came first
+    and the implementation follows it file for file: `src/owd/owd.cpp` is the
+    writer and the reader, `src/owd/internal.cpp` the CRC-32 and Deflate
+    codec, `include/grace/owd/types.hpp` the contract's types, and
+    `src/owd/owdtool.cpp` the `owdtool` command line that packs a directory,
+    unpacks a container and lists one. The suite is 38 checks: deterministic
+    output (two runs byte-identical), a whole-payload round trip, a
+    multi-entry index in canonical order, both filters' round trips,
+    `readRange` over a blocked payload, a corrupted byte rejected by the
+    per-entry checksum, the overlay resolution and the writer's refusals.
+    Two defects surfaced and were fixed before the suite went green, and both
+    are worth recording. The writer serialised its index records twice, the
+    second pass declaring a 36-byte fixed part where the format's is 38, so
+    the buffer under-ran by two bytes per record; and the reader derived the
+    index block table's end by scanning for a zero offset, a value no writer
+    emits, instead of using the header's block count. The first crashed the
+    writer, the second made the index unreadable; the suite covers both now.
+    Measured: `owdtool` packs the same directory twice to byte-identical
+    files (SHA-256 verified), `ctest` runs 19/19 with the container suite
+    among them.
 
 ## Verification commands
 

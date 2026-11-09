@@ -62,6 +62,16 @@ content) on the forward path and prints the centre pixel of the frame:
 round(255 * sRGB(aces(30/255))) = 110. The pre-chain legacy linear->8-bit
 output is still available as a compatibility path: `grace --no-post` prints
 `center_pixel=30,30,30,255`.
+The `owdtool` command line packs a directory into an OWD container, unpacks
+one and lists one:
+```
+owdtool pack <directory> <container.owd>
+owdtool unpack <container.owd> <directory>
+owdtool list <container.owd>
+```
+The container format is the OWD specification
+([docs/resource-container.md](docs/resource-container.md)), and the tool is
+the writer and the reader behind it driven by hand.
 
 ## Documentation
 
@@ -136,6 +146,7 @@ attribution entries and their licence terms.
 | --- | --- | --- | --- |
 | SDL2 | zlib | Window, context and input | linked when `GRACE_ENABLE_OPENGL=ON` |
 | OpenGL and GLVND | MIT-style | Graphics API, resolved at runtime | linked when `GRACE_ENABLE_OPENGL=ON` |
+| zlib | zlib | Deflate codec behind the OWD container | linked unconditionally |
 | [NVIDIA PhysX SDK 3.4](https://github.com/NVIDIAGameWorks/PhysX-3.4) | 3-Clause BSD | Physics backend (extra physics: cloth, soft body) | linked when `GRACE_ENABLE_PHYSX=ON` |
 | [Bullet Physics SDK](https://github.com/bulletphysics/bullet3) | zlib | Physics backend | linked when `GRACE_ENABLE_BULLET=ON` |
 | [Box2D](https://github.com/erincatto/box2d) | MIT | 2D physics backend | linked when `GRACE_ENABLE_BOX2D=ON` |

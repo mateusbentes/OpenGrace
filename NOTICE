@@ -56,6 +56,15 @@ Box2D
 
 ===============================================================================
 
+zlib
+  https://github.com/madler/zlib
+  Copyright (c) 1995-2024 Jean-loup Gailly and Mark Adler
+  Licence: zlib
+  Status: linked unconditionally, as the Deflate codec behind the OWD
+  container's payload compression.
+
+===============================================================================
+
 SDL2
   Copyright (c) 1997-2026 Sam Lantinga
   Licence: zlib

@@ -351,6 +351,37 @@ target_include_directories(grace_app PUBLIC
 target_link_libraries(grace_app PUBLIC grace_core grace_render PRIVATE grace_warnings)
 
 # ---------------------------------------------------------------------------
+# grace_owd
+#
+# The OWD container (docs/resource-container.md): the writer, the reader and
+# the overlay loader, on zlib's Deflate. The codec is internal; the contract
+# is the EntryDesc and the Payload.
+# ---------------------------------------------------------------------------
+
+find_package(ZLIB REQUIRED)
+
+add_library(grace_owd STATIC
+    src/owd/internal.cpp
+    src/owd/owd.cpp)
+
+target_include_directories(grace_owd PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
+
+target_link_libraries(grace_owd PUBLIC ZLIB::ZLIB PRIVATE grace_warnings)
+
+# ---------------------------------------------------------------------------
+# owdtool
+#
+# The container's command line: pack a directory, unpack a container, list
+# one. A build and test utility; not a library dependency of the engine.
+# ---------------------------------------------------------------------------
+
+add_executable(owdtool
+    src/owd/owdtool.cpp)
+
+target_link_libraries(owdtool PRIVATE grace_owd grace_warnings)
+
+# ---------------------------------------------------------------------------
 # grace
 #
 # CLI executable for the App module. Headless (null backend) in this

@@ -140,6 +140,13 @@ target_link_libraries(test_docs_structure PRIVATE grace_warnings)
 target_include_directories(test_docs_structure PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME docs_structure COMMAND test_docs_structure ${CMAKE_CURRENT_SOURCE_DIR}/..)
 
+# The OWD container (11): the writer, the reader, the filters, the checksums
+# and the overlay resolution. zlib's Deflate comes through grace_owd.
+add_executable(test_owd test_owd.cpp)
+target_link_libraries(test_owd PRIVATE grace_owd grace_warnings)
+target_include_directories(test_owd PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME owd COMMAND test_owd)
+
 # CLI tests for the grace executable, checked for their exact exit code
 # through check_exit_code.cmake in script mode (no test framework):
 # 0 = success, 2 = usage error.
