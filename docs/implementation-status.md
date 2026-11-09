@@ -38,7 +38,7 @@ The `.docx` files in this directory are generated from the `.md` sources with
 | 9 | Script host: the contract (9a), the null backend (8b) and the AngelScript adapter (9b) (decision 33); serialisation strategy landed in milestone 12b (decision 36) | Done |
 | 10 | Visual scripting: block registry and graph evaluation — the contract (10a), the null backend (10a) and the adapter (10b) (decision 34) | Done (10a, 10b) |
 | 10c | The OWD resource container: the writer, the reader, the filters, the checksums, the overlay loader (11a) and the `owdtool` command line (11b), implementing the specification the decisions 24 and 26 to 29 shaped (decision 35) | Done |
-| 11 | Animation: skeletal, state machines, blending, events | Planned |
+| 11 | Animation: skeletal clips, the deterministic sampler (11a, 11b), the state-machine layer with the cross-fade (11c) and the look-at and foot placement controllers (11c) (decision 38); blendshapes in 11a | Done |
 | 12 | Scene management: data-driven entities, selectable spatial partitioning (flat, grid, octree, quadtree), scene queries and LOD (12a), plus the serialisation strategy writing the scene's state into the OWD container (12b) (decision 36) | Done |
 | 13 | Audio: 2D/3D playback, streaming, reverb -- the contract (13a), the deterministic null backend (13b) and the OpenAL Soft adapter with the WAV and Ogg Vorbis decoders (13c) (decision 37) | Done |
 | 14 | UI: controls, FreeType fonts, unicode input | Planned |
@@ -58,7 +58,8 @@ The `.docx` files in this directory are generated from the `.md` sources with
 | script | Partial | The contract (9a), the null backend (9b) and the AngelScript adapter behind GRACE_ENABLE_ANGELSCRIPT; the visual block system (10a, 10b) registers through the same surface. |
 | scene | Partial | Data-driven entities, selectable spatial partitioning (flat, grid, octree, quadtree), scene queries and LOD (12a); the serialisation strategy writes the scene's state into the OWD container (12b) (decision 36). |
 | audio | Partial | The contract (13a), the deterministic null backend (13b) and the OpenAL Soft adapter behind GRACE_ENABLE_OPENAL (13c), with hand-written WAV and libvorbisfile Ogg Vorbis decoders in the data layer. |
-| video, gui, motion, ai, game | Not started | |
+| motion | Partial | Skeletal clips, the deterministic sampler with lerp/slerp and FK, the blendshapes, the events, the state-machine layer with the cross-fade and the look-at and foot placement controllers (decision 38). |
+| video, gui, ai, game | Not started | |
 
 ---
 
@@ -122,6 +123,7 @@ All results below are real runs, on the tree at the stated commit.
 | 2026-11-08 | same, milestone 9 | The script contract (9a), the null script backend (8b) and the AngelScript adapter (9b) (decision 33). The contract is decl-string based as data — registerType(name, size, flags), registerMethod/registerFunction(decl, native pointer, convention), registerGlobalProperty(decl, pointer) — and carries no scripting-language type: no as* type leaves an adapter. The null backend proves the registration surface and the violation protocol but cannot compile or run scripts (it has no language); the AngelScript adapter is the execution reference: a real script builds, functions are found by declaration, a native function registered through the contract is called from the script body, a registered global property is written from the script, a broken script fails build() with the SDK's message through lastError(), and a script exception fails execute() with the exception message. Suites: script (null backend) 41 checks, script_adapters 40 checks, 0 failures; the default build 17/17 Debug; zero warnings under -Werror. The adapter library builds behind GRACE_ENABLE_ANGELSCRIPT, so the default build stays SDK-free |
 | 2026-11-08 | same, milestone 10 | The visual scripting contract (10a), the null backend (10a) and the graph compiler (10b) (decision 34). The contract is the vocabulary and the graph as data: a registry holds block descriptions (an execution block has at least one flow pin; an expression block has none), a graph references registry blocks by name and connects pins by name, and compile() is the only language-dependent operation. The null backend proves the registry and the graph validation; the graph compiler generates a deterministic AngelScript source for the graph, hands it to the script backend through the contract's addScriptSource/build/findFunction surface, and the entry point resolves by declaration and runs the flow chain on execute. The blocks are native functions registered into the script backend through the contract's registerFunction surface, so the visual layer registers through the same surface the application already uses (architecture 4.2). Suites: visual (null backend) 38 checks, visual_adapters 31 checks, 0 failures; the default build 18/18 Debug (SDK-free), the AngelScript build 20/20; zero warnings under -Werror. The adapter library builds behind GRACE_ENABLE_ANGELSCRIPT, so the default build stays SDK-free |
 | 2026-11-09 | same, milestone 13 | The audio contract (13a), the deterministic null backend (13b) and the OpenAL Soft adapter (13c) (decision 37). The contract is the vocabulary and the backend is the mixer: buffers, voices (2D and 3D), per-voice reverb as a property, the listener and the streaming queue. The null backend is the deterministic reference: mix() advances every voice's cursor by the pitch rule, accumulates the mixed samples, and the 3D attenuation is a straight line from 1.0 at the reference distance to 0.0 at the maximum, so the same calls produce the same samples every run. The OpenAL Soft adapter opens the device lazily, queues the streaming chunks as AL buffers on the voice's source, and registers the reverb as a property (no EFX extension). The codecs are in the data layer, not in the backend calls: the WAV decoder is hand-written, the Ogg Vorbis decoder links libvorbisfile with callbacks over a memory span, and both turn file bytes into the PCM data the backend uploads. Suites: audio (null backend) 97 checks, audio_adapters 32 checks, 0 failures; the default build 21/21 Debug (SDK-free), the OpenAL build 22 tests (the adapter skips without a device, 77); zero warnings under -Werror |
+| 2026-11-09 | same, milestone 11 | The motion module (decision 38): the data types (11a: skeletons, clips, tracks, events, blendshapes), the deterministic sampler (11b: the lerp on the positions, the slerp on the rotations, the forward kinematics, the blend, the events in (from, to] with the loop wrap) and the state-machine layer (11c: the trigger and exit-time transitions, the cross-fade from the previous state's pose, the look-at and foot placement controllers). The slerp entered the core math module, where the quaternion header's comment already promised it. Suites: motion 85 checks, 0 failures; the default build 22/22 Debug; zero warnings under -Werror |
 
 ## Defects found by the tests, and fixed
 
@@ -1142,6 +1144,19 @@ grep -rn 'GLuint\|GLenum\|SDL_\|Window' include/grace/render/render_backend.hpp 
     The null mixer measures 97 checks against the contract; the adapter, 32
     checks against the same contract with the null driver. Suites: audio
     (null backend) 97 checks, audio_adapters 32 checks, 0 failures.
+
+38. **Is the motion module a device contract with backends, or plain
+    deterministic data?** Plain deterministic data, the scene module's
+    pattern. The documented architecture's animation is CPU evaluation
+    (skeletal keyframes, state machines, blending, node controllers,
+    events, blendshapes) with the skinning hardware-side, so there is
+    no device to abstract: the sampler, the machine and the
+    controllers are a library the render and application layers
+    consume. The same clip and the same time produce the same pose
+    every run, which is what a deterministic test can check. The
+    slerp, which the quaternion header's comment already promised,
+    landed in the core math module as the rotation interpolation the
+    key tracks and the cross-fade share.
 
 ## Verification commands
 

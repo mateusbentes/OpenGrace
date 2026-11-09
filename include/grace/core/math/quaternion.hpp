@@ -86,4 +86,36 @@ inline quat normalise(const quat& q)
     return quat{q.w / len, q.x / len, q.y / len, q.z / len};
 }
 
+/// Spherical interpolation of two unit quaternions. The inputs need
+/// not be exactly unit length; the result is re-normalised. When a and
+/// b are nearly equal the fallback is the nlerp form, so t = 0 returns
+/// a and t = 1 returns b regardless.
+inline quat slerp(const quat& a, const quat& b, float t)
+{
+    float cosOmega =
+        a.w * b.w + a.x * b.x + a.y * b.y + a.z * b.z;
+    quat target = b;
+    if (cosOmega < 0.0f)
+    {
+        // The short arc: negate one input when the dot product is
+        // negative, which keeps the path on the shorter sphere side.
+        cosOmega = -cosOmega;
+        target = quat{-b.w, -b.x, -b.y, -b.z};
+    }
+    float k0 = 1.0f - t;
+    float k1 = t;
+    if (cosOmega < 0.9995f)
+    {
+        const float omega =
+            static_cast<float>(std::acos(static_cast<double>(cosOmega)));
+        const float sinOmega = std::sin(omega);
+        k0 = std::sin((1.0f - t) * omega) / sinOmega;
+        k1 = std::sin(t * omega) / sinOmega;
+    }
+    return normalise(quat{a.w * k0 + target.w * k1,
+                          a.x * k0 + target.x * k1,
+                          a.y * k0 + target.y * k1,
+                          a.z * k0 + target.z * k1});
+}
+
 }  // namespace grace::core

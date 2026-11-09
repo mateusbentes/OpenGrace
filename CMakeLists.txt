@@ -450,6 +450,23 @@ if(GRACE_ENABLE_OPENAL)
 endif()
 
 # ---------------------------------------------------------------------------
+# grace_motion
+#
+# The motion module (docs/grace-architecture.md section 3.7): skeletal
+# keyframe clips, the deterministic sampler, the blendshapes, the state
+# machine layer and the node controllers. Plain data and deterministic CPU
+# work; the skinning stays hardware-side (the render module owns the skin
+# matrices).
+# ---------------------------------------------------------------------------
+add_library(grace_motion STATIC
+    src/motion/motion_types.cpp
+    src/motion/motion_sampler.cpp
+    src/motion/motion_machine.cpp
+    src/motion/motion_controllers.cpp)
+target_include_directories(grace_motion PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
+target_link_libraries(grace_motion PUBLIC grace_core PRIVATE grace_warnings)
+# ---------------------------------------------------------------------------
 # owdtool
 #
 # The container's command line: pack a directory, unpack a container, list

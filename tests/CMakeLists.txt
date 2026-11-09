@@ -53,6 +53,11 @@ add_test(NAME visual COMMAND test_visual)
 
 # Audio (13a): the contract and the null backend, the protocol reference.
 # No audio SDK: the null backend is the deterministic mixer.
+add_executable(test_motion test_motion.cpp)
+target_link_libraries(test_motion PRIVATE grace_motion grace_warnings)
+target_include_directories(test_motion PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME motion COMMAND test_motion)
+
 add_executable(test_audio test_audio.cpp)
 target_link_libraries(test_audio PRIVATE grace_audio grace_warnings)
 target_include_directories(test_audio PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
