@@ -74,6 +74,14 @@ if(GRACE_ENABLE_ANGELSCRIPT)
     target_include_directories(test_script_adapters PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR})
     add_test(NAME script_adapters COMMAND test_script_adapters)
+
+    add_executable(test_visual_adapters test_visual_adapters.cpp)
+    target_link_libraries(test_visual_adapters PRIVATE
+        grace_visual grace_null_visual grace_angelscript_script
+        grace_angelscript_visual grace_warnings)
+    target_include_directories(test_visual_adapters PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR})
+    add_test(NAME visual_adapters COMMAND test_visual_adapters)
 endif()
 
 add_executable(test_lights test_lights.cpp)

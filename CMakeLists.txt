@@ -208,6 +208,21 @@ add_library(grace_null_visual STATIC
 target_link_libraries(grace_null_visual PUBLIC grace_visual PRIVATE grace_warnings)
 
 # ---------------------------------------------------------------------------
+# grace_angelscript_visual
+#
+# The visual contract's real implementation (decision 34): the graph
+# compiler that turns a graph into a callable entry point through the
+# script contract's registration surface (architecture §4.2). It maps the
+# contract onto the script backend the application owns.
+# ---------------------------------------------------------------------------
+if(GRACE_ENABLE_ANGELSCRIPT)
+    add_library(grace_angelscript_visual STATIC
+        src/visual/angelscript_visual_backend.cpp)
+    target_link_libraries(grace_angelscript_visual PUBLIC grace_visual
+        grace_script PRIVATE grace_warnings)
+endif()
+
+# ---------------------------------------------------------------------------
 # Optional physics adapters (8c)
 #
 # Each adapter maps the contract onto one SDK and lives behind its own
