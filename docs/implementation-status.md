@@ -129,6 +129,7 @@ All results below are real runs, on the tree at the stated commit.
 | 2026-11-09 | same, milestone 14 | The GUI module (decision 39): the retained control tree with the hit test, the focus and the event dispatch carrying UTF-8 text (14a), the deterministic null backend with the fixed-metric font backend (14b) and the FreeType adapter behind GRACE_ENABLE_FREETYPE, measured against the system's DejaVu Sans face (14c). The UTF-8 decoder lives in the data layer (the two- to four-byte forms, the replacement code point on an invalid lead). Suites: gui 82 checks, gui_adapters 21 checks, 0 failures; the default build 23/23 Debug, the FreeType build 24 tests; zero warnings under -Werror |
 | 2026-11-09 | same, milestone 15 | The game module (decision 40): the agent behaviours idle, patrol, seek and flee with the deterministic steering (the patrol walks its waypoints in order and wraps, the seek stops at the target, the flee moves away), the timers with the repeating fire and the timer events on the queue, the named properties whose kind is fixed by the first set, the event queue and the xorshift64* random source the application seeds explicitly (a zero seed and an unseeded draw throw). Suites: game 129 checks, 0 failures; the default build 24/24 Debug, the full-SDK build 28/28; zero warnings under -Werror |
 | 2026-11-09 | same, milestone 16 | The video module (decision 41): the playback service as a deterministic frame stepper (the cursor advances by the delta seconds at the video's frame rate scaled by the playback's rate, the loop wraps, the playback stops at the last frame), the packed Yuv420 payload the application uploads, and the Ogg Theora decode layer behind GRACE_ENABLE_THEORA, measured against a real file (16 frames, 64x64, 16 fps). Suites: video 66 checks, video_adapters 11 checks, 0 failures; the default build 25/25 Debug, the Theora build 26/26, the full-SDK build 30/30; zero warnings under -Werror |
+| 2026-11-09 | same, middleware submodules | The ten middleware SDKs became pinned git submodules (physx-3.4, bullet3, box2d, angelscript, sdl2, openal-soft, freetype, libogg, libvorbis, libtheora), each at a fixed upstream commit; `tools/add-submodules.sh` registers them idempotently and the CMake configuration builds each one on demand (ExternalProject, Release, outside the engine's warning set) into the build tree's `third-party/`. The PhysX checkout is patched in place by `tools/physx-patch.cmake` (the makefiles' `-Werror` replaced with the tw2-proven set, one header's const-correctness fix), the xiph chain is built in dependency order (ogg -> vorbis -> theora, theora's configure finds the ogg headers through the prefix's pkg-config files), and the physics_adapters test carries the PhysX runtime `LD_LIBRARY_PATH`. Suites: default build 25/25 Debug, OpenGL build 41/41, full-SDK build 28/28 (PhysX + Bullet + Box2D + AngelScript), OpenAL build 26/26, FreeType build 26/26, Theora build 26/26, AngelScript build 27/27; zero warnings under -Werror. The two-step flow (submodules + patch) validated on a fresh clone of the tree |
 
 ## Defects found by the tests, and fixed
 
@@ -161,9 +162,29 @@ Build options:
 | `GRACE_BUILD_TESTS` | `ON` | Build and register the deterministic tests. |
 | `GRACE_WARNINGS_AS_ERRORS` | `ON` | Treat warnings as errors. |
 | `GRACE_ENABLE_OPENGL` | `OFF` | Build the Linux OpenGL backend. |
-| `GRACE_ENABLE_PHYSX` | `OFF` | Build the PhysX 3.4 physics backend. |
-| `GRACE_ENABLE_BULLET` | `OFF` | Build the Bullet physics backend. |
-| `GRACE_ENABLE_BOX2D` | `OFF` | Build the Box2D physics backend. |
+| `GRACE_ENABLE_PHYSX` | `OFF` | PhysX 3.4 physics backend (the submodule). |
+| `GRACE_ENABLE_BULLET` | `OFF` | Bullet physics backend (the submodule). |
+| `GRACE_ENABLE_BOX2D` | `OFF` | Box2D physics backend (the submodule). |
+| `GRACE_ENABLE_ANGELSCRIPT` | `OFF` | AngelScript backend (the submodule). |
+| `GRACE_ENABLE_OPENAL` | `OFF` | OpenAL Soft audio backend + Ogg/Vorbis. |
+| `GRACE_ENABLE_FREETYPE` | `OFF` | FreeType GUI font adapter (the submodule). |
+| `GRACE_ENABLE_THEORA` | `OFF` | Theora video decode adapter + Ogg/Vorbis. |
+
+Middleware dependencies (pinned git submodules, built by the CMake
+configuration when the corresponding option is enabled):
+
+| Dependency | Pin | Version |
+| --- | --- | --- |
+| PhysX 3.4 | `5e42a5f1` (v3.4.0-rc-2-22) | 3.4.0 rc2 tree |
+| Bullet 3 | `d3afe7613` (3.25-30) | 3.25 tree |
+| Box2D | `dd8bd3fb` (v3.2.0-3) | 3.2.0 |
+| AngelScript | `0020e24a` (v2.39.0~1) | 2.39.0 |
+| SDL2 | `859844ea` (release-2.30.0) | 2.30.0 |
+| OpenAL Soft | `d3875f33` (1.23.1) | 1.23.1 |
+| FreeType | `920c5502` (VER-2-13-2) | 2.13.2 |
+| libogg | `e1774cd7` (v1.3.5) | 1.3.5 |
+| libvorbis | `0657aee6` (v1.3.7) | 1.3.7 |
+| libtheora | `7ffd8b2e` (v1.1.1) | 1.1.1 |
 
 ---
 

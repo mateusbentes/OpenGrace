@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.16)
 project(OpenGrace
     VERSION 0.1.0
     DESCRIPTION "Independent reimplementation of the GRACE 2 engine architecture"
-    LANGUAGES CXX)
+    LANGUAGES C CXX)
 
 # ---------------------------------------------------------------------------
 # Global settings
@@ -35,6 +35,186 @@ option(GRACE_ENABLE_ANGELSCRIPT "Build the AngelScript script backend"     OFF)
 option(GRACE_ENABLE_OPENAL      "Build the OpenAL Soft audio backend"      OFF)
 option(GRACE_ENABLE_FREETYPE    "Build the FreeType GUI font adapter"     OFF)
 option(GRACE_ENABLE_THEORA      "Build the Theora video decode adapter"    OFF)
+
+# ---------------------------------------------------------------------------
+# Middleware dependencies (pinned git submodules)
+#
+# The SDKs are checked out at the repository root (see tools/add-submodules.sh)
+# and pinned to one commit each in .gitmodules. CMake builds the ones the
+# enabled options need into the build tree on first configure and each adapter
+# links what it needs. zlib and OpenGL stay system packages (GLVND).
+# ---------------------------------------------------------------------------
+
+include(ExternalProject)
+
+# The SDKs are older CMake projects; CMake 4 dropped the <3.5 compatibility,
+# so every SDK build passes the policy floor explicitly.
+set(GRACE_SDK_POLICY_MINIMUM 3.5)
+
+# The SDKs' install prefix and the shared flags for their CMake builds. Each
+# SDK is built in isolation, outside the engine's warning set (the
+# grace_warnings interface is not linked to them).
+set(GRACE_THIRD_PARTY "${CMAKE_BINARY_DIR}/third-party")
+set(GRACE_SDK_CMAKE_ARGS
+    -DCMAKE_POLICY_VERSION_MINIMUM=${GRACE_SDK_POLICY_MINIMUM}
+    -DCMAKE_BUILD_TYPE=Release
+    -DCMAKE_INSTALL_PREFIX=${GRACE_THIRD_PARTY}
+    -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+    -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER})
+# The adapter targets reference the prefix's include/lib directories before
+# the ExternalProject builds run; the directories must exist at configure
+# time, or the configure step fails on the imported target's paths.
+file(MAKE_DIRECTORY "${GRACE_THIRD_PARTY}/include" "${GRACE_THIRD_PARTY}/lib")
+
+# ---------------------------------------------------------------------------
+# The Ogg chain: libogg and libvorbis (the audio decode layer links
+# libvorbisfile, with libvorbis and libogg), and libtheora when the Theora
+# option is on (theora's configure step finds the ogg headers through the
+# pkg-config files of the built install prefix, and the chain is built in
+# dependency order).
+# ---------------------------------------------------------------------------
+
+if(GRACE_ENABLE_THEORA OR GRACE_ENABLE_OPENAL)
+ExternalProject_Add(grace_libogg
+    SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/libogg
+    CMAKE_ARGS ${GRACE_SDK_CMAKE_ARGS}
+    BUILD_BYPRODUCTS ${GRACE_THIRD_PARTY}/lib/libogg.a)
+
+ExternalProject_Add(grace_libvorbis
+    SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/libvorbis
+    CMAKE_ARGS ${GRACE_SDK_CMAKE_ARGS}
+    BUILD_BYPRODUCTS ${GRACE_THIRD_PARTY}/lib/libvorbisfile.a
+        ${GRACE_THIRD_PARTY}/lib/libvorbis.a)
+
+if(GRACE_ENABLE_THEORA)
+ExternalProject_Add(grace_libtheora
+    SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/libtheora
+    DEPENDS grace_libogg
+    CONFIGURE_COMMAND ${CMAKE_COMMAND} -E env
+        PKG_CONFIG_PATH=${GRACE_THIRD_PARTY}/lib/pkgconfig
+        <SOURCE_DIR>/autogen.sh --prefix=<INSTALL_DIR>
+        --disable-examples --disable-spec --disable-encexample
+        --disable-telemetry --disable-oggtest --disable-vorbistest
+    BUILD_COMMAND make -j4
+    INSTALL_COMMAND make install
+    BUILD_IN_SOURCE 1
+    INSTALL_DIR ${GRACE_THIRD_PARTY}
+    BUILD_BYPRODUCTS ${GRACE_THIRD_PARTY}/lib/libtheoradec.a)
+endif()
+endif()
+
+# ---------------------------------------------------------------------------
+# SDL2 (static; the OpenGL backend links it)
+# ---------------------------------------------------------------------------
+
+if(GRACE_ENABLE_OPENGL)
+ExternalProject_Add(grace_sdl2
+    SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/sdl2
+    CMAKE_ARGS ${GRACE_SDK_CMAKE_ARGS}
+        -DSDL_SHARED=OFF -DSDL_STATIC=ON -DSDL_TEST_LIBRARY=OFF
+        -DSDL_AUDIO=OFF -DSDL_RENDER=OFF -DSDL_EVENTS=ON
+        -DSDL_JOYSTICK=OFF -DSDL_HAPTIC=OFF -DSDL_POWER=OFF
+        -DSDL_FILESYSTEM=OFF -DSDL_TIMERS=ON
+    BUILD_BYPRODUCTS ${GRACE_THIRD_PARTY}/lib/libSDL2.a)
+endif()
+
+# ---------------------------------------------------------------------------
+# OpenAL Soft (static; the audio backend links it)
+# ---------------------------------------------------------------------------
+
+if(GRACE_ENABLE_OPENAL)
+ExternalProject_Add(grace_openal
+    SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/openal-soft
+    CMAKE_ARGS ${GRACE_SDK_CMAKE_ARGS}
+        -DLIBTYPE=STATIC
+    BUILD_BYPRODUCTS ${GRACE_THIRD_PARTY}/lib/libopenal.a)
+endif()
+
+# ---------------------------------------------------------------------------
+# FreeType (static; the GUI font adapter links it)
+# ---------------------------------------------------------------------------
+
+if(GRACE_ENABLE_FREETYPE)
+ExternalProject_Add(grace_freetype
+    SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/freetype
+    CMAKE_ARGS ${GRACE_SDK_CMAKE_ARGS}
+        -DBUILD_SHARED_LIBS=OFF
+        -DFT_DISABLE_PNG=ON -DFT_DISABLE_ZLIB=ON -DFT_DISABLE_BZIP2=ON
+        -DFT_DISABLE_HARFBUZZ=ON -DFT_DISABLE_BROTLI=ON
+    BUILD_BYPRODUCTS ${GRACE_THIRD_PARTY}/lib/libfreetype.a)
+endif()
+
+# ---------------------------------------------------------------------------
+# The physics and script SDKs (the adapters link the static libraries)
+# ---------------------------------------------------------------------------
+
+if(GRACE_ENABLE_BULLET)
+ExternalProject_Add(grace_bullet
+    SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/bullet3
+    CMAKE_ARGS ${GRACE_SDK_CMAKE_ARGS}
+        -DUSE_DOUBLE_PRECISION=OFF -DUSE_GRAPHICAL_BENCHMARK=OFF
+        -DBUILD_SHARED_LIBS=OFF -DBUILD_BULLET3=OFF
+        -DBUILD_BULLET2_DEMOS=OFF -DBUILD_OPENGL3_DEMOS=OFF
+        -DBUILD_EXTRAS=OFF -DBUILD_UNIT_TESTS=OFF
+        -DINSTALL_LIBS=OFF
+    INSTALL_COMMAND ${CMAKE_COMMAND} -E copy
+        <BINARY_DIR>/src/BulletDynamics/libBulletDynamics.a
+        <BINARY_DIR>/src/BulletCollision/libBulletCollision.a
+        <BINARY_DIR>/src/LinearMath/libLinearMath.a
+        ${GRACE_THIRD_PARTY}/lib/
+    BUILD_BYPRODUCTS
+        <BINARY_DIR>/src/BulletDynamics/libBulletDynamics.a
+        <BINARY_DIR>/src/BulletCollision/libBulletCollision.a
+        <BINARY_DIR>/src/LinearMath/libLinearMath.a)
+endif()
+
+if(GRACE_ENABLE_BOX2D)
+ExternalProject_Add(grace_box2d
+    SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/box2d
+    CMAKE_ARGS ${GRACE_SDK_CMAKE_ARGS}
+        -DBOX2D_SAMPLES=OFF -DBOX2D_UNIT_TESTS=OFF -DBOX2D_BENCHMARKS=OFF
+    INSTALL_COMMAND ${CMAKE_COMMAND} -E copy
+        <BINARY_DIR>/src/libbox2d.a ${GRACE_THIRD_PARTY}/lib/
+    BUILD_BYPRODUCTS <BINARY_DIR>/src/libbox2d.a)
+endif()
+
+if(GRACE_ENABLE_ANGELSCRIPT)
+ExternalProject_Add(grace_angelscript
+    SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/angelscript/sdk/angelscript/projects/cmake
+    CMAKE_ARGS ${GRACE_SDK_CMAKE_ARGS}
+        -DBUILD_SHARED_LIBS=OFF
+    INSTALL_COMMAND ${CMAKE_COMMAND} -E copy
+        <BINARY_DIR>/libangelscript.a ${GRACE_THIRD_PARTY}/lib/
+    BUILD_BYPRODUCTS <BINARY_DIR>/libangelscript.a)
+endif()
+
+# ---------------------------------------------------------------------------
+# PhysX 3.4 (the SDK's own Makefiles; the checkout is patched in place by the
+# tw2-proven pattern: the makefiles ship with -Werror, which modern GCC
+# rejects, and one header needs a const-correctness fix)
+# ---------------------------------------------------------------------------
+
+if(GRACE_ENABLE_PHYSX)
+ExternalProject_Add(grace_physx
+    SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/physx-3.4/PhysX_3.4/Source/compiler/linux64
+    CONFIGURE_COMMAND ""
+    PATCH_COMMAND ${CMAKE_COMMAND} -DSDK_DIR=${CMAKE_CURRENT_SOURCE_DIR}/physx-3.4
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tools/physx-patch.cmake
+    BUILD_COMMAND make -j4 release
+    BUILD_IN_SOURCE 1
+    INSTALL_COMMAND ""
+    BUILD_BYPRODUCTS
+        ${CMAKE_CURRENT_SOURCE_DIR}/physx-3.4/PhysX_3.4/Lib/linux64/libPhysX3Extensions.a
+        ${CMAKE_CURRENT_SOURCE_DIR}/physx-3.4/PhysX_3.4/Lib/linux64/libSimulationController.a
+        ${CMAKE_CURRENT_SOURCE_DIR}/physx-3.4/PhysX_3.4/Lib/linux64/libSceneQuery.a
+        ${CMAKE_CURRENT_SOURCE_DIR}/physx-3.4/PhysX_3.4/Lib/linux64/libLowLevelDynamics.a
+        ${CMAKE_CURRENT_SOURCE_DIR}/physx-3.4/PhysX_3.4/Lib/linux64/libLowLevelAABB.a
+        ${CMAKE_CURRENT_SOURCE_DIR}/physx-3.4/PhysX_3.4/Lib/linux64/libLowLevel.a
+        ${CMAKE_CURRENT_SOURCE_DIR}/physx-3.4/PhysX_3.4/Bin/linux64/libPhysX3_x64.so
+        ${CMAKE_CURRENT_SOURCE_DIR}/physx-3.4/PhysX_3.4/Bin/linux64/libPhysX3Common_x64.so
+        ${CMAKE_CURRENT_SOURCE_DIR}/physx-3.4/PxShared/bin/linux64/libPxFoundation_x64.so
+        ${CMAKE_CURRENT_SOURCE_DIR}/physx-3.4/PxShared/lib/linux64/libPxTask.a)
+endif()
 
 # ---------------------------------------------------------------------------
 # Warning set
@@ -177,11 +357,12 @@ target_link_libraries(grace_null_script PUBLIC grace_script PRIVATE grace_warnin
 if(GRACE_ENABLE_ANGELSCRIPT)
     add_library(grace_angelscript_script STATIC
         src/script/angelscript_backend.cpp)
+    add_dependencies(grace_angelscript_script grace_angelscript)
     target_include_directories(grace_angelscript_script SYSTEM PRIVATE
-        ${GRACE_ANGELSCRIPT_DIR}/include)
+        ${CMAKE_CURRENT_SOURCE_DIR}/angelscript/sdk/angelscript/include)
     target_link_libraries(grace_angelscript_script PUBLIC grace_script
         PRIVATE grace_warnings
-        ${GRACE_ANGELSCRIPT_BUILD_DIR}/libangelscript.a)
+        ${GRACE_THIRD_PARTY}/lib/libangelscript.a)
 endif()
 
 # ---------------------------------------------------------------------------
@@ -229,61 +410,53 @@ endif()
 # Optional physics adapters (8c)
 #
 # Each adapter maps the contract onto one SDK and lives behind its own
-# option. The SDK path is set through GRACE_PHYSX_DIR / GRACE_BULLET_DIR /
-# GRACE_BOX2D_DIR, the same pattern the OpenGL backend uses for SDL2.
+# option. The SDKs are the pinned git submodules; CMake builds them first
+# (add_dependencies) and the adapter links the built libraries.
 # ---------------------------------------------------------------------------
-
-set(GRACE_PHYSX_DIR "" CACHE PATH "PhysX 3.4 root (Include/, Lib/, PxShared/)")
-set(GRACE_BULLET_DIR "" CACHE PATH "Bullet source root (src/ headers)")
-set(GRACE_BULLET_BUILD_DIR "" CACHE PATH "Bullet build output (lib*.a)")
-set(GRACE_BOX2D_DIR "" CACHE PATH "Box2D source root (include/box2d)")
-set(GRACE_BOX2D_BUILD_DIR "" CACHE PATH "Box2D build output (libbox2d.a)")
-
-set(GRACE_ANGELSCRIPT_DIR "" CACHE PATH
-    "AngelScript source root (sdk/angelscript/include/)")
-set(GRACE_ANGELSCRIPT_BUILD_DIR "" CACHE PATH
-    "AngelScript build output (libangelscript.a)")
 
 if(GRACE_ENABLE_PHYSX)
     add_library(grace_physx_physics STATIC
         src/physics/physx_physics_backend.cpp)
+    add_dependencies(grace_physx_physics grace_physx)
     target_include_directories(grace_physx_physics SYSTEM PRIVATE
-        ${GRACE_PHYSX_DIR}/Include
-        ${GRACE_PHYSX_DIR}/../PxShared/include)
+        ${CMAKE_CURRENT_SOURCE_DIR}/physx-3.4/PhysX_3.4/Include
+        ${CMAKE_CURRENT_SOURCE_DIR}/physx-3.4/PxShared/include)
     target_link_libraries(grace_physx_physics PUBLIC grace_physics
         PRIVATE grace_warnings
-        ${GRACE_PHYSX_DIR}/Lib/linux64/libPhysX3Extensions.a
-        ${GRACE_PHYSX_DIR}/Lib/linux64/libSimulationController.a
-        ${GRACE_PHYSX_DIR}/Lib/linux64/libSceneQuery.a
-        ${GRACE_PHYSX_DIR}/Lib/linux64/libLowLevelDynamics.a
-        ${GRACE_PHYSX_DIR}/Lib/linux64/libLowLevelAABB.a
-        ${GRACE_PHYSX_DIR}/Lib/linux64/libLowLevel.a
-        ${GRACE_PHYSX_DIR}/Bin/linux64/libPhysX3_x64.so
-        ${GRACE_PHYSX_DIR}/Bin/linux64/libPhysX3Common_x64.so
-        ${GRACE_PHYSX_DIR}/../PxShared/bin/linux64/libPxFoundation_x64.so
-        ${GRACE_PHYSX_DIR}/../PxShared/lib/linux64/libPxTask.a)
+        ${CMAKE_CURRENT_SOURCE_DIR}/physx-3.4/PhysX_3.4/Lib/linux64/libPhysX3Extensions.a
+        ${CMAKE_CURRENT_SOURCE_DIR}/physx-3.4/PhysX_3.4/Lib/linux64/libSimulationController.a
+        ${CMAKE_CURRENT_SOURCE_DIR}/physx-3.4/PhysX_3.4/Lib/linux64/libSceneQuery.a
+        ${CMAKE_CURRENT_SOURCE_DIR}/physx-3.4/PhysX_3.4/Lib/linux64/libLowLevelDynamics.a
+        ${CMAKE_CURRENT_SOURCE_DIR}/physx-3.4/PhysX_3.4/Lib/linux64/libLowLevelAABB.a
+        ${CMAKE_CURRENT_SOURCE_DIR}/physx-3.4/PhysX_3.4/Lib/linux64/libLowLevel.a
+        ${CMAKE_CURRENT_SOURCE_DIR}/physx-3.4/PhysX_3.4/Bin/linux64/libPhysX3_x64.so
+        ${CMAKE_CURRENT_SOURCE_DIR}/physx-3.4/PhysX_3.4/Bin/linux64/libPhysX3Common_x64.so
+        ${CMAKE_CURRENT_SOURCE_DIR}/physx-3.4/PxShared/bin/linux64/libPxFoundation_x64.so
+        ${CMAKE_CURRENT_SOURCE_DIR}/physx-3.4/PxShared/lib/linux64/libPxTask.a)
 endif()
 
 if(GRACE_ENABLE_BULLET)
     add_library(grace_bullet_physics STATIC
         src/physics/bullet_physics_backend.cpp)
+    add_dependencies(grace_bullet_physics grace_bullet)
     target_include_directories(grace_bullet_physics SYSTEM PRIVATE
-        ${GRACE_BULLET_DIR}/src)
+        ${CMAKE_CURRENT_SOURCE_DIR}/bullet3/src)
     target_link_libraries(grace_bullet_physics PUBLIC grace_physics
         PRIVATE grace_warnings
-        ${GRACE_BULLET_BUILD_DIR}/src/BulletDynamics/libBulletDynamics.a
-        ${GRACE_BULLET_BUILD_DIR}/src/BulletCollision/libBulletCollision.a
-        ${GRACE_BULLET_BUILD_DIR}/src/LinearMath/libLinearMath.a)
+        ${GRACE_THIRD_PARTY}/lib/libBulletDynamics.a
+        ${GRACE_THIRD_PARTY}/lib/libBulletCollision.a
+        ${GRACE_THIRD_PARTY}/lib/libLinearMath.a)
 endif()
 
 if(GRACE_ENABLE_BOX2D)
     add_library(grace_box2d_physics STATIC
         src/physics/box2d_physics_backend.cpp)
+    add_dependencies(grace_box2d_physics grace_box2d)
     target_include_directories(grace_box2d_physics SYSTEM PRIVATE
-        ${GRACE_BOX2D_DIR}/include)
+        ${CMAKE_CURRENT_SOURCE_DIR}/box2d/include)
     target_link_libraries(grace_box2d_physics PUBLIC grace_physics
         PRIVATE grace_warnings
-        ${GRACE_BOX2D_BUILD_DIR}/src/libbox2d.a)
+        ${GRACE_THIRD_PARTY}/lib/libbox2d.a)
 endif()
 
 # ---------------------------------------------------------------------------
@@ -301,26 +474,13 @@ if(GRACE_ENABLE_OPENGL)
             "(target platform: native Linux x86_64, OpenGL)")
     endif()
 
-    # SDL2 discovery: config-mode find_package(SDL2) first, pkg-config fallback.
-    find_package(SDL2 QUIET)
-    if(NOT TARGET SDL2::SDL2)
-        find_package(PkgConfig QUIET)
-        if(PKG_CONFIG_FOUND)
-            pkg_check_modules(SDL2_PC QUIET sdl2)
-        endif()
-        if(SDL2_PC_FOUND)
-            add_library(SDL2::SDL2 INTERFACE IMPORTED)
-            target_include_directories(SDL2::SDL2 SYSTEM INTERFACE ${SDL2_PC_INCLUDE_DIRS})
-            target_link_libraries(SDL2::SDL2 INTERFACE ${SDL2_PC_LIBRARIES})
-            target_link_directories(SDL2::SDL2 INTERFACE ${SDL2_PC_LIBRARY_DIRS})
-        endif()
-    endif()
-    if(NOT TARGET SDL2::SDL2)
-        message(FATAL_ERROR
-            "GRACE_ENABLE_OPENGL=ON requires SDL2: neither find_package(SDL2) nor "
-            "pkg-config sdl2 located it. Install libsdl2-dev or configure with "
-            "-DGRACE_ENABLE_OPENGL=OFF.")
-    endif()
+    # SDL2 comes from the pinned git submodule (grace_sdl2 above), built as
+    # a static library into the third-party prefix.
+    add_library(SDL2::SDL2 INTERFACE IMPORTED)
+    target_include_directories(SDL2::SDL2 SYSTEM INTERFACE
+        ${GRACE_THIRD_PARTY}/include)
+    target_link_libraries(SDL2::SDL2 INTERFACE
+        ${GRACE_THIRD_PARTY}/lib/libSDL2.a)
 
     set(OpenGL_GL_PREFERENCE GLVND)
     find_package(OpenGL REQUIRED)
@@ -331,6 +491,7 @@ if(GRACE_ENABLE_OPENGL)
         src/render/opengl/opengl_shader.cpp
         src/render/opengl/opengl_render_target.cpp
         src/render/opengl/opengl_render_backend.cpp)
+    add_dependencies(grace_render_opengl grace_sdl2)
 
     target_link_libraries(grace_render_opengl
         PUBLIC grace_render
@@ -411,44 +572,21 @@ if(GRACE_ENABLE_OPENAL)
         src/audio/audio_decode_vorbis.cpp)
     target_include_directories(grace_openal_audio PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
-    find_package(OpenAL QUIET)
-    if(NOT TARGET OpenAL::OpenAL)
-        find_package(PkgConfig QUIET)
-        if(PKG_CONFIG_FOUND)
-            pkg_check_modules(OPENAL_PC QUIET openal)
-        endif()
-        if(OPENAL_PC_FOUND)
-            add_library(OpenAL::OpenAL INTERFACE IMPORTED)
-            target_include_directories(OpenAL::OpenAL SYSTEM INTERFACE
-                ${OPENAL_PC_INCLUDE_DIRS})
-            target_link_libraries(OpenAL::OpenAL INTERFACE ${OPENAL_PC_LIBRARIES})
-            target_link_directories(OpenAL::OpenAL INTERFACE ${OPENAL_PC_LIBRARY_DIRS})
-        endif()
-    endif()
-    if(NOT TARGET OpenAL::OpenAL)
-        message(FATAL_ERROR
-            "GRACE_ENABLE_OPENAL=ON requires OpenAL: neither find_package(OpenAL) "
-            "nor pkg-config openal located it. Install libopenal-dev or configure "
-            "with -DGRACE_ENABLE_OPENAL=OFF.")
-    endif()
-    # The Ogg Vorbis decode links libvorbisfile (with libvorbis and
-    # libogg): the discovery follows the same pkg-config pattern.
-    find_package(PkgConfig QUIET)
-    if(PKG_CONFIG_FOUND)
-        pkg_check_modules(VORBISFILE QUIET vorbisfile)
-    endif()
-    if(NOT VORBISFILE_FOUND)
-        message(FATAL_ERROR
-            "GRACE_ENABLE_OPENAL=ON requires libvorbisfile: pkg-config "
-            "vorbisfile did not locate it. Install libvorbis-dev or "
-            "configure with -DGRACE_ENABLE_OPENAL=OFF.")
-    endif()
+    add_dependencies(grace_openal_audio grace_openal grace_libvorbis)
+    add_library(OpenAL::OpenAL INTERFACE IMPORTED)
+    target_include_directories(OpenAL::OpenAL SYSTEM INTERFACE
+        ${GRACE_THIRD_PARTY}/include
+        ${GRACE_THIRD_PARTY}/include/AL)
+    target_link_libraries(OpenAL::OpenAL INTERFACE
+        ${GRACE_THIRD_PARTY}/lib/libopenal.a)
     target_link_libraries(grace_openal_audio PUBLIC grace_audio
         PRIVATE grace_warnings OpenAL::OpenAL ${VORBISFILE_LIBRARIES})
     target_include_directories(grace_openal_audio SYSTEM PRIVATE
-        ${VORBISFILE_INCLUDE_DIRS})
-    target_link_directories(grace_openal_audio PRIVATE
-        ${VORBISFILE_LIBRARY_DIRS})
+        ${GRACE_THIRD_PARTY}/include)
+    target_link_libraries(grace_openal_audio PRIVATE
+        ${GRACE_THIRD_PARTY}/lib/libvorbisfile.a
+        ${GRACE_THIRD_PARTY}/lib/libvorbis.a
+        ${GRACE_THIRD_PARTY}/lib/libogg.a)
 endif()
 
 # ---------------------------------------------------------------------------
@@ -483,26 +621,15 @@ target_include_directories(grace_gui PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
 target_link_libraries(grace_gui PUBLIC grace_core PRIVATE grace_warnings)
 if(GRACE_ENABLE_FREETYPE)
-    find_package(PkgConfig QUIET)
-    if(PKG_CONFIG_FOUND)
-        pkg_check_modules(FREETYPE QUIET freetype2)
-    endif()
-    if(NOT FREETYPE_FOUND)
-        message(FATAL_ERROR
-            "GRACE_ENABLE_FREETYPE=ON requires FreeType: pkg-config "
-            "freetype2 did not locate it. Install libfreetype-dev or "
-            "configure with -DGRACE_ENABLE_FREETYPE=OFF.")
-    endif()
     add_library(grace_freetype_gui STATIC
         src/gui/freetype_gui_backend.cpp)
+    add_dependencies(grace_freetype_gui grace_freetype)
     target_include_directories(grace_freetype_gui PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
     target_include_directories(grace_freetype_gui SYSTEM PRIVATE
-        ${FREETYPE_INCLUDE_DIRS})
+        ${GRACE_THIRD_PARTY}/include/freetype2)
     target_link_libraries(grace_freetype_gui PUBLIC grace_gui
-        PRIVATE grace_warnings ${FREETYPE_LIBRARIES})
-    target_link_directories(grace_freetype_gui PRIVATE
-        ${FREETYPE_LIBRARY_DIRS})
+        PRIVATE grace_warnings ${GRACE_THIRD_PARTY}/lib/libfreetype.a)
 endif()
 # ---------------------------------------------------------------------------
 # grace_game
@@ -537,26 +664,18 @@ target_include_directories(grace_video PUBLIC
 target_link_libraries(grace_video PUBLIC grace_core PRIVATE grace_warnings)
 
 if(GRACE_ENABLE_THEORA)
-    find_package(PkgConfig QUIET)
-    if(PKG_CONFIG_FOUND)
-        pkg_check_modules(THEORA QUIET theoradec)
-    endif()
-    if(NOT THEORA_FOUND)
-        message(FATAL_ERROR
-            "GRACE_ENABLE_THEORA=ON requires Theora: pkg-config theora "
-            "did not locate it. Install libtheora-dev or configure with "
-            "-DGRACE_ENABLE_THEORA=OFF.")
-    endif()
     add_library(grace_theora_video STATIC
         src/video/video_decode_theora.cpp)
+    add_dependencies(grace_theora_video grace_libtheora grace_libvorbis
+        grace_libogg)
     target_include_directories(grace_theora_video PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
     target_include_directories(grace_theora_video SYSTEM PRIVATE
-        ${THEORA_INCLUDE_DIRS})
+        ${GRACE_THIRD_PARTY}/include)
     target_link_libraries(grace_theora_video PUBLIC grace_video
-        PRIVATE grace_warnings ${THEORA_LIBRARIES})
-    target_link_directories(grace_theora_video PRIVATE
-        ${THEORA_LIBRARY_DIRS})
+        PRIVATE grace_warnings
+        ${GRACE_THIRD_PARTY}/lib/libtheoradec.a
+        ${GRACE_THIRD_PARTY}/lib/libogg.a)
 endif()
 
 # ---------------------------------------------------------------------------

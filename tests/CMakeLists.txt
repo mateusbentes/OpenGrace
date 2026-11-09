@@ -121,6 +121,8 @@ if(GRACE_ENABLE_PHYSX AND GRACE_ENABLE_BULLET AND GRACE_ENABLE_BOX2D)
     target_include_directories(test_physics_adapters PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR})
     add_test(NAME physics_adapters COMMAND test_physics_adapters)
+    set_tests_properties(physics_adapters PROPERTIES ENVIRONMENT
+        "LD_LIBRARY_PATH=${CMAKE_SOURCE_DIR}/physx-3.4/PhysX_3.4/Bin/linux64:${CMAKE_SOURCE_DIR}/physx-3.4/PxShared/bin/linux64")
 endif()
 
 # Script host (9b): the AngelScript adapter, the execution reference. It is

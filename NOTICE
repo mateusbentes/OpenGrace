@@ -6,11 +6,12 @@ listed below remains under its own licence; the Apache License 2.0 that covers
 this project's original source code does not alter those terms.
 
 The build links SDL2 and OpenGL/GLVND when GRACE_ENABLE_OPENGL is enabled,
-and the physics SDKs when their GRACE_ENABLE_PHYSX / GRACE_ENABLE_BULLET /
-GRACE_ENABLE_BOX2D options are enabled. Entries marked "planned" are
-recorded here so that attribution is in place before the dependency is
-integrated; their licence texts are added to third_party/ when the
-corresponding backend is actually built.
+and the physics and scripting SDKs when their GRACE_ENABLE_PHYSX /
+GRACE_ENABLE_BULLET / GRACE_ENABLE_BOX2D / GRACE_ENABLE_ANGELSCRIPT options
+are enabled. The middleware SDKs are pinned as git submodules of this
+repository and are built by the project's own configuration when the
+corresponding option is enabled; no part of any of them is redistributed in
+binary form.
 
 ===============================================================================
 
@@ -30,12 +31,14 @@ NVIDIA PhysX SDK 3.4
   Status: linked when GRACE_ENABLE_PHYSX is enabled, as the extra-physics
   backend (CPU cloth and soft body).
 
-  Not vendored. The SDK is cloned into a local, git-ignored directory and
-  linked as an external dependency; no part of it is redistributed from this
-  repository. A binary distribution that links it must reproduce the
-  copyright notice, the list of conditions and the disclaimer, as clause 2
-  requires. The APEX SDK shipped in the same depot is deprecated and is not
-  used.
+  Not vendored. The SDK is pinned as a git submodule and built by this
+  project's configuration through its own Makefiles; no part of it is
+  redistributed in binary form from this repository. The checkout is patched
+  in place before building (the makefiles ship with -Werror, which modern
+  GCC rejects, and one header needs a const-correctness fix). A binary
+  distribution that links it must reproduce the copyright notice, the list
+  of conditions and the disclaimer, as clause 2 requires. The APEX SDK
+  shipped in the same depot is deprecated and is not used.
 
 ===============================================================================
 
@@ -86,11 +89,10 @@ OpenAL Soft
   https://github.com/kcat/openal-soft
   Copyright (c) 2012-2026 Chris Robinson and contributors
   Licence: LGPL-2.0-or-later
-  Status: linked when GRACE_ENABLE_OPENAL is enabled, as the audio
-  backend. Linked dynamically.
-  Not vendored. The SDK is installed as a system dependency and linked
-  as an external library; no part of it is redistributed from this
-  repository.
+  Status: linked when GRACE_ENABLE_OPENAL is enabled, as the audio backend.
+  Built statically (LIBTYPE=STATIC) from the submodule; the LGPL-2.0
+  requirement is satisfied by the library's own licence text, which
+  accompanies any distribution that links it.
 
 FreeType
   https://freetype.org
@@ -98,36 +100,23 @@ FreeType
   Licence: FTL (FreeType Licence, BSD-style) or GPL-2.0-or-later, the
   project's dual licence
   Status: linked when GRACE_ENABLE_FREETYPE is enabled, as the GUI
-  module's font rasteriser. Linked dynamically.
-  Not vendored. The library is installed as a system dependency and
-  linked as an external library; no part of it is redistributed from
-  this repository.
+  module's font rasteriser. Built statically from the submodule.
 
 libtheora
   https://theora.org
   Copyright (c) 2002-2020 The Xiph.Org Foundation
   Licence: BSD-3-Clause
   Status: linked when GRACE_ENABLE_THEORA is enabled, as the video
-  module's decode layer. Linked dynamically.
-  Not vendored. The library is installed as a system dependency and
-  linked as an external library; no part of it is redistributed from
-  this repository.
-===============================================================================
-libvorbisfile (with libvorbis and libogg)
+  module's decode layer. Built from the submodule via autotools (the
+  configure step finds the ogg headers through the pkg-config files of
+  the built install prefix).
+
+libvorbis (with libogg)
   https://github.com/xiph/vorbis
   Copyright (c) 2002-2020 Xiph.Org Foundation
   Licence: BSD-style
   Status: linked when GRACE_ENABLE_OPENAL is enabled, as the Ogg Vorbis
   decoder in the audio module's data layer.
-  Not vendored. The SDK is installed as a system dependency and linked
-  as an external library; no part of it is redistributed from this
-  repository.
-
-===============================================================================
-
-FreeType
-  Copyright (c) 1996-2026 David Turner, Robert Wilhelm, Werner Lemberg
-  Licence: FreeType License (BSD-style) or GPLv2
-  Status: planned, for font rendering in the UI module.
+  Built statically from the submodules.
 
 ===============================================================================

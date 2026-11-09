@@ -132,20 +132,22 @@ Build options:
 | --- | --- | --- |
 | `GRACE_BUILD_TESTS` | `ON` | Build and register the deterministic tests with CTest. |
 | `GRACE_WARNINGS_AS_ERRORS` | `ON` | Treat compiler warnings as errors. |
-| `GRACE_ENABLE_OPENGL` | `OFF` | Build the OpenGL backend. Requires SDL2 and OpenGL. |
-| `GRACE_ENABLE_PHYSX` | `OFF` | Build the PhysX 3.4 physics backend from a local SDK clone. |
-| `GRACE_ENABLE_BULLET` | `OFF` | Build the Bullet physics backend from a local SDK clone. |
-| `GRACE_ENABLE_BOX2D` | `OFF` | Build the Box2D physics backend from a local SDK clone. |
-| `GRACE_ENABLE_ANGELSCRIPT` | `OFF` | Build the AngelScript script backend from a local SDK clone. |
-| `GRACE_ENABLE_OPENAL` | `OFF` | Build the OpenAL Soft audio backend. Requires OpenAL Soft and libvorbisfile. |
-| `GRACE_ENABLE_FREETYPE` | `OFF` | Build the FreeType GUI font adapter. Requires FreeType. |
-| `GRACE_ENABLE_THEORA` | `OFF` | Build the Theora video decode adapter. Requires libtheoradec. |
+| `GRACE_ENABLE_OPENGL` | `OFF` | OpenGL backend (SDL2 submodule, OpenGL at runtime). |
+| `GRACE_ENABLE_PHYSX` | `OFF` | PhysX 3.4 physics backend (the submodule). |
+| `GRACE_ENABLE_BULLET` | `OFF` | Bullet physics backend (the submodule). |
+| `GRACE_ENABLE_BOX2D` | `OFF` | Box2D physics backend (the submodule). |
+| `GRACE_ENABLE_ANGELSCRIPT` | `OFF` | AngelScript backend (the submodule). |
+| `GRACE_ENABLE_OPENAL` | `OFF` | OpenAL Soft audio backend + Ogg/Vorbis. |
+| `GRACE_ENABLE_FREETYPE` | `OFF` | FreeType GUI font adapter (the submodule). |
+| `GRACE_ENABLE_THEORA` | `OFF` | Theora video decode adapter + Ogg/Vorbis. |
 
 ## Dependencies
 
-Nothing is vendored. Optional dependencies are cloned into local, git-ignored
-directories and linked as external libraries. [NOTICE](NOTICE) holds the full
-attribution entries and their licence terms.
+No dependency is vendored. The middleware SDKs are pinned as git submodules at
+the revisions the build is tested against; each one is built on demand by the
+project's CMake configuration, outside the engine's warning set, and installed
+into the build tree (the PhysX SDK keeps its own Makefile build and links the
+static libraries it produces).
 
 | Dependency | Licence | Used for | Status |
 | --- | --- | --- | --- |
@@ -156,10 +158,18 @@ attribution entries and their licence terms.
 | [Bullet Physics SDK](https://github.com/bulletphysics/bullet3) | zlib | Physics backend | linked when `GRACE_ENABLE_BULLET=ON` |
 | [Box2D](https://github.com/erincatto/box2d) | MIT | 2D physics backend | linked when `GRACE_ENABLE_BOX2D=ON` |
 | [AngelScript](https://github.com/anjo76/angelscript) | zlib | Text scripting host | linked when `GRACE_ENABLE_ANGELSCRIPT=ON` |
-| [OpenAL Soft](https://github.com/kcat/openal-soft) | LGPL-2.0-or-later | Audio backend, linked dynamically | linked when `GRACE_ENABLE_OPENAL=ON` |
-| libvorbisfile | BSD-style | Ogg Vorbis decode in the audio module's data layer | linked when `GRACE_ENABLE_OPENAL=ON` |
+| [OpenAL Soft](https://github.com/kcat/openal-soft) | LGPL-2.0-or-later | Audio backend | linked when `GRACE_ENABLE_OPENAL=ON` |
+| [libogg](https://github.com/xiph/ogg) / [libvorbis](https://github.com/xiph/vorbis) | BSD-style | Ogg Vorbis decode in the audio module's data layer | linked when `GRACE_ENABLE_OPENAL=ON` |
 | [FreeType](https://freetype.org) | FTL (BSD-style) or GPL-2.0 | Font rasterisation in the GUI module | linked when `GRACE_ENABLE_FREETYPE=ON` |
 | [libtheora](https://theora.org) | BSD-style (3-Clause) | Ogg Theora decode in the video module's data layer | linked when `GRACE_ENABLE_THEORA=ON` |
+
+The submodules are fetched once with:
+
+```
+git submodule update --init
+```
+
+[NOTICE](NOTICE) holds the full attribution entries and their licence terms.
 
 ## Repository layout
 
