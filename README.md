@@ -71,7 +71,9 @@ owdtool list <container.owd>
 ```
 The container format is the OWD specification
 ([docs/resource-container.md](docs/resource-container.md)), and the tool is
-the writer and the reader behind it driven by hand.
+the writer and the reader behind it driven by hand. The scene module
+serialises its state into the container as one entry, so the same data can
+be read back by the overlay loader.
 
 ## Documentation
 

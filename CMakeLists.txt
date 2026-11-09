@@ -363,11 +363,27 @@ find_package(ZLIB REQUIRED)
 add_library(grace_owd STATIC
     src/owd/internal.cpp
     src/owd/owd.cpp)
-
 target_include_directories(grace_owd PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
-
 target_link_libraries(grace_owd PUBLIC ZLIB::ZLIB PRIVATE grace_warnings)
+
+# ---------------------------------------------------------------------------
+# grace_scene
+#
+# The scene module (docs/grace-architecture.md section 3.8): data-driven
+# entities, selectable spatial partitioning (flat, grid, octree, quadtree),
+# scene queries and level of detail. The serialisation strategy (decision
+# 36) writes the scene's state into the OWD container as one entry; the
+# scene stays plain data, so the container's own checksums and the overlay
+# loader carry the integrity.
+# ---------------------------------------------------------------------------
+add_library(grace_scene STATIC
+    src/scene/scene_types.cpp
+    src/scene/scene.cpp
+    src/scene/scene_serial.cpp)
+target_include_directories(grace_scene PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
+target_link_libraries(grace_scene PUBLIC grace_core PRIVATE grace_warnings)
 
 # ---------------------------------------------------------------------------
 # owdtool

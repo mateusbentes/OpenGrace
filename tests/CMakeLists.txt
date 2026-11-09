@@ -147,6 +147,14 @@ target_link_libraries(test_owd PRIVATE grace_owd grace_warnings)
 target_include_directories(test_owd PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME owd COMMAND test_owd)
 
+# Scene management (12a, 12b): the entities, the partitioning, the queries
+# and the LOD, plus the serialisation strategy (decision 36) writing into
+# the OWD container.
+add_executable(test_scene test_scene.cpp)
+target_link_libraries(test_scene PRIVATE grace_scene grace_owd grace_warnings)
+target_include_directories(test_scene PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME scene COMMAND test_scene)
+
 # CLI tests for the grace executable, checked for their exact exit code
 # through check_exit_code.cmake in script mode (no test framework):
 # 0 = success, 2 = usage error.
