@@ -30,8 +30,9 @@ option(GRACE_WARNINGS_AS_ERRORS "Treat compiler warnings as errors"         ON)
 option(GRACE_ENABLE_OPENGL      "Build the Linux OpenGL backend"            OFF)
 option(GRACE_ENABLE_PHYSX       "Build the PhysX 3.4 physics backend"       OFF)
 option(GRACE_ENABLE_BULLET      "Build the Bullet physics backend"          OFF)
-option(GRACE_ENABLE_BOX2D       "Build the Box2D physics backend"           OFF)
-option(GRACE_ENABLE_ANGELSCRIPT "Build the AngelScript script backend"      OFF)
+option(GRACE_ENABLE_BOX2D       "Build the Box2D physics backend"          OFF)
+option(GRACE_ENABLE_ANGELSCRIPT "Build the AngelScript script backend"     OFF)
+option(GRACE_ENABLE_OPENAL      "Build the OpenAL Soft audio backend"      OFF)
 
 # ---------------------------------------------------------------------------
 # Warning set
@@ -384,6 +385,69 @@ add_library(grace_scene STATIC
 target_include_directories(grace_scene PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
 target_link_libraries(grace_scene PUBLIC grace_core PRIVATE grace_warnings)
+
+# ---------------------------------------------------------------------------
+# grace_audio
+#
+# The audio contract (docs/grace-architecture.md section 3.10): buffers,
+# voices, streams, per-sound reverb and the 3D listener. The null backend is
+# the deterministic mixer, the protocol reference; the OpenAL Soft adapter is
+# built only when its SDK option is on. The decode layer (WAV, Ogg Vorbis)
+# lives in the data layer, never in the backend calls.
+# ---------------------------------------------------------------------------
+add_library(grace_audio STATIC
+    src/audio/audio_types.cpp
+    src/audio/audio_decode.cpp
+    src/audio/null_audio_backend.cpp)
+target_include_directories(grace_audio PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
+target_link_libraries(grace_audio PUBLIC grace_core PRIVATE grace_warnings)
+
+if(GRACE_ENABLE_OPENAL)
+    add_library(grace_openal_audio STATIC
+        src/audio/openal_audio_backend.cpp
+        src/audio/audio_decode_vorbis.cpp)
+    target_include_directories(grace_openal_audio PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
+    find_package(OpenAL QUIET)
+    if(NOT TARGET OpenAL::OpenAL)
+        find_package(PkgConfig QUIET)
+        if(PKG_CONFIG_FOUND)
+            pkg_check_modules(OPENAL_PC QUIET openal)
+        endif()
+        if(OPENAL_PC_FOUND)
+            add_library(OpenAL::OpenAL INTERFACE IMPORTED)
+            target_include_directories(OpenAL::OpenAL SYSTEM INTERFACE
+                ${OPENAL_PC_INCLUDE_DIRS})
+            target_link_libraries(OpenAL::OpenAL INTERFACE ${OPENAL_PC_LIBRARIES})
+            target_link_directories(OpenAL::OpenAL INTERFACE ${OPENAL_PC_LIBRARY_DIRS})
+        endif()
+    endif()
+    if(NOT TARGET OpenAL::OpenAL)
+        message(FATAL_ERROR
+            "GRACE_ENABLE_OPENAL=ON requires OpenAL: neither find_package(OpenAL) "
+            "nor pkg-config openal located it. Install libopenal-dev or configure "
+            "with -DGRACE_ENABLE_OPENAL=OFF.")
+    endif()
+    # The Ogg Vorbis decode links libvorbisfile (with libvorbis and
+    # libogg): the discovery follows the same pkg-config pattern.
+    find_package(PkgConfig QUIET)
+    if(PKG_CONFIG_FOUND)
+        pkg_check_modules(VORBISFILE QUIET vorbisfile)
+    endif()
+    if(NOT VORBISFILE_FOUND)
+        message(FATAL_ERROR
+            "GRACE_ENABLE_OPENAL=ON requires libvorbisfile: pkg-config "
+            "vorbisfile did not locate it. Install libvorbis-dev or "
+            "configure with -DGRACE_ENABLE_OPENAL=OFF.")
+    endif()
+    target_link_libraries(grace_openal_audio PUBLIC grace_audio
+        PRIVATE grace_warnings OpenAL::OpenAL ${VORBISFILE_LIBRARIES})
+    target_include_directories(grace_openal_audio SYSTEM PRIVATE
+        ${VORBISFILE_INCLUDE_DIRS})
+    target_link_directories(grace_openal_audio PRIVATE
+        ${VORBISFILE_LIBRARY_DIRS})
+endif()
 
 # ---------------------------------------------------------------------------
 # owdtool

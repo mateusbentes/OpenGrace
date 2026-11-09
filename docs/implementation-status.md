@@ -40,7 +40,7 @@ The `.docx` files in this directory are generated from the `.md` sources with
 | 10c | The OWD resource container: the writer, the reader, the filters, the checksums, the overlay loader (11a) and the `owdtool` command line (11b), implementing the specification the decisions 24 and 26 to 29 shaped (decision 35) | Done |
 | 11 | Animation: skeletal, state machines, blending, events | Planned |
 | 12 | Scene management: data-driven entities, selectable spatial partitioning (flat, grid, octree, quadtree), scene queries and LOD (12a), plus the serialisation strategy writing the scene's state into the OWD container (12b) (decision 36) | Done |
-| 13 | Audio: 2D/3D playback, streaming, reverb | Planned |
+| 13 | Audio: 2D/3D playback, streaming, reverb -- the contract (13a), the deterministic null backend (13b) and the OpenAL Soft adapter with the WAV and Ogg Vorbis decoders (13c) (decision 37) | Done |
 | 14 | UI: controls, FreeType fonts, unicode input | Planned |
 | 15 | AI and gameplay services | Planned |
 
@@ -55,9 +55,10 @@ The `.docx` files in this directory are generated from the `.md` sources with
 | render | Partial | Contract, null backend, OpenGL backend, loader, API-neutral mesh/shader/material plus their OpenGL implementations; diagnostic triangle rebuilt on the foundation. |
 | physics | Partial | Contract (8a), null backend (8b), and the Bullet, Box2D and PhysX 3.4 adapters (8c) behind build options. PhysX is the extra-physics capability (decision 32); the classical layer is backend-neutral. |
 | owd | Partial | The OWD container (11a): the writer, the reader, the filters, the checksums and the overlay loader, plus the `owdtool` command line (11b), on zlib's Deflate. |
-| script | Not started | AngelScript and the visual block system are in scope. |
+| script | Partial | The contract (9a), the null backend (9b) and the AngelScript adapter behind GRACE_ENABLE_ANGELSCRIPT; the visual block system (10a, 10b) registers through the same surface. |
 | scene | Partial | Data-driven entities, selectable spatial partitioning (flat, grid, octree, quadtree), scene queries and LOD (12a); the serialisation strategy writes the scene's state into the OWD container (12b) (decision 36). |
-| audio, video, gui, motion, ai, game | Not started | |
+| audio | Partial | The contract (13a), the deterministic null backend (13b) and the OpenAL Soft adapter behind GRACE_ENABLE_OPENAL (13c), with hand-written WAV and libvorbisfile Ogg Vorbis decoders in the data layer. |
+| video, gui, motion, ai, game | Not started | |
 
 ---
 
@@ -120,7 +121,7 @@ All results below are real runs, on the tree at the stated commit.
 | 2026-11-08 | same, milestone 8 | The physics contract (8a), the null backend (8b) and the three real backends (8c): Bullet, Box2D 3 and PhysX 3.4 (decision 32). The contract is the classical layer only — rigid bodies, collision shapes, forces, gravity, joints, buoyancy and force fields, in SI units, Y-up — and carries no physics-API type: no Px*, bt* or b2* type leaves an adapter. The extra physics (PhysX 3.4's CPU cloth and soft body) is a backend capability, reported through capabilityFlags() (decision 32): PhysX reports cloth and soft body, Box2D reports 2D-only, the null backend and Bullet report none. The null backend is the exact reference: deterministic semi-implicit Euler over the world's fixed step. The real backends are measured against it: Bullet and PhysX reproduce the null's single-step scenarios bit-for-bit (fall velocity, fall position, force velocity, impulse, buoyancy), Box2D matches the velocities exactly and integrates positions inside its internal substeps, so its position tolerance is measured (0.219 m of difference against the null's 0.5 m for the force scenario). The adapters live in their own libraries behind the GRACE_ENABLE_PHYSX/BULLET/BOX2D options; the SDKs are external dependencies, cloned git-ignored, never committed. The PhysX adapter instantiates the default allocator and error callback, the default CPU dispatcher, and the null backend's protocol (shutdown, violations, double release). Suites: physics (null backend) 32 checks, physics_adapters 54 checks, 0 failures; the full default build 17/17 Debug; zero warnings under -Werror. All three adapter libraries build with zero warnings under -Werror |
 | 2026-11-08 | same, milestone 9 | The script contract (9a), the null script backend (8b) and the AngelScript adapter (9b) (decision 33). The contract is decl-string based as data — registerType(name, size, flags), registerMethod/registerFunction(decl, native pointer, convention), registerGlobalProperty(decl, pointer) — and carries no scripting-language type: no as* type leaves an adapter. The null backend proves the registration surface and the violation protocol but cannot compile or run scripts (it has no language); the AngelScript adapter is the execution reference: a real script builds, functions are found by declaration, a native function registered through the contract is called from the script body, a registered global property is written from the script, a broken script fails build() with the SDK's message through lastError(), and a script exception fails execute() with the exception message. Suites: script (null backend) 41 checks, script_adapters 40 checks, 0 failures; the default build 17/17 Debug; zero warnings under -Werror. The adapter library builds behind GRACE_ENABLE_ANGELSCRIPT, so the default build stays SDK-free |
 | 2026-11-08 | same, milestone 10 | The visual scripting contract (10a), the null backend (10a) and the graph compiler (10b) (decision 34). The contract is the vocabulary and the graph as data: a registry holds block descriptions (an execution block has at least one flow pin; an expression block has none), a graph references registry blocks by name and connects pins by name, and compile() is the only language-dependent operation. The null backend proves the registry and the graph validation; the graph compiler generates a deterministic AngelScript source for the graph, hands it to the script backend through the contract's addScriptSource/build/findFunction surface, and the entry point resolves by declaration and runs the flow chain on execute. The blocks are native functions registered into the script backend through the contract's registerFunction surface, so the visual layer registers through the same surface the application already uses (architecture 4.2). Suites: visual (null backend) 38 checks, visual_adapters 31 checks, 0 failures; the default build 18/18 Debug (SDK-free), the AngelScript build 20/20; zero warnings under -Werror. The adapter library builds behind GRACE_ENABLE_ANGELSCRIPT, so the default build stays SDK-free |
-| 2026-11-09 | same, milestone 12 | The scene management (12a) and the serialisation strategy (12b) (decision 36). The scene is plain data: a name, a position, a scale, a mesh index, a material index and a list of LOD steps. The partitioning is selectable among flat, grid, octree and quadtree (architecture §3.8) and the same entities and the same query produce the same result under every choice, in the same order — the partitioning is a query strategy, not a data reorganisation. The queries walk the partitioning, so their cost is the nodes they touch. The serialisation writes the scene's state into the OWD container as one entry, deterministic: the same entities produce byte-identical bytes, and the container's own checksums and overlay carry the integrity. Suites: scene 129 checks, 0 failures; the default build 20/20; zero warnings under -Werror |
+| 2026-11-09 | same, milestone 13 | The audio contract (13a), the deterministic null backend (13b) and the OpenAL Soft adapter (13c) (decision 37). The contract is the vocabulary and the backend is the mixer: buffers, voices (2D and 3D), per-voice reverb as a property, the listener and the streaming queue. The null backend is the deterministic reference: mix() advances every voice's cursor by the pitch rule, accumulates the mixed samples, and the 3D attenuation is a straight line from 1.0 at the reference distance to 0.0 at the maximum, so the same calls produce the same samples every run. The OpenAL Soft adapter opens the device lazily, queues the streaming chunks as AL buffers on the voice's source, and registers the reverb as a property (no EFX extension). The codecs are in the data layer, not in the backend calls: the WAV decoder is hand-written, the Ogg Vorbis decoder links libvorbisfile with callbacks over a memory span, and both turn file bytes into the PCM data the backend uploads. Suites: audio (null backend) 97 checks, audio_adapters 32 checks, 0 failures; the default build 21/21 Debug (SDK-free), the OpenAL build 22 tests (the adapter skips without a device, 77); zero warnings under -Werror |
 
 ## Defects found by the tests, and fixed
 
@@ -1123,6 +1124,24 @@ grep -rn 'GLuint\|GLenum\|SDL_\|Window' include/grace/render/render_backend.hpp 
     alone. The suite covers the partitioning selection, the queries, the
     LOD, the refusals and the serialisation through the container.
     Measured: `scene` 129 checks, 0 failures; the default build 20/20.
+
+37. **How does the audio backend mix sound, and where does the codec live?**
+    The contract is the vocabulary and the backend is the mixer: buffers,
+    voices (2D and 3D), per-voice reverb as a property, the listener and the
+    streaming queue. The null backend is the deterministic reference: `mix()`
+    advances every voice's cursor by the pitch rule, accumulates the mixed
+    samples, and the 3D attenuation is a straight line from 1.0 at the
+    reference distance to 0.0 at the maximum, so the same calls produce the
+    same samples every run. The OpenAL Soft adapter is the execution
+    reference: the device opens lazily, the streaming chunks are queued as
+    AL buffers on the voice's source, and the reverb is registered as a
+    property (no EFX extension). The codecs are in the data layer, not in
+    the backend calls: the WAV decoder is hand-written (RIFF, `fmt`, `data`),
+    the Ogg Vorbis decoder links libvorbisfile with callbacks over a memory
+    span, and both turn file bytes into the PCM data the backend uploads.
+    The null mixer measures 97 checks against the contract; the adapter, 32
+    checks against the same contract with the null driver. Suites: audio
+    (null backend) 97 checks, audio_adapters 32 checks, 0 failures.
 
 ## Verification commands
 

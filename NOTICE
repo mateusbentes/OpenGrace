@@ -83,9 +83,24 @@ OpenGL and GLVND
 ===============================================================================
 
 OpenAL Soft
+  https://github.com/kcat/openal-soft
   Copyright (c) 2012-2026 Chris Robinson and contributors
   Licence: LGPL-2.0-or-later
-  Status: planned, as the audio backend. Linked dynamically.
+  Status: linked when GRACE_ENABLE_OPENAL is enabled, as the audio
+  backend. Linked dynamically.
+  Not vendored. The SDK is installed as a system dependency and linked
+  as an external library; no part of it is redistributed from this
+  repository.
+===============================================================================
+libvorbisfile (with libvorbis and libogg)
+  https://github.com/xiph/vorbis
+  Copyright (c) 2002-2020 Xiph.Org Foundation
+  Licence: BSD-style
+  Status: linked when GRACE_ENABLE_OPENAL is enabled, as the Ogg Vorbis
+  decoder in the audio module's data layer.
+  Not vendored. The SDK is installed as a system dependency and linked
+  as an external library; no part of it is redistributed from this
+  repository.
 
 ===============================================================================
 

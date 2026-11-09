@@ -51,6 +51,27 @@ target_link_libraries(test_visual PRIVATE grace_visual grace_null_visual grace_w
 target_include_directories(test_visual PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME visual COMMAND test_visual)
 
+# Audio (13a): the contract and the null backend, the protocol reference.
+# No audio SDK: the null backend is the deterministic mixer.
+add_executable(test_audio test_audio.cpp)
+target_link_libraries(test_audio PRIVATE grace_audio grace_warnings)
+target_include_directories(test_audio PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME audio COMMAND test_audio)
+
+# Audio (13c): the OpenAL Soft adapter and the decode layer. It is only
+# built when its SDK option is on, so this suite exists only when the SDK
+# is present (the SDK lives outside the repo).
+if(GRACE_ENABLE_OPENAL)
+    add_executable(test_audio_adapters test_audio_adapters.cpp)
+    target_link_libraries(test_audio_adapters PRIVATE
+        grace_audio grace_openal_audio grace_warnings)
+    target_include_directories(test_audio_adapters PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR})
+    add_test(NAME audio_adapters COMMAND test_audio_adapters)
+    set_tests_properties(audio_adapters PROPERTIES
+        SKIP_RETURN_CODE 77)
+endif()
+
 # Runtime tests for the real backends (8c). Each adapter target is only
 # built when its SDK option is on, so this suite exists only when all of
 # them are (the sandbox build is; the SDKs live outside the repo).

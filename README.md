@@ -137,6 +137,7 @@ Build options:
 | `GRACE_ENABLE_BULLET` | `OFF` | Build the Bullet physics backend from a local SDK clone. |
 | `GRACE_ENABLE_BOX2D` | `OFF` | Build the Box2D physics backend from a local SDK clone. |
 | `GRACE_ENABLE_ANGELSCRIPT` | `OFF` | Build the AngelScript script backend from a local SDK clone. |
+| `GRACE_ENABLE_OPENAL` | `OFF` | Build the OpenAL Soft audio backend. Requires OpenAL Soft and libvorbisfile. |
 
 ## Dependencies
 
@@ -153,8 +154,8 @@ attribution entries and their licence terms.
 | [Bullet Physics SDK](https://github.com/bulletphysics/bullet3) | zlib | Physics backend | linked when `GRACE_ENABLE_BULLET=ON` |
 | [Box2D](https://github.com/erincatto/box2d) | MIT | 2D physics backend | linked when `GRACE_ENABLE_BOX2D=ON` |
 | [AngelScript](https://github.com/anjo76/angelscript) | zlib | Text scripting host | linked when `GRACE_ENABLE_ANGELSCRIPT=ON` |
-| OpenAL Soft | LGPL-2.0-or-later | Audio backend, linked dynamically | planned |
-| FreeType | FreeType License | Font rendering in the UI module | planned |
+| [OpenAL Soft](https://github.com/kcat/openal-soft) | LGPL-2.0-or-later | Audio backend, linked dynamically | linked when `GRACE_ENABLE_OPENAL=ON` |
+| libvorbisfile | BSD-style | Ogg Vorbis decode in the audio module's data layer | linked when `GRACE_ENABLE_OPENAL=ON` |
 
 ## Repository layout
 
