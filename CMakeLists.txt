@@ -504,6 +504,22 @@ if(GRACE_ENABLE_FREETYPE)
         ${FREETYPE_LIBRARY_DIRS})
 endif()
 # ---------------------------------------------------------------------------
+# grace_game
+#
+# The game module (docs/grace-architecture.md section 2's module table):
+# the agent behaviour system (AI is agent behaviour) and the
+# gameplay-level services (Game). The steering, the timers, the
+# properties, the event queue and the random source are deterministic
+# CPU work; the random source is a xorshift64* generator the application
+# seeds explicitly.
+# ---------------------------------------------------------------------------
+add_library(grace_game STATIC
+    src/game/game_types.cpp
+    src/game/game.cpp)
+target_include_directories(grace_game PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
+target_link_libraries(grace_game PUBLIC grace_core PRIVATE grace_warnings)
+# ---------------------------------------------------------------------------
 # owdtool
 #
 # The container's command line: pack a directory, unpack a container, list

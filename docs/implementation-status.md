@@ -42,7 +42,7 @@ The `.docx` files in this directory are generated from the `.md` sources with
 | 12 | Scene management: data-driven entities, selectable spatial partitioning (flat, grid, octree, quadtree), scene queries and LOD (12a), plus the serialisation strategy writing the scene's state into the OWD container (12b) (decision 36) | Done |
 | 13 | Audio: 2D/3D playback, streaming, reverb -- the contract (13a), the deterministic null backend (13b) and the OpenAL Soft adapter with the WAV and Ogg Vorbis decoders (13c) (decision 37) | Done |
 | 14 | UI: retained controls, the UTF-8 event path and the font contract (14a), the deterministic null backend (14b) and the FreeType adapter behind GRACE_ENABLE_FREETYPE (14c) (decision 39) | Done |
-| 15 | AI and gameplay services | Planned |
+| 15 | AI and gameplay services: the agent behaviours (idle, patrol, seek, flee) with the deterministic steering, the timers, the named properties, the event queue and the seeded random source (15a, 15b) (decision 40) | Done |
 
 ---
 
@@ -60,7 +60,8 @@ The `.docx` files in this directory are generated from the `.md` sources with
 | audio | Partial | The contract (13a), the deterministic null backend (13b) and the OpenAL Soft adapter behind GRACE_ENABLE_OPENAL (13c), with hand-written WAV and libvorbisfile Ogg Vorbis decoders in the data layer. |
 | motion | Partial | Skeletal clips, the deterministic sampler with lerp/slerp and FK, the blendshapes, the events, the state-machine layer with the cross-fade and the look-at and foot placement controllers (decision 38). |
 | gui | Partial | The retained control tree, the hit test and focus, the event dispatch with the UTF-8 text path and the font contract (14a); the deterministic null backend (14b) and the FreeType adapter behind GRACE_ENABLE_FREETYPE (14c) (decision 39). |
-| video, ai, game | Not started | |
+| ai, game | Partial | The agent behaviours (idle, patrol, seek, flee) with the deterministic steering and the gameplay-level services: timers, named properties, the event queue and the seeded random source (decision 40). |
+| video | Not started | |
 
 ---
 
@@ -126,6 +127,7 @@ All results below are real runs, on the tree at the stated commit.
 | 2026-11-09 | same, milestone 13 | The audio contract (13a), the deterministic null backend (13b) and the OpenAL Soft adapter (13c) (decision 37). The contract is the vocabulary and the backend is the mixer: buffers, voices (2D and 3D), per-voice reverb as a property, the listener and the streaming queue. The null backend is the deterministic reference: mix() advances every voice's cursor by the pitch rule, accumulates the mixed samples, and the 3D attenuation is a straight line from 1.0 at the reference distance to 0.0 at the maximum, so the same calls produce the same samples every run. The OpenAL Soft adapter opens the device lazily, queues the streaming chunks as AL buffers on the voice's source, and registers the reverb as a property (no EFX extension). The codecs are in the data layer, not in the backend calls: the WAV decoder is hand-written, the Ogg Vorbis decoder links libvorbisfile with callbacks over a memory span, and both turn file bytes into the PCM data the backend uploads. Suites: audio (null backend) 97 checks, audio_adapters 32 checks, 0 failures; the default build 21/21 Debug (SDK-free), the OpenAL build 22 tests (the adapter skips without a device, 77); zero warnings under -Werror |
 | 2026-11-09 | same, milestone 11 | The motion module (decision 38): the data types (11a: skeletons, clips, tracks, events, blendshapes), the deterministic sampler (11b: the lerp on the positions, the slerp on the rotations, the forward kinematics, the blend, the events in (from, to] with the loop wrap) and the state-machine layer (11c: the trigger and exit-time transitions, the cross-fade from the previous state's pose, the look-at and foot placement controllers). The slerp entered the core math module, where the quaternion header's comment already promised it. Suites: motion 85 checks, 0 failures; the default build 22/22 Debug; zero warnings under -Werror |
 | 2026-11-09 | same, milestone 14 | The GUI module (decision 39): the retained control tree with the hit test, the focus and the event dispatch carrying UTF-8 text (14a), the deterministic null backend with the fixed-metric font backend (14b) and the FreeType adapter behind GRACE_ENABLE_FREETYPE, measured against the system's DejaVu Sans face (14c). The UTF-8 decoder lives in the data layer (the two- to four-byte forms, the replacement code point on an invalid lead). Suites: gui 82 checks, gui_adapters 21 checks, 0 failures; the default build 23/23 Debug, the FreeType build 24 tests; zero warnings under -Werror |
+| 2026-11-09 | same, milestone 15 | The game module (decision 40): the agent behaviours idle, patrol, seek and flee with the deterministic steering (the patrol walks its waypoints in order and wraps, the seek stops at the target, the flee moves away), the timers with the repeating fire and the timer events on the queue, the named properties whose kind is fixed by the first set, the event queue and the xorshift64* random source the application seeds explicitly (a zero seed and an unseeded draw throw). Suites: game 129 checks, 0 failures; the default build 24/24 Debug, the full-SDK build 28/28; zero warnings under -Werror |
 
 ## Defects found by the tests, and fixed
 
@@ -1174,6 +1176,23 @@ grep -rn 'GLuint\|GLenum\|SDL_\|Window' include/grace/render/render_backend.hpp 
     against the system's DejaVu Sans. Text is UTF-8 through the
     whole contract; the decoder lives in the data layer, not in the
     backend calls.
+
+40. **What do "agent behaviour" and "gameplay-level services"
+    cover, and where does the randomness come from?** The module
+    table names the AI module's scope in one phrase, agent
+    behaviour, and the Game module's in another, gameplay-level
+    services; the documented material says nothing more specific
+    about either. This project reads both as deterministic engine
+    services, the scene module's pattern: the behaviours the built-in
+    set covers are idle, patrol, seek and flee, driven by
+    application-supplied targets and waypoints, and the services are
+    timers, named properties, an event queue and a random source.
+    The random source is a xorshift64* generator the application
+    seeds explicitly, so a scripted sequence is reproducible by
+    construction and no library random state exists. Nothing in the
+    module names a navigation mesh, a path finder or a scheduler:
+    the documented material names none, and the module stays the
+    deterministic core the higher layers build on.
 
 ## Verification commands
 

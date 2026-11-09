@@ -53,6 +53,11 @@ add_test(NAME visual COMMAND test_visual)
 
 # Audio (13a): the contract and the null backend, the protocol reference.
 # No audio SDK: the null backend is the deterministic mixer.
+add_executable(test_game test_game.cpp)
+target_link_libraries(test_game PRIVATE grace_game grace_warnings)
+target_include_directories(test_game PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME game COMMAND test_game)
+
 add_executable(test_gui test_gui.cpp)
 target_link_libraries(test_gui PRIVATE grace_gui grace_warnings)
 target_include_directories(test_gui PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
