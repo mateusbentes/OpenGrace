@@ -182,6 +182,32 @@ if(GRACE_ENABLE_ANGELSCRIPT)
 endif()
 
 # ---------------------------------------------------------------------------
+# grace_visual
+#
+# The platform-neutral visual-scripting contract: registry, block and pin
+# descriptions, graph descriptions and the compile operation. The headers
+# carry no scripting-language types; the visual layer registers its blocks
+# through the script contract (architecture §4.2).
+# ---------------------------------------------------------------------------
+add_library(grace_visual STATIC
+    src/visual/visual_types.cpp)
+target_include_directories(grace_visual PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
+target_link_libraries(grace_visual PUBLIC grace_script PRIVATE grace_warnings)
+
+# ---------------------------------------------------------------------------
+# grace_null_visual
+#
+# Headless visual-scripting backend: the contract's protocol reference. It
+# records the registration surface and the compile requests and counts
+# protocol violations; it cannot compile graphs (it has no script host
+# behind it).
+# ---------------------------------------------------------------------------
+add_library(grace_null_visual STATIC
+    src/visual/null_visual_backend.cpp)
+target_link_libraries(grace_null_visual PUBLIC grace_visual PRIVATE grace_warnings)
+
+# ---------------------------------------------------------------------------
 # Optional physics adapters (8c)
 #
 # Each adapter maps the contract onto one SDK and lives behind its own

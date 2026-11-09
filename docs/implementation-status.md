@@ -36,7 +36,7 @@ The `.docx` files in this directory are generated from the `.md` sources with
 | 7 | Global illumination by light volume propagation. Four increments, all measured: the 3D texture exists in the contract and in both backends, a pass renders into one layer of a volume without touching the others, the scene deposits its light into every layer, one propagation step averages the six face neighbours, and the volume composes into the frame — the ambient term of both paths (decision 30, decision 17(d)) | Done |
 | 8 | Physics contract and the first backend: the contract (8a), the null backend (8b), and the Bullet, Box2D and PhysX 3.4 adapters (8c) (decision 32) | Done |
 | 9 | Script host: the contract (9a), the null backend (8b) and the AngelScript adapter (9b) (decision 33); serialisation strategy is milestone 12 | Done |
-| 10 | Visual scripting: block registry and graph evaluation | Planned |
+| 10 | Visual scripting: block registry and graph evaluation — the contract (10a), the null backend (10a) and the adapter (10b) (decision 34) | Planned (10a done) |
 | 11 | Animation: skeletal, state machines, blending, events | Planned |
 | 12 | Scene management: entities, spatial partitioning, queries, LOD | Planned |
 | 13 | Audio: 2D/3D playback, streaming, reverb | Planned |
@@ -1054,6 +1054,23 @@ grep -rn 'GLuint\|GLenum\|SDL_\|Window' include/grace/render/render_backend.hpp 
     them into every engine created through it. The SDK is cloned
     git-ignored and linked when GRACE_ENABLE_ANGELSCRIPT is enabled, so
     the default build stays free of it; the licence entry is in NOTICE.
+34. **What is the visual scripting layer, and what does its contract carry?**
+    The documented architecture describes the visual scripting system as a
+    graph representation whose blocks are types registered into the
+    AngelScript engine; each graph compiles to a callable entry point
+    (architecture §3.5, §4.2). The contract is the vocabulary and the graph
+    as data: a registry holds block descriptions (an execution block has at
+    least one flow pin; an expression block has none), a graph references
+    registry blocks by name and connects pins by name, and compile() is the
+    only language-dependent operation. The documented material does not
+    publish the block vocabulary, so the contract records the structure and
+    defers the vocabulary to the adapter; the null backend is the protocol
+    reference (registry, graph validation, compile() fails with a
+    deterministic lastError(), violations counted), and the real adapter
+    (milestone 10b) maps the vocabulary onto the script contract's
+    registration surface, so a graph compiles to a callable entry point
+    through the same surface the visual layer registers its blocks through
+    (architecture §4.2).
 
 ## Verification commands
 

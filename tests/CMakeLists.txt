@@ -44,6 +44,13 @@ target_link_libraries(test_script PRIVATE grace_script grace_null_script grace_w
 target_include_directories(test_script PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME script COMMAND test_script)
 
+# Visual scripting (10a): the contract and the null backend, the protocol
+# reference. No scripting-language dependency.
+add_executable(test_visual test_visual.cpp)
+target_link_libraries(test_visual PRIVATE grace_visual grace_null_visual grace_warnings)
+target_include_directories(test_visual PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME visual COMMAND test_visual)
+
 # Runtime tests for the real backends (8c). Each adapter target is only
 # built when its SDK option is on, so this suite exists only when all of
 # them are (the sandbox build is; the SDKs live outside the repo).
