@@ -1,9 +1,21 @@
 #pragma once
 
-// OpenGL types and constants. This header belongs to the OpenGL render module
-// only; the platform-neutral contract (grace/render/render_backend.hpp) never
-// includes it.
-#include <GL/gl.h>
+// OpenGL types and constants, from the ARB registry core header. It defines
+// every constant the engine uses up through the profiles it targets and is
+// standalone on every platform the engine builds on (the system gl.h is not:
+// MinGW's declares GL 1.1 only, and gl.h on Linux reaches 3.x constants only
+// through its own glext.h include). The header belongs to the OpenGL render
+// module only; the platform-neutral contract never includes it. Entry points
+// are still resolved at runtime through SDL_GL_GetProcAddress; the header's
+// GLAPI declarations are extern and the engine never links against them.
+#include <GL/glcorearb.h>
+// The ARB registry header includes <windows.h> on Windows, and the legacy
+// Windows headers define near and far as empty macros (the 16-bit segment
+// modifiers). The engine's camera and shadow structures use near and far as
+// member names, so the macros are removed right after the registry header
+// instead of renaming public API fields around a platform quirk.
+#undef near
+#undef far
 
 #include <string>
 

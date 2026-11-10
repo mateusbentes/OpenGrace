@@ -1,6 +1,8 @@
 #pragma once
 
-#include <GL/gl.h>
+#include <GL/glcorearb.h>
+#undef near
+#undef far
 
 #include <cstddef>
 #include <cstdint>

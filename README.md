@@ -3,6 +3,9 @@
 Independent, source-only reimplementation of the GRACE 2 engine architecture,
 targeting native Linux x86_64 with OpenGL. Apache-2.0 licensed.
 
+The engine is implemented on Linux x86_64 with OpenGL, and is cross-compiled
+for Windows x86_64 (MinGW-w64), validated under Wine.
+
 **This repository ships no game assets, no proprietary code, and no SDK
 material.** It is an independent implementation built from publicly documented
 behaviour and published technical descriptions of the original engine.
@@ -34,9 +37,9 @@ or TopWare Interactive.
   from the requirements a runtime has rather than copied from any product; see
   the resource container specification.
 - Keep every subsystem behind a platform-neutral contract.
-- Target Linux x86_64 with OpenGL as the implemented platform. Windows and
-  Android are planned and described in the Platforms section; neither is
-  implemented, and no source file has been adapted for them.
+- Target Linux x86_64 with OpenGL as the implemented platform. Windows is
+  cross-compiled and validated under Wine (milestone 17) and Android remains
+  planned; see the Platforms section.
 - Validate each subsystem with deterministic tests and observable behaviour.
 - Document design decisions, limitations, and validation results clearly.
 
@@ -88,20 +91,26 @@ be read back by the overlay loader.
 | Platform | Graphics API | Status |
 | --- | --- | --- |
 | Linux x86_64 | OpenGL 3.3 core, falling back to 3.0 | Implemented and validated |
-| Windows x86_64 | OpenGL | Planned, not started |
+| Windows x86_64 | OpenGL | Cross-compiled, validated under Wine (milestone 17) |
 | Android | OpenGL ES 3.0 | Planned, not started |
 
-Only the first row is real. Linux x86_64 with OpenGL is the only target that
-builds and passes its tests; the other two are recorded here so the intended
-scope is explicit rather than implied. Nothing in this repository currently
-supports them, and no build file, shader or source file has been adapted for
-either.
+Linux is implemented and validated. Windows is cross-compiled with MinGW-w64
+and validated under Wine (milestone 17): the tree builds clean under -Werror
+and the full render pipeline (context, mesh, shader, lighting, shadows, post
+chain, readback) executes under Wine. This is Wine, not a native Windows run.
+Android is recorded here so the intended scope is explicit rather than
+implied, and nothing in this repository currently supports it; no build file,
+shader or source file has been adapted for it.
 
 Windows is expected to be a small change rather than a port. The window and the
 context come from SDL2, the render contract is API-neutral, and the OpenGL entry
 points are resolved at runtime through `SDL_GL_GetProcAddress` instead of being
-linked directly, so there is no import library to replace. The build has not
-been exercised on Windows and the loader has not been reviewed for it.
+linked directly, so there is no import library to replace. What the cross-compile
+changed: the CMakeLists gained the Windows branch (opengl32 and the Windows
+system libraries for a static SDL2, the MSVC warning set, the MinGW static
+runtime), the GL headers load glcorearb.h (MinGW's gl.h is GL 1.1 only) and
+shield the `near`/`far` pseudo-modifiers, and the PhysX adapter is Linux-only
+by build option.
 
 Android is a larger change and is not primarily a build-system question. OpenGL
 ES is a different API profile with a different shading language: the shaders
@@ -111,10 +120,14 @@ API-neutral. The application lifecycle also differs, because the application
 does not own its window and the context can be lost and recreated. None of that
 is implemented.
 
-The physics and scripting backends are not wired yet, so neither platform
-introduces a dependency that is currently unavailable there. The PhysX SDK 3.4
-upstream lists Windows, Linux, OSX, Android and iOS among its supported
-platforms, which is part of why Windows and Android are the two recorded here.
+The scripting backends are not wired yet, so neither platform introduces a
+dependency that is currently unavailable there. The physics backends are
+behind build options and the PhysX adapter is Linux-only: the adapter links
+the SDK's linux64 Makefiles build, and the CMake configuration stops with
+`FATAL_ERROR` when GRACE_ENABLE_PHYSX is on and the target is not Linux. The
+SDK upstream lists Windows, Linux, OSX, Android and iOS among its supported
+platforms, so a Windows PhysX backend would come from the SDK's own Windows
+build, not from milestone 17.
 
 ## Building
 

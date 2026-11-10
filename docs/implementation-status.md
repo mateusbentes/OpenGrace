@@ -44,6 +44,7 @@ The `.docx` files in this directory are generated from the `.md` sources with
 | 14 | UI: retained controls, the UTF-8 event path and the font contract (14a), the deterministic null backend (14b) and the FreeType adapter behind GRACE_ENABLE_FREETYPE (14c) (decision 39) | Done |
 | 15 | AI and gameplay services: the agent behaviours (idle, patrol, seek, flee) with the deterministic steering, the timers, the named properties, the event queue and the seeded random source (15a, 15b) (decision 40) | Done |
 | 16 | Video: the playback service -- the contract (16a), the deterministic null backend (16b) and the Ogg Theora decode layer behind GRACE_ENABLE_THEORA (16c) (decision 41) | Done |
+| 17 | Windows validation: the MinGW-w64 cross-compile builds the tree clean under -Werror (105 targets), the OpenGL backend links opengl32.dll and the Windows system libraries, the GL headers load glcorearb.h, and the SDL teardown releases the video subsystem by reference count with the context unbound before deletion (decision 42) | Done |
 ---
 
 ## Module status
@@ -131,6 +132,8 @@ All results below are real runs, on the tree at the stated commit.
 | 2026-11-09 | same, milestone 16 | The video module (decision 41): the playback service as a deterministic frame stepper (the cursor advances by the delta seconds at the video's frame rate scaled by the playback's rate, the loop wraps, the playback stops at the last frame), the packed Yuv420 payload the application uploads, and the Ogg Theora decode layer behind GRACE_ENABLE_THEORA, measured against a real file (16 frames, 64x64, 16 fps). Suites: video 66 checks, video_adapters 11 checks, 0 failures; the default build 25/25 Debug, the Theora build 26/26, the full-SDK build 30/30; zero warnings under -Werror |
 | 2026-11-09 | same, middleware submodules | The ten middleware SDKs became pinned git submodules (physx-3.4, bullet3, box2d, angelscript, sdl2, openal-soft, freetype, libogg, libvorbis, libtheora), each at a fixed upstream commit; `tools/add-submodules.sh` registers them idempotently and the CMake configuration builds each one on demand (ExternalProject, Release, outside the engine's warning set) into the build tree's `third-party/`. The PhysX checkout is patched in place by `tools/physx-patch.cmake` (the makefiles' `-Werror` replaced with the tw2-proven set, one header's const-correctness fix), the xiph chain is built in dependency order (ogg -> vorbis -> theora, theora's configure finds the ogg headers through the prefix's pkg-config files), and the physics_adapters test carries the PhysX runtime `LD_LIBRARY_PATH`. Suites: default build 25/25 Debug, OpenGL build 41/41, full-SDK build 28/28 (PhysX + Bullet + Box2D + AngelScript), OpenAL build 26/26, FreeType build 26/26, Theora build 26/26, AngelScript build 27/27; zero warnings under -Werror. The two-step flow (submodules + patch) validated on a fresh clone of the tree |
 | 2026-11-09 | same, middleware submodules | SDL2 re-pinned to release-2.30.12 (the last revision of the 2.30.x series the engine supports; the engine's window, context, GL attribute and `SDL_GL_GetProcAddress` uses are unchanged across the series), and the shader-source rule test reads the submodule paths out of `.gitmodules` and skips them (measured: bullet3's examples and PhysX's KaplaDemo carry shading-language sources; without the skip the rule reported 8 hits in third-party code, 2905 files scanned, 0 hits with the skip). The four open questions of architecture §7 are resolved and recorded in "Open decisions" (3, 4, 5, 6). Suites: default build 25/25 Debug, OpenGL build 41/41 (SDL2 2.30.12 built from the new pin), docs_structure 23 checks, 0 failures; zero warnings under -Werror |
+| 2026-11-09 | Ubuntu 26.04.1, x86_64, GCC 15.2.0, CMake 4.2.3, milestone 17 (decision 42) | Linux regression: the default build 25/25 Debug, the OpenGL build 41/41, zero warnings under -Werror |
+| 2026-11-09 | same, MinGW-w64 GCC 13.2.0 cross-compile (x86_64-w64-mingw32), Wine 9.0 + Xvfb, milestone 17 (decision 42) | The tree cross-compiles clean under -Werror: 105 targets in the default build and 111 in the OpenGL build (SDL2 2.30.12 built from the submodule for Windows by the ExternalProject). Under Wine the default build 25/25 and the OpenGL build 38/38 (the two path-argument tests pass with the repo root as argv[1]); opengl_render runs 193 checks, 0 failures, and the full render pipeline (context, mesh, shader, lighting, shadows, post chain, readback) executes on Windows. Validation is Wine, not a native Windows run: the engine code has not been executed on native Windows hardware |
 
 ## Defects found by the tests, and fixed
 
@@ -1264,6 +1267,27 @@ grep -rn 'GLuint\|GLenum\|SDL_\|Window' include/grace/render/render_backend.hpp 
     packed payload is planar YCbCr, the format the decoder
     produces; the RGB conversion is the renderer's sampling
     concern, not a backend call.
+
+42. **How does the OpenGL backend release the video subsystem when a
+    backend instance is torn down?** The engine creates the video
+    subsystem with `SDL_Init(SDL_INIT_VIDEO)` per backend instance
+    and the documented SDL2 behaviour is that `SDL_Quit` is not
+    reference counted: it tears down the video subsystem for every
+    backend instance in the process, so a sibling backend's
+    `SDL_GL_MakeCurrent` and `SDL_GL_GetProcAddress` fail after it.
+    **Resolved 2026-11-09 (milestone 17): the teardown releases the
+    caller's own reference with `SDL_QuitSubSystem(SDL_INIT_VIDEO)`,
+    which is reference counted, and unbinds the context with
+    `SDL_GL_MakeCurrent(nullptr, nullptr)` before deleting it.**
+    The measured Windows behaviour (see the validation records,
+    milestone 17) is that SDL keeps the most recent context current
+    for the whole process, so a backend that leaves its context
+    bound on delete would leave a sibling backend's GL calls running
+    without a current context; `drainGlErrors` loops forever on
+    `GL_INVALID_OPERATION` in that state. The rebind before every GL
+    entry point (`makeCurrent`) is the defensive half of the same
+    decision: the backend no longer assumes the process-wide context
+    belongs to it.
 
 ## Verification commands
 

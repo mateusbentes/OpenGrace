@@ -27,7 +27,7 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
 
 option(GRACE_BUILD_TESTS        "Build and register the deterministic tests" ON)
 option(GRACE_WARNINGS_AS_ERRORS "Treat compiler warnings as errors"         ON)
-option(GRACE_ENABLE_OPENGL      "Build the Linux OpenGL backend"            OFF)
+option(GRACE_ENABLE_OPENGL      "Build the OpenGL backend"                 OFF)
 option(GRACE_ENABLE_PHYSX       "Build the PhysX 3.4 physics backend"       OFF)
 option(GRACE_ENABLE_BULLET      "Build the Bullet physics backend"          OFF)
 option(GRACE_ENABLE_BOX2D       "Build the Box2D physics backend"          OFF)
@@ -61,6 +61,23 @@ set(GRACE_SDK_CMAKE_ARGS
     -DCMAKE_INSTALL_PREFIX=${GRACE_THIRD_PARTY}
     -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
     -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER})
+if(CMAKE_TOOLCHAIN_FILE)
+    # A cross-compile's toolchain file must reach the SDK builds, or they
+    # configure for the build host and the engine's link fails at the
+    # platform mismatch.
+    list(APPEND GRACE_SDK_CMAKE_ARGS
+        -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE})
+endif()
+if(CMAKE_CROSSCOMPILING)
+    # A cross-compile needs the system name and the binutils at the SDK
+    # builds, or they configure for the build host (the SDL2 build would
+    # probe linux/version.h on a Windows target).
+    list(APPEND GRACE_SDK_CMAKE_ARGS
+        -DCMAKE_SYSTEM_NAME=${CMAKE_SYSTEM_NAME}
+        -DCMAKE_SYSTEM_PROCESSOR=${CMAKE_SYSTEM_PROCESSOR}
+        -DCMAKE_AR=${CMAKE_AR}
+        -DCMAKE_RANLIB=${CMAKE_RANLIB})
+endif()
 # The adapter targets reference the prefix's include/lib directories before
 # the ExternalProject builds run; the directories must exist at configure
 # time, or the configure step fails on the imported target's paths.
@@ -115,6 +132,7 @@ ExternalProject_Add(grace_sdl2
         -DSDL_AUDIO=OFF -DSDL_RENDER=OFF -DSDL_EVENTS=ON
         -DSDL_JOYSTICK=OFF -DSDL_HAPTIC=OFF -DSDL_POWER=OFF
         -DSDL_FILESYSTEM=OFF -DSDL_TIMERS=ON
+        -DSDL_THREADS=ON
     BUILD_BYPRODUCTS ${GRACE_THIRD_PARTY}/lib/libSDL2.a)
 endif()
 
@@ -195,6 +213,12 @@ endif()
 # ---------------------------------------------------------------------------
 
 if(GRACE_ENABLE_PHYSX)
+    if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        message(FATAL_ERROR
+            "GRACE_ENABLE_PHYSX=ON is supported on Linux only "
+            "(the adapter links the SDK's linux64 Makefiles build; the "
+            "Windows validation milestone 17 does not cover the adapter)")
+    endif()
 ExternalProject_Add(grace_physx
     SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/physx-3.4/PhysX_3.4/Source/compiler/linux64
     CONFIGURE_COMMAND ""
@@ -242,7 +266,21 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
         target_compile_options(grace_warnings INTERFACE -Werror)
     endif()
 endif()
-
+if(MSVC)
+    target_compile_options(grace_warnings INTERFACE
+        /W4
+        /permissive-)
+    if(GRACE_WARNINGS_AS_ERRORS)
+        target_compile_options(grace_warnings INTERFACE /WX)
+    endif()
+endif()
+if(WIN32 AND NOT MSVC)
+    # The default MinGW build links the GCC runtime as DLLs; the engine ships
+    # no DLLs, so the runtime is linked in statically. Visual Studio links the
+    # runtime statically by default and needs no equivalent.
+    target_link_options(grace_warnings INTERFACE
+        -static-libgcc -static-libstdc++ -static)
+endif()
 # ---------------------------------------------------------------------------
 # grace_core
 #
@@ -460,20 +498,15 @@ if(GRACE_ENABLE_BOX2D)
 endif()
 
 # ---------------------------------------------------------------------------
-# OpenGL render backend (Linux only)
+# OpenGL render backend
 #
 # SDL2 provides window/context/input; OpenGL comes from GLVND (OpenGL::OpenGL,
-# never the legacy libGL). Entry points beyond GL 1.1 are resolved at runtime
-# through SDL_GL_GetProcAddress by the internal loader in this module.
+# never the legacy libGL) on Linux and from opengl32.dll on Windows. Entry
+# points beyond GL 1.1 are resolved at runtime through SDL_GL_GetProcAddress
+# by the internal loader in this module.
 # ---------------------------------------------------------------------------
 
 if(GRACE_ENABLE_OPENGL)
-    if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
-        message(FATAL_ERROR
-            "GRACE_ENABLE_OPENGL=ON is supported on Linux only "
-            "(target platform: native Linux x86_64, OpenGL)")
-    endif()
-
     # SDL2 comes from the pinned git submodule (grace_sdl2 above), built as
     # a static library into the third-party prefix.
     add_library(SDL2::SDL2 INTERFACE IMPORTED)
@@ -481,9 +514,25 @@ if(GRACE_ENABLE_OPENGL)
         ${GRACE_THIRD_PARTY}/include)
     target_link_libraries(SDL2::SDL2 INTERFACE
         ${GRACE_THIRD_PARTY}/lib/libSDL2.a)
+    if(WIN32)
+        # A static SDL2 on Windows needs the Windows API libraries that
+        # the SDL2 CMake build records as its own dependencies; CMake
+        # resolves them at the engine's link.
+        target_link_libraries(SDL2::SDL2 INTERFACE
+            user32 gdi32 winmm imm32 ole32 oleaut32 version uuid
+            advapi32 setupapi shell32)
+    endif()
 
     set(OpenGL_GL_PREFERENCE GLVND)
-    find_package(OpenGL REQUIRED)
+    if(WIN32)
+        # Windows: OpenGL 1.1 comes from opengl32.dll, the platform SDK's
+        # import library; entry points beyond GL 1.1 are resolved at
+        # runtime (SDL_GL_GetProcAddress) exactly as on Linux.
+        target_link_libraries(SDL2::SDL2 INTERFACE opengl32)
+    else()
+        set(OpenGL_GL_PREFERENCE GLVND)
+        find_package(OpenGL REQUIRED)
+    endif()
 
     add_library(grace_render_opengl STATIC
         src/render/opengl/gl_loader.cpp
@@ -493,9 +542,18 @@ if(GRACE_ENABLE_OPENGL)
         src/render/opengl/opengl_render_backend.cpp)
     add_dependencies(grace_render_opengl grace_sdl2)
 
-    target_link_libraries(grace_render_opengl
-        PUBLIC grace_render
-        PRIVATE grace_warnings SDL2::SDL2 OpenGL::OpenGL)
+    if(WIN32)
+        # OpenGL::OpenGL does not exist on Windows (GLVND is a Linux
+        # system package); the GL 1.1 import library comes through
+        # SDL2::SDL2 above.
+        target_link_libraries(grace_render_opengl
+            PUBLIC grace_render
+            PRIVATE grace_warnings SDL2::SDL2)
+    else()
+        target_link_libraries(grace_render_opengl
+            PUBLIC grace_render
+            PRIVATE grace_warnings SDL2::SDL2 OpenGL::OpenGL)
+    endif()
 endif()
 
 # ---------------------------------------------------------------------------

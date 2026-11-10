@@ -41,6 +41,8 @@ int main(int argc, char** argv)
             submodules.push_back(line.substr(at + key.size()));
         }
     }
+    const std::string rootGeneric =
+        fs::path(root).lexically_normal().generic_string();
     int filesScanned = 0;
     int hits = 0;
     for (const auto& entry : fs::recursive_directory_iterator(root))
@@ -62,7 +64,7 @@ int main(int argc, char** argv)
         bool inSubmodule = false;
         for (const std::string& sub : submodules)
         {
-            if (generic.find("./" + sub + "/") == 0)
+            if (generic.find(rootGeneric + "/" + sub + "/") == 0)
             {
                 inSubmodule = true;
                 break;

@@ -30,6 +30,16 @@ constexpr int kRequestedMinor = 3;
 
 constexpr float kPi = 3.14159265358979323846f;
 
+// The teardown of a backend instance releases the video subsystem with
+// SDL_QuitSubSystem, not SDL_Quit: SDL_Quit is not reference counted and
+// would tear down the video subsystem that other backend instances in the
+// same process still use (SDL_QuitSubSystem only releases the caller's own
+// SDL_Init reference, so video stays up while another instance is alive).
+void sdlVideoRelease()
+{
+    SDL_QuitSubSystem(SDL_INIT_VIDEO);
+}
+
 // Diagnostic triangle shaders, built on the generic shader/material path.
 std::string glErrorText(GLenum error)
 {
@@ -169,6 +179,16 @@ struct OpenGLRenderBackend::Impl
 
     bool ready() const { return state == State::Initialised; }
 
+    // GL calls require the context to be current on the calling thread. SDL
+    // keeps the most recent context current for the whole process, so a
+    // sibling backend's teardown would leave this backend without a current
+    // context on Windows. Rebind before every GL entry point.
+    void makeCurrent()
+    {
+        if (context != nullptr && window != nullptr)
+            SDL_GL_MakeCurrent(window, context);
+    }
+
     void drainGlErrors(const char* where)
     {
         GLenum error = gl.glGetError();
@@ -258,7 +278,7 @@ void OpenGLRenderBackend::initialise()
             SDL_DestroyWindow(impl.window);
             impl.window = nullptr;
         }
-        SDL_Quit();
+        sdlVideoRelease();
         throw std::runtime_error(message);
     }
 
@@ -274,7 +294,7 @@ void OpenGLRenderBackend::initialise()
         impl.context = nullptr;
         SDL_DestroyWindow(impl.window);
         impl.window = nullptr;
-        SDL_Quit();
+        sdlVideoRelease();
         throw std::runtime_error(message);
     }
 
@@ -322,6 +342,7 @@ void OpenGLRenderBackend::clear()
         return;
     }
 
+    impl.makeCurrent();
     impl.gl.glClearColor(static_cast<GLfloat>(impl.clear_color.r) / 255.0f,
                          static_cast<GLfloat>(impl.clear_color.g) / 255.0f,
                          static_cast<GLfloat>(impl.clear_color.b) / 255.0f,
@@ -344,6 +365,7 @@ void OpenGLRenderBackend::swapBuffers()
         ++impl.violations;
         return;
     }
+    impl.makeCurrent();
     // Readback happens before the swap: the back buffer contents are undefined
     // after SDL_GL_SwapWindow.
     if (impl.config.readback_center || !impl.readback_queue.empty())
@@ -400,6 +422,11 @@ void OpenGLRenderBackend::shutdownImpl(bool countViolation)
     impl.drainGlErrors("shutdown");
     if (impl.context != nullptr)
     {
+        // Release the bind before deleting the context: SDL keeps the old
+        // context current on SDL_GL_DeleteContext, and the test's next
+        // SDL_GL_MakeCurrent on the sibling backend would then fail with
+        // GL_INVALID_OPERATION and loop forever in drainGlErrors.
+        SDL_GL_MakeCurrent(nullptr, nullptr);
         SDL_GL_DeleteContext(impl.context);
         impl.context = nullptr;
     }
@@ -408,7 +435,7 @@ void OpenGLRenderBackend::shutdownImpl(bool countViolation)
         SDL_DestroyWindow(impl.window);
         impl.window = nullptr;
     }
-    SDL_Quit();
+    sdlVideoRelease();
     impl.state = Impl::State::Shutdown;
 }
 
@@ -470,6 +497,7 @@ void OpenGLRenderBackend::readback()
         ++impl.violations;
         return;
     }
+    impl.makeCurrent();
     readCenter();
     captureQueuedReadbacks();
 }
@@ -486,6 +514,7 @@ ClearColor OpenGLRenderBackend::readPixel(std::uint32_t x, std::uint32_t y)
     // depth-only pass target) is invalid: skip the GL call.
     if (impl.bound_target != nullptr && !impl.bound_target->hasColorAttachment())
         return ClearColor{0, 0, 0, 0};
+    impl.makeCurrent();
     GLubyte pixel[4] = {0, 0, 0, 0};
     impl.gl.glReadPixels(static_cast<GLint>(x), static_cast<GLint>(y), 1, 1, GL_RGBA,
                          GL_UNSIGNED_BYTE, pixel);
@@ -503,6 +532,7 @@ float OpenGLRenderBackend::readDepth(std::uint32_t x, std::uint32_t y)
     }
     if (impl.bound_target != nullptr && !impl.bound_target->hasDepthAttachment())
         return 0.0f;
+    impl.makeCurrent();
     GLfloat depth = 0.0f;
     impl.gl.glReadPixels(static_cast<GLint>(x), static_cast<GLint>(y), 1, 1,
                          GL_DEPTH_COMPONENT, GL_FLOAT, &depth);
@@ -520,6 +550,7 @@ std::int32_t OpenGLRenderBackend::readStencilAt(std::uint32_t x, std::uint32_t y
     }
     if (impl.bound_target != nullptr && !impl.bound_target->hasDepthAttachment())
         return 0;
+    impl.makeCurrent();
     GLubyte stencil = 0;
     impl.gl.glReadPixels(static_cast<GLint>(x), static_cast<GLint>(y), 1, 1, GL_STENCIL_INDEX,
                          GL_UNSIGNED_BYTE, &stencil);

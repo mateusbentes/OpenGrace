@@ -1,6 +1,8 @@
 #pragma once
 
-#include <GL/gl.h>
+#include <GL/glcorearb.h>
+#undef near
+#undef far
 
 #include "grace/render/mesh.hpp"
 #include "grace/render/opengl/gl_loader.hpp"
