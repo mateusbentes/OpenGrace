@@ -212,16 +212,18 @@ as a decision rather than folded in as if it were fidelity.
 OpenGrace implements Linux x86_64 with OpenGL, and records Windows and Android
 as planned targets. This is a subset of the original platform matrix, and the
 implemented part is well supported: OpenGL 3.0+ was a documented GRACE 2
-target.
+target. Android is planned through Vulkan, not OpenGL ES: Vulkan is the
+single backend that covers Android, Windows and Linux, with Windows and
+Linux Vulkan being the extra capability (see 4.5).
 
 | GRACE 2 area | OpenGrace approach |
 | --- | --- |
-| Direct3D 9/10/11 | Out of scope. OpenGL and OpenGL ES only. |
+| Direct3D 9/10/11 | Out of scope. OpenGL and Vulkan only. |
 | OpenGL 3.0+ | Primary target. Core profile, GLSL 3.30 or newer. |
 | Console platforms | Out of scope. |
 | Windows | Cross-compiled (MinGW-w64) and validated under Wine; the same backend; see 4.3. |
 | macOS | Not a target. Apple deprecated OpenGL in macOS 10.14, so a backend would be possible but would have no future; see 4.3. |
-| Mobile platforms | Android is a planned target, not implemented. OpenGL ES 3.0 would be the API; see 4.3. |
+| Mobile platforms | Android is a planned target, not implemented. Vulkan would be the API; see 4.3. |
 | PhysX / Bullet / Box2D | Plugin contract preserved; backends chosen by licence fit. |
 | OpenAL / OpenSL / XAudio2 / MultiStream | Plugin contract preserved; OpenAL Soft on Linux. |
 | AngelScript + Tetragramaton | Both reimplemented as engine services. |
@@ -280,7 +282,7 @@ script layer holding behaviour rather than authoritative state.
 | --- | --- | --- |
 | Linux x86_64 | OpenGL 3.3 core, falling back to 3.0 | Implemented and validated |
 | Windows x86_64 | OpenGL | Cross-compiled, validated under Wine (milestone 17) |
-| Android | OpenGL ES 3.0 | Planned, not started |
+| Android | Vulkan | Planned, not started |
 
 Linux is implemented and validated. Windows is cross-compiled with MinGW-w64
 and validated under Wine (milestone 17, decision 42): the tree builds clean
@@ -303,10 +305,10 @@ shield the `near`/`far` pseudo-modifiers, and the PhysX adapter is Linux-only
 by build option (the adapter links the SDK's linux64 Makefiles build; the
 Windows validation milestone 17 does not cover the adapter).
 
-Android is a larger change and is not primarily a build-system question. OpenGL
-ES is a different profile with a different shading language: the shaders target
-GLSL 3.30 core and would need a GLSL ES 3.00 path, and that difference would
-have to be absorbed inside the OpenGL backend so the render contract stays
+Android is planned through Vulkan, not OpenGL ES. The OpenGL ES profile is a
+different profile with a different shading language: the shaders target GLSL
+3.30 core and would need a GLSL ES 3.00 path, and that difference would have
+to be absorbed inside the OpenGL backend so the render contract stays
 API-neutral. The application lifecycle also differs, because the application
 does not own its window and the context can be lost and recreated.
 
@@ -319,13 +321,12 @@ impossibility. The distinction matters: deprecated is not the same as absent,
 and this project does not get to call something impossible because it is
 unattractive.
 
-Android carries one concrete requirement that belongs here rather than in a
-future porting note. The HDR target is a 16-bit float colour attachment, which
-OpenGL ES 3.0 does not require to be renderable: it needs
-`EXT_color_buffer_float` or `EXT_color_buffer_half_float`, or OpenGL ES 3.2.
-An Android backend would therefore depend on an extension the target table
-does not currently mention, and discovering that during a port would be an
-expensive way to learn it.
+The HDR target is a 16-bit float colour attachment, which Vulkan 1.0 requires
+to be renderable: any 64-bit-or-less format must support COLOR_ATTACHMENT, and
+R16G16B16A16_SFLOAT is 64 bits. The Android Vulkan requirement the OpenGL ES
+path would have carried (the `EXT_color_buffer_float` extension) does not
+apply here, and discovering the difference during a port would be an expensive
+way to learn it.
 
 The scripting backends are not wired yet, so neither platform introduces a
 dependency that is currently unavailable there. The physics backends are
@@ -353,15 +354,17 @@ the specification. Nothing in it names a graphics API or a host platform.
 
 ### 4.5 Future rendering backends
 
-OpenGL is the only backend implemented, on Linux x86_64. The render contract is
-API-neutral by construction and the boundary is checked by grep in every
-milestone, so a second backend is a new implementation of the same contract
-rather than a rewrite. Two are planned and neither is started.
+OpenGL is the only backend implemented, on Linux x86_64 and Windows x86_64.
+The render contract is API-neutral by construction and the boundary is checked
+by grep in every milestone, so a second backend is a new implementation of the
+same contract rather than a rewrite. Two are planned and neither is started.
 
-**Vulkan** would cover Windows, Linux and Android with one backend. **Metal**
-would cover macOS and iOS with one backend, and on iOS it is the only option
-left: Apple removed OpenGL ES, while on macOS OpenGL is deprecated but still
-present. Both are recorded here as intent, not as work in progress.
+**Vulkan** covers Windows, Linux and Android with one backend. On Windows and
+Linux it is the extra capability (the OpenGL backend remains the supported
+path there), and on Android it is the primary target. **Metal** would cover
+macOS and iOS with one backend, and on iOS it is the only option left: Apple
+removed OpenGL ES, while on macOS OpenGL is deprecated but still present.
+Both are recorded here as intent, not as work in progress.
 
 The contract was designed against OpenGL, and the second backend is what will
 test it. The parts expected to survive unchanged are the ones about resources

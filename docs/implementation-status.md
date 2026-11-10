@@ -1289,6 +1289,21 @@ grep -rn 'GLuint\|GLenum\|SDL_\|Window' include/grace/render/render_backend.hpp 
     decision: the backend no longer assumes the process-wide context
     belongs to it.
 
+43. **Does Android stay on OpenGL ES, or does it come through Vulkan?**
+    Vulkan. The original plan had Android on OpenGL ES 3.0, but the
+    reimplementation of a GLSL ES 3.00 shader path inside the OpenGL
+    backend is a second shading language for one platform, and the
+    **resolved** direction is that **Vulkan covers Android, Windows
+    and Linux with one backend** (2026-11-10). Windows and Linux Vulkan
+    are the extra capability on top of the implemented OpenGL backend,
+    and Android is the primary target of the Vulkan backend. The
+    HDR target's float colour attachment is renderable in Vulkan 1.0
+    (any 64-bit-or-less format must support COLOR_ATTACHMENT, and
+    R16G16B16A16_SFLOAT is 64 bits), so the OpenGL ES extension
+    dependency (`EXT_color_buffer_float`) the earlier plan carried
+    does not exist on the Vulkan path. See 4.3 and 4.5 of
+    [grace-architecture.md](grace-architecture.md).
+
 ## Verification commands
 
 ```sh

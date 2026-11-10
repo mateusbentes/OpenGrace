@@ -39,7 +39,8 @@ or TopWare Interactive.
 - Keep every subsystem behind a platform-neutral contract.
 - Target Linux x86_64 with OpenGL as the implemented platform. Windows is
   cross-compiled and validated under Wine (milestone 17) and Android remains
-  planned; see the Platforms section.
+  planned through Vulkan, with Windows and Linux Vulkan being the extra
+  capability; see the Platforms section.
 - Validate each subsystem with deterministic tests and observable behaviour.
 - Document design decisions, limitations, and validation results clearly.
 
@@ -92,7 +93,7 @@ be read back by the overlay loader.
 | --- | --- | --- |
 | Linux x86_64 | OpenGL 3.3 core, falling back to 3.0 | Implemented and validated |
 | Windows x86_64 | OpenGL | Cross-compiled, validated under Wine (milestone 17) |
-| Android | OpenGL ES 3.0 | Planned, not started |
+| Android | Vulkan | Planned, not started |
 
 Linux is implemented and validated. Windows is cross-compiled with MinGW-w64
 and validated under Wine (milestone 17): the tree builds clean under -Werror
@@ -112,13 +113,13 @@ runtime), the GL headers load glcorearb.h (MinGW's gl.h is GL 1.1 only) and
 shield the `near`/`far` pseudo-modifiers, and the PhysX adapter is Linux-only
 by build option.
 
-Android is a larger change and is not primarily a build-system question. OpenGL
-ES is a different API profile with a different shading language: the shaders
-target GLSL 3.30 core and would need a GLSL ES 3.00 path, and that difference
-would have to be absorbed inside the OpenGL backend so the render contract stays
+Android is planned through Vulkan, not OpenGL ES. The OpenGL ES profile is a
+different API profile with a different shading language: the shaders target
+GLSL 3.30 core and would need a GLSL ES 3.00 path, and that difference would
+have to be absorbed inside the OpenGL backend so the render contract stays
 API-neutral. The application lifecycle also differs, because the application
-does not own its window and the context can be lost and recreated. None of that
-is implemented.
+does not own its window and the context can be lost and recreated. None of
+that is implemented.
 
 The scripting backends are not wired yet, so neither platform introduces a
 dependency that is currently unavailable there. The physics backends are
