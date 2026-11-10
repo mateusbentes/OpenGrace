@@ -35,9 +35,9 @@
 #   box2d         erincatto/box2d
 #                 dd8bd3fb525f0f33f1079f8ca3c5770783c44a53 (v3.2.0)
 #   angelscript   anjo76/angelscript
-#                 0020e24ac91a159dc68386c22137fc37516be216 (v2.38.0)
+#                 0020e24ac91a159dc68386c22137fc37516be216 (v2.39.0~1)
 #   sdl2          libsdl-org/SDL
-#                 859844eae358447be8d66e6da59b6fb3df0ed778 (release-2.30.0)
+#                 8236e01a9f758d15927624925c6043f84d8a261f (release-2.30.12)
 #   openal-soft   kcat/openal-soft
 #                 d3875f333fb6abe2f39d82caca329414871ae53b (1.23.1)
 #   freetype      freetype/freetype
@@ -95,7 +95,7 @@ dd8bd3fb525f0f33f1079f8ca3c5770783c44a53"
     "angelscript|https://github.com/anjo76/angelscript|\
 0020e24ac91a159dc68386c22137fc37516be216"
     "sdl2|https://github.com/libsdl-org/SDL|\
-859844eae358447be8d66e6da59b6fb3df0ed778"
+8236e01a9f758d15927624925c6043f84d8a261f"
     "openal-soft|https://github.com/kcat/openal-soft|\
 d3875f333fb6abe2f39d82caca329414871ae53b"
     "freetype|https://github.com/freetype/freetype|\
@@ -126,6 +126,14 @@ for entry in "${ENTRIES[@]}"; do
 
     dir="$CLONE_ROOT/$path"
 
+    # A fresh clone of a tree that carries gitlinks creates the paths as empty
+    # directories (the git submodule update --init is what fills them). An
+    # empty directory is the same state as "nothing on disk" and the clone
+    # below fills it; only a directory that holds anything else is a real
+    # conflict.
+    if [ -d "$dir" ] && [ -z "$(ls -A "$dir")" ]; then
+        rmdir "$dir"
+    fi
     if [ -d "$dir/.git" ] || [ -f "$dir/.git" ]; then
         # An existing clone: adopt it. If its local history does not carry the
         # pin, shallow-fetch that one commit first.
@@ -198,9 +206,21 @@ for entry in "${ENTRIES[@]}"; do
 
     # Idempotency: a re-run must not re-clone or re-add an entry that is
     # already registered at the pin.
+    old_registered="$(git ls-files --stage -- "$path" | awk '{print $2}')"
     if [ "$(git ls-files --stage -- "$path" | awk '{print $1, $2}')" \
         = "160000 $pin_commit" ]; then
         say "already registered at the pin; nothing to do"
+        continue
+    fi
+    # A re-pin: the path is already registered as a gitlink, but at a
+    # different sha. The checkout above is already at the new pin, so only the
+    # gitlink is re-staged; .gitmodules already carries the URL and needs
+    # nothing. Without this branch `git submodule add` would fail with "'$path'
+    # already exists in the index", measured on the SDL2 bump.
+    if [ -n "$old_registered" ] && [ "$(git ls-files --stage -- "$path" \
+        | awk '{print $1}')" = "160000" ]; then
+        git add "$path"
+        say "re-pinned at ${actual:0:8} (was ${old_registered:0:8}); staged"
         continue
     fi
 

@@ -130,6 +130,7 @@ All results below are real runs, on the tree at the stated commit.
 | 2026-11-09 | same, milestone 15 | The game module (decision 40): the agent behaviours idle, patrol, seek and flee with the deterministic steering (the patrol walks its waypoints in order and wraps, the seek stops at the target, the flee moves away), the timers with the repeating fire and the timer events on the queue, the named properties whose kind is fixed by the first set, the event queue and the xorshift64* random source the application seeds explicitly (a zero seed and an unseeded draw throw). Suites: game 129 checks, 0 failures; the default build 24/24 Debug, the full-SDK build 28/28; zero warnings under -Werror |
 | 2026-11-09 | same, milestone 16 | The video module (decision 41): the playback service as a deterministic frame stepper (the cursor advances by the delta seconds at the video's frame rate scaled by the playback's rate, the loop wraps, the playback stops at the last frame), the packed Yuv420 payload the application uploads, and the Ogg Theora decode layer behind GRACE_ENABLE_THEORA, measured against a real file (16 frames, 64x64, 16 fps). Suites: video 66 checks, video_adapters 11 checks, 0 failures; the default build 25/25 Debug, the Theora build 26/26, the full-SDK build 30/30; zero warnings under -Werror |
 | 2026-11-09 | same, middleware submodules | The ten middleware SDKs became pinned git submodules (physx-3.4, bullet3, box2d, angelscript, sdl2, openal-soft, freetype, libogg, libvorbis, libtheora), each at a fixed upstream commit; `tools/add-submodules.sh` registers them idempotently and the CMake configuration builds each one on demand (ExternalProject, Release, outside the engine's warning set) into the build tree's `third-party/`. The PhysX checkout is patched in place by `tools/physx-patch.cmake` (the makefiles' `-Werror` replaced with the tw2-proven set, one header's const-correctness fix), the xiph chain is built in dependency order (ogg -> vorbis -> theora, theora's configure finds the ogg headers through the prefix's pkg-config files), and the physics_adapters test carries the PhysX runtime `LD_LIBRARY_PATH`. Suites: default build 25/25 Debug, OpenGL build 41/41, full-SDK build 28/28 (PhysX + Bullet + Box2D + AngelScript), OpenAL build 26/26, FreeType build 26/26, Theora build 26/26, AngelScript build 27/27; zero warnings under -Werror. The two-step flow (submodules + patch) validated on a fresh clone of the tree |
+| 2026-11-09 | same, middleware submodules | SDL2 re-pinned to release-2.30.12 (the last revision of the 2.30.x series the engine supports; the engine's window, context, GL attribute and `SDL_GL_GetProcAddress` uses are unchanged across the series), and the shader-source rule test reads the submodule paths out of `.gitmodules` and skips them (measured: bullet3's examples and PhysX's KaplaDemo carry shading-language sources; without the skip the rule reported 8 hits in third-party code, 2905 files scanned, 0 hits with the skip). The four open questions of architecture §7 are resolved and recorded in "Open decisions" (3, 4, 5, 6). Suites: default build 25/25 Debug, OpenGL build 41/41 (SDL2 2.30.12 built from the new pin), docs_structure 23 checks, 0 failures; zero warnings under -Werror |
 
 ## Defects found by the tests, and fixed
 
@@ -179,7 +180,7 @@ configuration when the corresponding option is enabled):
 | Bullet 3 | `d3afe7613` (3.25-30) | 3.25 tree |
 | Box2D | `dd8bd3fb` (v3.2.0-3) | 3.2.0 |
 | AngelScript | `0020e24a` (v2.39.0~1) | 2.39.0 |
-| SDL2 | `859844ea` (release-2.30.0) | 2.30.0 |
+| SDL2 | `8236e01a` (release-2.30.12) | 2.30.12 |
 | OpenAL Soft | `d3875f33` (1.23.1) | 1.23.1 |
 | FreeType | `920c5502` (VER-2-13-2) | 2.13.2 |
 | libogg | `e1774cd7` (v1.3.5) | 1.3.5 |
@@ -228,21 +229,51 @@ not exist before GL 3.2, so "3.0 core" is not a valid request.
     vocabulary is not publicly documented. A functionally equivalent set may be
     acceptable, but the decision affects the AngelScript type registration
     interface.
+   **Resolved 2026-11-09: a functionally equivalent block vocabulary is
+    accepted, and milestone 10 (decision 34) records it as the structure.** The
+    documented material does not publish the original block set, so the
+    contract's registry holds block descriptions and the graph references them
+    by name; the vocabulary is an engine-owned set of native functions
+    registered through the script backend's registerFunction surface, the same
+    surface the application already uses. The graph compiler generates a
+    deterministic AngelScript source for the graph, so the visual layer stays
+    a layer and the engine never treats a block set as a specification.
 
 4. **Save format and script state.** AngelScript has no built-in object
    serialisation. Game state should live in engine-owned structures wherever
    practical, with scripts holding behaviour rather than authoritative state.
+   **Resolved 2026-11-09: the scene's state lives in engine-owned structures
+   and the script state stays out of the save file (decision 36).** The
+   serialisation (12b) writes the scene's entities, the partitioning result
+   and the container's payload into the OWD container; the script state
+   (the AngelScript globals and the visual scripting graphs) holds behaviour
+   rather than authoritative state, and the save file does not serialise
+   script objects. A game that wants to save script state must expose it
+   through engine-owned structures, which is the same boundary the engine
+   holds for the visual scripting graphs.
 
 5. **Physics backend order.** The original was explicitly plugin-based over
    PhysX, Bullet and Box2D. Bullet is the natural first backend on licence and
    platform grounds; PhysX 3.4 is the second candidate if CPU cloth and soft
    body fidelity is required. PhysX 5 is not a candidate, because its
    deformable features depend on GPU execution.
+   **Resolved 2026-11-09: Bullet is the first backend, PhysX 3.4 the second
+   (decision 32).** The three adapters (8c) build behind their own options and
+   the contract is the same across all of them; the physical backend a build
+   links is the build's choice, not the engine's. The original's plugin
+   contract is preserved as one abstraction, and the null backend is the
+   deterministic reference both adapter suites are measured against.
 
 6. **Engine name.** OpenGrace follows the convention of OpenMW, OpenRCT2,
     OpenTTD and OpenSAGE, all of which take their name from the original
     product. The closest precedent is OpenSAGE, which reimplements an internal
     EA engine.
+   **Resolved 2026-11-09: the engine name stays OpenGrace.** The convention
+   the four open-source reimplementation projects set is the one this project
+   follows: the name carries the original product's name and states the
+   project's intent. The milestone codenames (4b, 4c, the d-g increments)
+   are the project's own numbering, not the original's, and the original
+   engine's internal codenames are not reproduced.
 
 7. **Shadow-pass contract shape: technique-named method or generic render-pass
     composition?** The 4b contract method `renderShadowMap(target, sun, bounds,

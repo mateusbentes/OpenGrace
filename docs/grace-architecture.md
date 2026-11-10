@@ -441,13 +441,28 @@ buildable.
   sunlight. The deferred path stays planned as a later milestone rather than
   a runtime alternative. See docs/implementation-status.md.
 - Does the Tetragramaton block set need to be reproduced faithfully, or is a
-  functionally equivalent block vocabulary acceptable?
+  functionally equivalent block vocabulary acceptable?~~ Resolved: a
+  functionally equivalent block vocabulary is accepted. The original block
+  set is not publicly documented, so the contract's registry holds block
+  descriptions and the graph references them by name; the vocabulary is an
+  engine-owned set of native functions registered through the script
+  backend's registerFunction surface. See docs/implementation-status.md.
 - What is the save format's relationship to script state, given that AngelScript
-  has no built-in object serialisation?
+  has no built-in object serialisation?~~ Resolved: the scene's state lives
+  in engine-owned structures and the serialisation writes it into the OWD
+  container; the script state holds behaviour rather than authoritative
+  state, and the save file does not serialise script objects. See
+  docs/implementation-status.md.
 - Is the original GRACE 2 codename scheme to be preserved for milestone naming,
-  or is that an unnecessary affectation?
+  or is that an unnecessary affectation?~~ Resolved: it is not preserved.
+  The milestone numbering (4b, 4c, the d-g increments) is the project's own
+  numbering, not the original's, and the original engine's internal codenames
+  are not reproduced. See docs/implementation-status.md.
 - Should the engine name remain OpenGrace, given the precedent set by OpenMW,
-  OpenRCT2, OpenTTD and OpenSAGE?
+  OpenRCT2, OpenTTD and OpenSAGE?~~ Resolved: the engine name stays OpenGrace.
+  The convention the four open-source reimplementation projects set is the
+  one this project follows: the name carries the original product's name and
+  states the project's intent. See docs/implementation-status.md.
 
 ---
 

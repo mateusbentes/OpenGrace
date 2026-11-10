@@ -7,7 +7,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
-
+#include <vector>
 #include "test_support.hpp"
 
 namespace fs = std::filesystem;
@@ -20,6 +20,27 @@ int main(int argc, char** argv)
         return 2;
     }
     const fs::path root = argv[1];
+    // The middleware SDKs live in the tree as git submodules (the paths in
+    // .gitmodules). They are third-party code, not the engine's API-neutral
+    // files, and their own samples and demos carry shading-language sources
+    // (measured: bullet3's examples and PhysX's KaplaDemo), so the rule reads
+    // the submodule paths out of .gitmodules and skips them. The paths are
+    // read from the file rather than listed here, so a submodule change
+    // updates the rule without a test edit.
+    std::vector<std::string> submodules;
+    std::ifstream gitmodules(root / ".gitmodules");
+    if (gitmodules)
+    {
+        std::string line;
+        while (std::getline(gitmodules, line))
+        {
+            const std::string key = "path = ";
+            const std::size_t at = line.find(key);
+            if (at == std::string::npos)
+                continue;
+            submodules.push_back(line.substr(at + key.size()));
+        }
+    }
     int filesScanned = 0;
     int hits = 0;
     for (const auto& entry : fs::recursive_directory_iterator(root))
@@ -37,6 +58,17 @@ int main(int argc, char** argv)
         if (generic.find("/tests/") != std::string::npos)
             continue;
         if (generic.find("/build") != std::string::npos)
+            continue;
+        bool inSubmodule = false;
+        for (const std::string& sub : submodules)
+        {
+            if (generic.find("./" + sub + "/") == 0)
+            {
+                inSubmodule = true;
+                break;
+            }
+        }
+        if (inSubmodule)
             continue;
         ++filesScanned;
         std::ifstream in(path);
