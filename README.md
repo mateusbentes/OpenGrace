@@ -97,6 +97,7 @@ be read back by the overlay loader.
 | Linux x86_64 | Vulkan (extra capability) | Implemented, validated under lavapipe (milestones 18 and 19) |
 | Windows x86_64 | Vulkan (extra capability) | Cross-compiled against the winevulkan loader surface, not executed (milestone 18) |
 | Android (arm64-v8a) | Vulkan (primary target) | Cross-compiled with NDK r27c, not executed on hardware (milestone 18) |
+| macOS, iOS | Metal | Compiles on any platform; mapping tests run on Linux; hardware run pending until a Mac (milestone 20) |
 
 Linux is implemented and validated. Windows is cross-compiled with MinGW-w64
 and validated under Wine (milestone 17): the tree builds clean under -Werror
@@ -129,6 +130,15 @@ the out-of-date resize, the depth attachment format is picked from the
 device's format properties, and the sampler descriptors are written at draw
 time from the bound texture views. The Vulkan backend is closed — the next
 milestone has no Vulkan work.
+
+Metal (milestone 20, behind `GRACE_ENABLE_METAL`) is the macOS and iOS
+backend. Its loader declares its own types (the published enum values and
+the published C layouts) and resolves the Objective-C runtime and the
+Metal framework at runtime, so no Apple SDK is needed to build it and the
+module compiles on any platform. Its MSL 2.0 shaders compile at runtime
+through MTLLibrary, so there is no build-time shader step. The recorded
+validation is the Linux compile and the pure mapping tests; the hardware
+run is pending until a Mac executes it (decision 47).
 
 The scripting backends are not wired yet, so neither platform introduces a
 dependency that is currently unavailable there. The physics backends are

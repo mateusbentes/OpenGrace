@@ -1,7 +1,8 @@
 // G0/G2 (decision 14): a real check that no shading-language source appears
 // outside the render backends' shader libraries. Scans the source tree given
 // as argv[1] for .hpp/.cpp files containing a shading-language marker
-// ("#version") outside src/render/opengl/, src/render/vulkan/ and tests/,
+// ("#version") outside src/render/opengl/, src/render/vulkan/,
+// src/render/metal/ and tests/,
 // prints every hit, and fails if any.
 #include <cstdio>
 #include <filesystem>
@@ -60,6 +61,8 @@ int main(int argc, char** argv)
             continue;
         if (generic.find("/src/render/vulkan/") != std::string::npos)
             continue;
+        if (generic.find("/src/render/metal/") != std::string::npos)
+            continue;
         if (generic.find("/tests/") != std::string::npos)
             continue;
         if (generic.find("/build") != std::string::npos)
@@ -88,7 +91,8 @@ int main(int argc, char** argv)
         }
     }
     std::printf("shader-source rule: scanned %d files, %d hits outside"
-                " src/render/opengl/, src/render/vulkan/ and tests/\n",
+                " src/render/opengl/, src/render/vulkan/,"
+                " src/render/metal/ and tests/\n",
                 filesScanned, hits);
     GRACE_CHECK_EQ(hits, 0);
     return grace::test::summary("shader_source_rule");

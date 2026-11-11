@@ -29,6 +29,7 @@ option(GRACE_BUILD_TESTS        "Build and register the deterministic tests" ON)
 option(GRACE_WARNINGS_AS_ERRORS "Treat compiler warnings as errors"         ON)
 option(GRACE_ENABLE_OPENGL      "Build the OpenGL backend"                 OFF)
 option(GRACE_ENABLE_VULKAN      "Build the Vulkan backend"                 OFF)
+option(GRACE_ENABLE_METAL       "Build the Metal backend (macOS/iOS)"      OFF)
 option(GRACE_ENABLE_PHYSX       "Build the PhysX 3.4 physics backend"       OFF)
 option(GRACE_ENABLE_BULLET      "Build the Bullet physics backend"          OFF)
 option(GRACE_ENABLE_BOX2D       "Build the Box2D physics backend"          OFF)
@@ -142,10 +143,10 @@ endif()
 endif()
 
 # ---------------------------------------------------------------------------
-# SDL2 (static; the OpenGL and the Vulkan backends link it)
+# SDL2 (static; the OpenGL, the Vulkan and the Metal backends link it)
 # ---------------------------------------------------------------------------
 
-if(GRACE_ENABLE_OPENGL OR GRACE_ENABLE_VULKAN)
+if(GRACE_ENABLE_OPENGL OR GRACE_ENABLE_VULKAN OR GRACE_ENABLE_METAL)
 ExternalProject_Add(grace_sdl2
     SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/sdl2
     CMAKE_ARGS ${GRACE_SDK_CMAKE_ARGS}
@@ -525,7 +526,7 @@ endif()
 # a static library into the third-party prefix. Both the OpenGL and the
 # Vulkan backends consume it through the same imported target.
 # ---------------------------------------------------------------------------
-if(GRACE_ENABLE_OPENGL OR GRACE_ENABLE_VULKAN)
+if(GRACE_ENABLE_OPENGL OR GRACE_ENABLE_VULKAN OR GRACE_ENABLE_METAL)
     add_library(SDL2::SDL2 INTERFACE IMPORTED)
     target_include_directories(SDL2::SDL2 SYSTEM INTERFACE
         ${GRACE_THIRD_PARTY}/include)
@@ -632,10 +633,50 @@ if(GRACE_ENABLE_VULKAN)
     target_link_libraries(grace_render_vulkan
         PUBLIC grace_render
         PRIVATE grace_warnings SDL2::SDL2)
-    if(ANDROID)
+if(ANDROID)
         # SDL2's Android backend references the NDK's platform libraries
         # (the native window, the log and the sensor manager).
         target_link_libraries(grace_render_vulkan PRIVATE android log)
+    endif()
+endif()
+
+# ---------------------------------------------------------------------------
+# Metal render backend
+#
+# SDL2 provides window/input (the CAMetalLayer comes from SDL's Metal
+# bridge); the Objective-C runtime and the Metal framework's entry
+# points are resolved at runtime by the internal loader in this module
+# (no link-time dependency, no Apple SDK header in the tree — the loader
+# declares its own types, so the module compiles on every platform and
+# the mapping tests run anywhere; the hardware run needs a Mac).
+# There is no build-time shader step: MSL compiles at runtime through
+# MTLLibrary, so glslangValidator has no Metal equivalent.
+# ---------------------------------------------------------------------------
+if(GRACE_ENABLE_METAL)
+    add_library(grace_render_metal STATIC
+        src/render/metal/mtl_loader.cpp
+        src/render/metal/metal_shader.cpp
+        src/render/metal/metal_mesh.cpp
+        src/render/metal/metal_render_target.cpp
+        src/render/metal/metal_render_backend.cpp)
+    target_include_directories(grace_render_metal PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
+    target_include_directories(grace_render_metal PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/render/metal)
+    add_dependencies(grace_render_metal grace_sdl2)
+    target_link_libraries(grace_render_metal
+        PUBLIC grace_render
+        PRIVATE grace_warnings SDL2::SDL2)
+    if(APPLE)
+        # The Objective-C runtime is part of the system; the framework
+        # loads at runtime (the loader's dlopen), the link-time list
+        # stays empty.
+        target_link_libraries(grace_render_metal PRIVATE objc)
+    endif()
+    if(ANDROID)
+        # SDL2's Android backend references the NDK's platform libraries
+        # (the native window, the log and the sensor manager).
+        target_link_libraries(grace_render_metal PRIVATE android log)
     endif()
 endif()
 
@@ -851,6 +892,11 @@ endif()
 if(GRACE_ENABLE_VULKAN)
     target_link_libraries(grace PRIVATE grace_render_vulkan)
     target_compile_definitions(grace PRIVATE GRACE_HAVE_VULKAN=1)
+endif()
+
+if(GRACE_ENABLE_METAL)
+    target_link_libraries(grace PRIVATE grace_render_metal)
+    target_compile_definitions(grace PRIVATE GRACE_HAVE_METAL=1)
 endif()
 
 # ---------------------------------------------------------------------------

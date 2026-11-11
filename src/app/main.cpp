@@ -17,6 +17,9 @@
 #ifdef GRACE_HAVE_VULKAN
 #include "grace/render/vulkan_render_backend.hpp"
 #endif
+#ifdef GRACE_HAVE_METAL
+#include "grace/render/metal_render_backend.hpp"
+#endif
 
 namespace {
 
@@ -24,6 +27,7 @@ struct Options
 {
     bool headless = false;
     bool vulkan = false;
+    bool metal = false;
     bool post = true;  // 6e: the post chain is the default (decision 23); --no-post opts out
     bool dof = false;   ///< enable the 6d depth-of-field post pass (with --post)
     bool mlaa = false;  ///< enable the 6d morphological AA post pass (with --post)
@@ -50,7 +54,8 @@ void printUsage(std::FILE* out)
                  "\n"
                  "Backend selection:\n"
                 "  (default)           OpenGL backend, when built with GRACE_ENABLE_OPENGL=ON.\n"
-                "  --vulkan            Vulkan backend, when built with GRACE_ENABLE_VULKAN=ON.\n"
+               "  --vulkan            Vulkan backend, when built with GRACE_ENABLE_VULKAN=ON.\n"
+                "  --metal             Metal backend, when built with GRACE_ENABLE_METAL=ON.\n"
                 "  --headless          Null (headless) render backend.\n"
                  "  --post              Post chain (HDR, bloom, tonemap, SSAO, MLAA) — DEFAULT.\n"
                  "  --no-post           Legacy compatibility path: linear -> 8-bit, no chain.\n"
@@ -113,6 +118,10 @@ int main(int argc, char** argv)
         else if (arg == "--vulkan")
         {
             options.vulkan = true;
+        }
+        else if (arg == "--metal")
+        {
+            options.metal = true;
         }
         else if (arg == "--post")
         {
@@ -219,9 +228,16 @@ int main(int argc, char** argv)
         return usageError("--vulkan requires a Vulkan build "
                           "(configure with -DGRACE_ENABLE_VULKAN=ON)");
 #endif
+#ifndef GRACE_HAVE_METAL
+    if (options.metal)
+        return usageError("--metal requires a Metal build "
+                          "(configure with -DGRACE_ENABLE_METAL=ON)");
+#endif
 
     if (options.vulkan && options.headless)
         return usageError("--vulkan and --headless are mutually exclusive");
+    if (options.metal && options.headless)
+        return usageError("--metal and --headless are mutually exclusive");
 
     // Deterministic clear colour for every run.
     constexpr grace::render::ClearColor kClearColor{0x1E, 0x1E, 0x1E, 0xFF};
@@ -250,9 +266,12 @@ int main(int argc, char** argv)
 #ifdef GRACE_HAVE_VULKAN
         grace::render::VulkanRenderBackend* vulkan_backend = nullptr;
 #endif
+#ifdef GRACE_HAVE_METAL
+        grace::render::MetalRenderBackend* metal_backend = nullptr;
+#endif
 #ifdef GRACE_HAVE_OPENGL
         grace::render::OpenGLRenderBackend* gl_backend = nullptr;
-        if (!options.headless && !options.vulkan)
+        if (!options.headless && !options.vulkan && !options.metal)
         {
             grace::render::OpenGLBackendConfig gl_config;
             gl_config.width = options.width;
@@ -285,10 +304,29 @@ int main(int argc, char** argv)
         else
 #endif
         {
-            auto concrete =
-                std::make_unique<grace::render::NullRenderBackend>(options.width, options.height);
-            null_backend = concrete.get();
-            backend = std::move(concrete);
+#ifdef GRACE_HAVE_METAL
+            if (options.metal)
+            {
+                grace::render::MetalBackendConfig metal_config;
+                metal_config.width = options.width;
+                metal_config.height = options.height;
+                metal_config.hidden = options.hidden;
+                metal_config.readback_center = options.readback;
+                metal_config.swap_interval = options.swap_interval;
+                auto concrete =
+                    std::make_unique<grace::render::MetalRenderBackend>(metal_config);
+                concrete->initialise();
+                metal_backend = concrete.get();
+                backend = std::move(concrete);
+            }
+            else
+#endif
+            {
+                auto concrete =
+                    std::make_unique<grace::render::NullRenderBackend>(options.width, options.height);
+                null_backend = concrete.get();
+                backend = std::move(concrete);
+            }
         }
 
         grace::render::Renderer renderer(*backend);
@@ -352,8 +390,41 @@ int main(int argc, char** argv)
         else
 #endif
         {
-            std::printf("grace: violations=%" PRIu64 "\n", null_backend->violationCount());
+#ifdef GRACE_HAVE_METAL
+            if (metal_backend != nullptr)
+            {
+                std::printf("grace: violations=%" PRIu64 "\n",
+                            metal_backend->violationCount());
+                if (options.verbose)
+                {
+                    std::printf("grace: detail: %s\n",
+                                metal_backend->describe().c_str());
+                    std::printf("grace: hidden=%d swap_interval=%d readback=%d\n",
+                                static_cast<int>(options.hidden),
+                                static_cast<int>(options.swap_interval),
+                                static_cast<int>(options.readback));
+                }
+                if (options.readback && metal_backend->hasCenterPixel())
+                {
+                    const grace::render::ClearColor pixel =
+                        metal_backend->centerPixel();
+                    std::printf("grace: center_pixel=%d,%d,%d,%d depth=%.6f stencil=%d\n",
+                                static_cast<int>(pixel.r),
+                                static_cast<int>(pixel.g),
+                                static_cast<int>(pixel.b),
+                                static_cast<int>(pixel.a),
+                                static_cast<double>(metal_backend->centerDepth()),
+                                static_cast<int>(metal_backend->centerStencil()));
+                }
+            }
+            else
+#endif
+            {
+                std::printf("grace: violations=%" PRIu64 "\n",
+                            null_backend->violationCount());
+            }
         }
+
     }
     catch (const std::exception& error)
     {

@@ -47,6 +47,7 @@ The `.docx` files in this directory are generated from the `.md` sources with
 | 17 | Windows validation: the MinGW-w64 cross-compile builds the tree clean under -Werror (105 targets), the OpenGL backend links opengl32.dll and the Windows system libraries, the GL headers load glcorearb.h, and the SDL teardown releases the video subsystem by reference count with the context unbound before deletion (decision 42) | Done |
 | 18 | Vulkan render backend: the full 38-method contract on one backend for Linux, Windows and Android (decision 43), behind `GRACE_ENABLE_VULKAN` with its own GLSL 450-core shader library compiled to SPIR-V at build time by glslangValidator (decision 44). The loader declares its own types locally (no generated headers shipped); validated on Linux under lavapipe, cross-compiled for Windows (winevulkan) and for Android (NDK r27c, arm64-v8a, build only) | Done |
 | 19 | Vulkan hardware path: the presentation engine (the swap interval maps onto the present mode, the acquire retries on the out-of-date resize, the present result steers the next frame), the depth attachment format picked from the device's format properties (D24S8, D32Sfloat, D16Unorm in that order), and the sampler descriptors written at draw time from the bound texture views (the layout table's unit rule, the default 1x1 white texture for unbound slots) (decision 46) | Done |
+| 20 | Metal render backend: macOS and iOS behind `GRACE_ENABLE_METAL` — the same 38-method contract, the self-declared loader resolving the Objective-C runtime and the Metal framework at runtime (dlopen/dlsym, no Apple SDK header in the tree, the module compiles on any platform), MSL 2.0 shader sources compiled at runtime by MTLLibrary (no build-time shader step), presentation through SDL's CAMetalLayer bridge, and the pure mapping tests (pixel formats, compare ops, blend, load/store, sampler states, index types) running on Linux. Hardware run pending until a Mac executes it (decision 47) | Done |
 ---
 
 ## Module status
@@ -144,6 +145,7 @@ All results below are real runs, on the tree at the stated commit.
 | 2026-11-11 | Ubuntu 24.04.5, x86_64, GCC 13.3.0, CMake 4.4.4, lavapipe (Vulkan 1.3.275 loader, Mesa lavapipe ICD 25.2.8), Xvfb, milestone 19 (decision 46) | The Vulkan build (GL and Vulkan on) compiles clean under -Werror; test_vulkan_render passes 42/42 in ctest (230 checks, 0 failures): the sampler binds and the shadow pass record without violations, `describe()` reports the API version and the device, and the contract, texture-3D and volume-layer checks pass unchanged on a second backend instance |
 | 2026-11-11 | same, milestone 19 | Linux regression: the default build 25/25 and the OpenGL build 41/41 stay green; docs_structure 23 checks, 0 failures. Validation is lavapipe only: the engine's Vulkan path has not been executed on dedicated hardware in this environment — the hardware run on the project's Iris Xe host is recorded by the user's own validation |
 | 2026-11-11 | Kubuntu, x86_64, Mesa Intel Iris Xe (ADL GT2), milestone 19 | The first hardware run of the Vulkan path segfaulted inside vkAllocateMemory on the driver (ANV), at the default texture's allocation. The loader's hand-written structures carried two layout defects the software device never punished: VkMemoryAllocateInfo's allocationSize was 32-bit where the spec's VkDeviceSize is 64 (the driver read the memory type index past the structure's end), and VkSamplerCreateInfo lacked the mipmapMode field, shifting every following member by 4 bytes. Both fixed, and every loader structure's size now matches the published layout exactly; grace --vulkan then ran the 10-frame forward path on the Iris Xe with violations 0, exit 0 |
+| 2026-11-11 | Ubuntu 24.04.5, x86_64, GCC 13.3.0, CMake 4.4.4, no Apple SDK, milestone 20 (decision 47) | The Metal build compiles clean under -Werror on Linux with `GRACE_ENABLE_METAL=ON` (the loader declares its own types; no Apple SDK exists in this environment, and none is needed). test_metal_render runs on Linux: the pure mapping checks pass (the published MTLPixelFormat, MTLCompareFunction, MTLBlendFactor, MTLLoadAction/MTLStoreAction, MTLSamplerAddressMode and MTLIndexType values, and the shared std140 layout table's 27 entries), and the device-dependent block skips with exit 77 — no Metal framework exists here. Honest scope: the hardware run of the Metal path is pending until someone builds and runs on a Mac; nothing in this record claims otherwise |
 | 2026-11-11 | same, MinGW-w64 GCC 13.2.0 cross-compile (x86_64-w64-mingw32), Wine 9.0, milestone 19 | The tree with `GRACE_ENABLE_VULKAN=ON` cross-compiles clean under -Werror: 41 test executables link for x86_64 and test_renderer runs 41 checks, 0 failures under Wine. Honest scope: compile-validated only |
 | 2026-11-11 | same, Android NDK r27c cross-compile (arm64-v8a, android-26), milestone 19 | The tree with `GRACE_ENABLE_VULKAN=ON` cross-compiles clean under -Werror with the NDK's clang (r27c): 23 test executables link for aarch64. Not executed on Android hardware: build-only validation, the intended Android path is the primary target of the Vulkan backend (decision 43) |
 
@@ -1369,6 +1371,34 @@ grep -rn 'GLuint\|GLenum\|SDL_\|Window' include/grace/render/render_backend.hpp 
     either way). The descriptor pool carries the samplers' descriptors
     and the writes are the same descriptor set the draw binds. **The
     Vulkan backend is closed** — the next milestone has no Vulkan work.
+47. **What the Metal backend is, and what its validation honestly
+    covers.** The Metal backend (milestone 20) implements the same
+    38-method contract on macOS and iOS. The loader declares its own
+    types — the Metal enum values are the published API's values, the
+    structures are the published C layouts (MTLClearColor's four
+    doubles, MTLViewport's six) — and resolves the Objective-C runtime
+    and the Metal framework at runtime through dlopen/dlsym, so no
+    Apple SDK header joins the tree and the module compiles on any
+    platform. MSL 2.0 sources compile at runtime through MTLLibrary
+    (the device's own compiler), so the build-time SPIR-V step has no
+    Metal equivalent and glslangValidator is not a prerequisite.
+    Presentation goes through SDL's CAMetalLayer bridge: the drawable
+    is the frame's colour attachment, and there is no acquire/recreate
+    semaphore dance to map. The depth attachment format is picked once
+    at initialise time: Depth24Unorm_Stencil8 on macOS,
+    Depth32Float_Stencil8 where the packed 24-bit format does not
+    exist (iOS 9.0+). The uniform staging buffer and the sampler
+    layout table are shared with the Vulkan library — one std140
+    table, two shading languages stating the same offsets. **The
+    validation scope is recorded honestly**: this environment has no
+    Apple SDK, so the milestone's verification is (a) the module
+    compiles clean under -Werror on Linux, and (b) the pure mapping
+    tests (pixel formats, compare ops, blend factors, load/store
+    actions, sampler states, index types, the clear-colour struct's
+    size) run on Linux without a device. The hardware run — the
+    contract checks executing on a real Metal device — stays pending
+    until someone builds and runs on a Mac, exactly as the Vulkan
+    backend's own hardware run was pending before milestone 19.
 
 ## Verification commands
 

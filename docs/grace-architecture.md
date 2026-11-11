@@ -217,7 +217,10 @@ the single backend that covers Android, Windows and Linux, with Windows and
 Linux Vulkan being the extra capability (see 4.5). The Vulkan backend is
 implemented in milestone 18 and validated on Linux under lavapipe; the
 Windows and Android validation is build-only (cross-compile clean, not
-executed on either platform).
+executed on either platform). macOS and iOS go through Metal
+(milestone 20, decision 47): the backend is implemented behind
+`GRACE_ENABLE_METAL` and compiles on any platform, with the hardware
+run pending until a Mac.
 
 | GRACE 2 area | OpenGrace approach |
 | --- | --- |
@@ -225,7 +228,7 @@ executed on either platform).
 | OpenGL 3.0+ | Primary target. Core profile, GLSL 3.30 or newer. |
 | Console platforms | Out of scope. |
 | Windows | Cross-compiled (MinGW-w64) and validated under Wine; the same backend; see 4.3. |
-| macOS | Not a target. Apple deprecated OpenGL in macOS 10.14, so a backend would be possible but would have no future; see 4.3. |
+| macOS, iOS | Metal backend (milestone 20): the platform pair GRACE 2 also targeted, mapped onto the one API Apple still ships; see 4.3. |
 | Mobile platforms | Android goes through Vulkan, not OpenGL ES. The Vulkan backend is implemented (milestone 18) and cross-compiled for Android (NDK r27c, arm64-v8a); executing it on hardware is recorded by the user's validation run. See 4.3. |
 | PhysX / Bullet / Box2D | Plugin contract preserved; backends chosen by licence fit. |
 | OpenAL / OpenSL / XAudio2 / MultiStream | Plugin contract preserved; OpenAL Soft on Linux. |
@@ -288,6 +291,7 @@ script layer holding behaviour rather than authoritative state.
 | Linux x86_64 | Vulkan (extra capability) | Implemented, validated under lavapipe (milestones 18 and 19) |
 | Windows x86_64 | Vulkan (extra capability) | Cross-compiled against the winevulkan loader surface, not executed (milestone 18) |
 | Android (arm64-v8a) | Vulkan (primary target) | Cross-compiled with NDK r27c, not executed on hardware (milestone 18) |
+| macOS, iOS | Metal | Compiles on any platform (the loader declares its own types); mapping tests run on Linux; hardware run pending until a Mac (milestone 20) |
 
 Linux is implemented and validated. Windows is cross-compiled with MinGW-w64
 and validated under Wine (milestone 17, decision 42): the tree builds clean
@@ -308,6 +312,16 @@ resize, the depth attachment format picked from the device's format
 properties, and the sampler descriptors written at draw time from the bound
 texture views. The Vulkan backend is closed — the next milestone has no
 Vulkan work.
+
+The Metal backend (milestone 20, decision 47) covers macOS and iOS with one
+backend behind `GRACE_ENABLE_METAL`: the loader declares its own types (the
+published enum values, the published C layouts) and resolves the
+Objective-C runtime and the Metal framework at runtime, so no Apple SDK
+header joins the tree and the module compiles on any platform. Its MSL 2.0
+sources compile at runtime through MTLLibrary, so there is no build-time
+shader step. The hardware run is pending until someone builds on a Mac;
+the validation recorded so far is the Linux compile and the pure mapping
+tests.
 
 Windows is expected to be a small change rather than a port. The window and the
 context come from SDL2, the render contract is API-neutral, and the OpenGL entry
@@ -383,10 +397,14 @@ path closed in milestone 19 (decision 46): validated on Linux under
 lavapipe, build-validated for Windows (winevulkan loader surface) and
 Android (NDK r27c, arm64-v8a). On Windows and Linux it is the extra capability
 (the OpenGL backend remains the supported path there), and on Android it is
-the primary target. **Metal** would cover macOS and iOS with one backend, and
-on iOS it is the only option left: Apple removed OpenGL ES, while on macOS
-OpenGL is deprecated but still present. Metal is recorded as intent, not as
-work in progress.
+the primary target. **Metal** covers macOS and iOS with one backend, implemented in
+milestone 20 (decision 47) behind `GRACE_ENABLE_METAL`: on iOS it is the
+only option left (Apple removed OpenGL ES), while on macOS OpenGL is
+deprecated but still present. The loader declares its own types and
+resolves the Objective-C runtime and the Metal framework at runtime, so
+the module compiles on any platform; MSL compiles at runtime through
+MTLLibrary. The hardware run is pending until a Mac executes it — the
+recorded validation is the Linux compile and the pure mapping tests.
 The contract was designed against OpenGL, and the second backend is what will
 test it. The parts expected to survive unchanged are the ones about resources
 and passes: mesh and texture creation, `beginRenderPass` and `endRenderPass`,
@@ -415,6 +433,10 @@ the pipeline when depth-test state changes); the recorded-command shape of
 `draw`/`submit` and the pre-present staging-buffer readback landed as the
 contract had anticipated. Sampling the presented target was left unexploited
 so far: the diagnostic triangle still renders on the swapchain directly.
+ The Metal implementation (milestone 20) is the third check of the same
+prediction: the resource and pass mapping survived unchanged, depth state
+is a pipeline-creation property on the Metal side too, and the recorded
+`submit(DrawSubmission)` shape carried over directly.
 
 ## 5. Licensing boundary
 

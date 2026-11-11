@@ -369,3 +369,24 @@ if(GRACE_ENABLE_VULKAN)
         LABELS "vulkan"
         SKIP_RETURN_CODE 77)
 endif()
+
+# Metal backend tests. The mapping checks are pure: they run on every
+# platform with no device (Linux included — that is milestone 20's
+# recorded validation scope). The device-dependent contract block needs
+# the Metal framework and a default device, so it skips with exit code 77
+# everywhere the framework is absent (always, on Linux); the "metal"
+# label and the SKIP_RETURN_CODE follow the Vulkan block's shape.
+if(GRACE_ENABLE_METAL)
+    add_executable(test_metal_render test_metal_render.cpp)
+    target_link_libraries(test_metal_render PRIVATE
+        grace_null_render grace_render_metal grace_warnings)
+    target_include_directories(test_metal_render PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR})
+    target_include_directories(test_metal_render PRIVATE
+        ${CMAKE_SOURCE_DIR}/src/render/metal)
+    add_test(NAME test_metal_render
+        COMMAND $<TARGET_FILE:test_metal_render>)
+    set_tests_properties(test_metal_render PROPERTIES
+        LABELS "metal"
+        SKIP_RETURN_CODE 77)
+endif()
