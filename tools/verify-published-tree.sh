@@ -11,6 +11,7 @@ WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
 git clone --quiet --branch "$BRANCH" . "$WORK/tree"
+git -C "$WORK/tree" submodule update --quiet --init --depth 1
 
 # Report whether the local branch is ahead of the remote, because a clone
 # of the local repository would otherwise verify commits that were never
