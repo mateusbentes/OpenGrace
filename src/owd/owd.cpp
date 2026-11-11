@@ -633,7 +633,6 @@ Payload Reader::read(const std::string& name) const
             const std::uint8_t* table = m_impl->data + desc.payloadOffset;
             const std::uint8_t* blocks = table + tableSize;
             inflated.reserve(desc.payloadSizeInflated);
-            std::size_t produced = 0;
             for (std::size_t i = 0; i < blockCount; ++i)
             {
                 const std::uint64_t blockOffset =
@@ -655,7 +654,6 @@ Payload Reader::read(const std::string& name) const
                            desc.elementSize);
                 inflated.insert(inflated.end(), unfiltered.begin(),
                                 unfiltered.end());
-                produced += unfiltered.size();
             }
             (void)blocks;
         }

@@ -53,6 +53,7 @@
 #include <filesystem>
 #include <map>
 #include <fstream>
+#include <sstream>
 #include <string>
 #include <vector>
 

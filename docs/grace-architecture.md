@@ -212,9 +212,12 @@ as a decision rather than folded in as if it were fidelity.
 OpenGrace implements Linux x86_64 with OpenGL, and records Windows and Android
 as planned targets. This is a subset of the original platform matrix, and the
 implemented part is well supported: OpenGL 3.0+ was a documented GRACE 2
-target. Android is planned through Vulkan, not OpenGL ES: Vulkan is the
-single backend that covers Android, Windows and Linux, with Windows and
-Linux Vulkan being the extra capability (see 4.5).
+target. Android goes through Vulkan, not OpenGL ES (decision 43): Vulkan is
+the single backend that covers Android, Windows and Linux, with Windows and
+Linux Vulkan being the extra capability (see 4.5). The Vulkan backend is
+implemented in milestone 18 and validated on Linux under lavapipe; the
+Windows and Android validation is build-only (cross-compile clean, not
+executed on either platform).
 
 | GRACE 2 area | OpenGrace approach |
 | --- | --- |
@@ -223,7 +226,7 @@ Linux Vulkan being the extra capability (see 4.5).
 | Console platforms | Out of scope. |
 | Windows | Cross-compiled (MinGW-w64) and validated under Wine; the same backend; see 4.3. |
 | macOS | Not a target. Apple deprecated OpenGL in macOS 10.14, so a backend would be possible but would have no future; see 4.3. |
-| Mobile platforms | Android is a planned target, not implemented. Vulkan would be the API; see 4.3. |
+| Mobile platforms | Android goes through Vulkan, not OpenGL ES. The Vulkan backend is implemented (milestone 18) and cross-compiled for Android (NDK r27c, arm64-v8a); executing it on hardware is a later milestone. See 4.3. |
 | PhysX / Bullet / Box2D | Plugin contract preserved; backends chosen by licence fit. |
 | OpenAL / OpenSL / XAudio2 / MultiStream | Plugin contract preserved; OpenAL Soft on Linux. |
 | AngelScript + Tetragramaton | Both reimplemented as engine services. |
@@ -282,7 +285,9 @@ script layer holding behaviour rather than authoritative state.
 | --- | --- | --- |
 | Linux x86_64 | OpenGL 3.3 core, falling back to 3.0 | Implemented and validated |
 | Windows x86_64 | OpenGL | Cross-compiled, validated under Wine (milestone 17) |
-| Android | Vulkan | Planned, not started |
+| Linux x86_64 | Vulkan (extra capability) | Implemented, validated under lavapipe (milestone 18) |
+| Windows x86_64 | Vulkan (extra capability) | Cross-compiled against the winevulkan loader surface, not executed (milestone 18) |
+| Android (arm64-v8a) | Vulkan (primary target) | Cross-compiled with NDK r27c, not executed on hardware (milestone 18) |
 
 Linux is implemented and validated. Windows is cross-compiled with MinGW-w64
 and validated under Wine (milestone 17, decision 42): the tree builds clean
@@ -290,9 +295,14 @@ under -Werror, the OpenGL backend links opengl32.dll and the Windows system
 libraries, the GL headers load glcorearb.h, and the SDL teardown is reference
 counted. The full render pipeline (context, mesh, shader, lighting, shadows,
 post chain, readback) executes under Wine. This is Wine, not a native Windows
-run: the engine code has not been executed on native Windows hardware. Android
-is recorded so the intended scope is explicit rather than implied, and nothing
-in the repository supports it today.
+run: the engine code has not been executed on native Windows hardware. The
+Vulkan backend (milestone 18, decisions 43 and 44) implements the same
+38-method contract for all three platforms: validated on Linux under
+lavapipe, cross-compiled clean under -Werror for Windows (the local loader
+resolves through SDL's Vulkan bridge, so winevulkan's surface needs no
+generated headers) and for Android with NDK r27c (arm64-v8a) — the Android
+and Windows validation is build-only, and the engine has not executed Vulkan
+on either.
 
 Windows is expected to be a small change rather than a port. The window and the
 context come from SDL2, the render contract is API-neutral, and the OpenGL entry
@@ -305,12 +315,14 @@ shield the `near`/`far` pseudo-modifiers, and the PhysX adapter is Linux-only
 by build option (the adapter links the SDK's linux64 Makefiles build; the
 Windows validation milestone 17 does not cover the adapter).
 
-Android is planned through Vulkan, not OpenGL ES. The OpenGL ES profile is a
-different profile with a different shading language: the shaders target GLSL
-3.30 core and would need a GLSL ES 3.00 path, and that difference would have
-to be absorbed inside the OpenGL backend so the render contract stays
-API-neutral. The application lifecycle also differs, because the application
-does not own its window and the context can be lost and recreated.
+Android goes through Vulkan, not OpenGL ES (decision 43). The OpenGL ES
+profile is a different profile with a different shading language: the OpenGL
+shaders target GLSL 3.30 core and would need a GLSL ES 3.00 path, and that
+difference would have to be absorbed inside the OpenGL backend so the render
+contract stays API-neutral. The Vulkan shaders target GLSL 450 core, which
+the Vulkan backend compiles to SPIR-V at build time (decision 44). The
+application lifecycle also differs, because the application does not own its
+window and the context can be lost and recreated.
 
 macOS is not a target. The published material lists it among supported
 platforms, so this is a scope decision and not a claim about the original.
@@ -354,18 +366,20 @@ the specification. Nothing in it names a graphics API or a host platform.
 
 ### 4.5 Future rendering backends
 
-OpenGL is the only backend implemented, on Linux x86_64 and Windows x86_64.
-The render contract is API-neutral by construction and the boundary is checked
-by grep in every milestone, so a second backend is a new implementation of the
-same contract rather than a rewrite. Two are planned and neither is started.
+OpenGL was the only backend implemented on Linux x86_64 and Windows x86_64;
+milestone 18 added Vulkan. The render contract is API-neutral by construction
+and the boundary is checked by grep in every milestone, so a second backend is
+a new implementation of the same contract rather than a rewrite.
 
-**Vulkan** covers Windows, Linux and Android with one backend. On Windows and
-Linux it is the extra capability (the OpenGL backend remains the supported
-path there), and on Android it is the primary target. **Metal** would cover
-macOS and iOS with one backend, and on iOS it is the only option left: Apple
-removed OpenGL ES, while on macOS OpenGL is deprecated but still present.
-Both are recorded here as intent, not as work in progress.
-
+**Vulkan** covers Windows, Linux and Android with one backend, implemented in
+milestone 18 (decision 43) behind `GRACE_ENABLE_VULKAN`: validated on Linux
+under lavapipe, build-validated for Windows (winevulkan loader surface) and
+Android (NDK r27c, arm64-v8a). On Windows and Linux it is the extra capability
+(the OpenGL backend remains the supported path there), and on Android it is
+the primary target. **Metal** would cover macOS and iOS with one backend, and
+on iOS it is the only option left: Apple removed OpenGL ES, while on macOS
+OpenGL is deprecated but still present. Metal is recorded as intent, not as
+work in progress.
 The contract was designed against OpenGL, and the second backend is what will
 test it. The parts expected to survive unchanged are the ones about resources
 and passes: mesh and texture creation, `beginRenderPass` and `endRenderPass`,
@@ -385,9 +399,15 @@ OpenGL fact rather than a general one: Vulkan and Metal both allow sampling the
 presented target, which would remove the reason the post chain ends in a
 separate display target.
 
-The honest position is that none of this is verified. It is a list of the
-places where a second backend is expected to press on the contract, written
-before the backend exists so that the prediction can be checked against it.
+The honest position was that none of this was verified. It was a list of the
+places where a second backend was expected to press on the contract, written
+before the backend existed so the prediction could be checked against it.
+The Vulkan implementation checked it: the resource and pass mapping survived
+as expected; depth state moved into pipeline creation (the backend rebuilds
+the pipeline when depth-test state changes); the recorded-command shape of
+`draw`/`submit` and the pre-present staging-buffer readback landed as the
+contract had anticipated. Sampling the presented target was left unexploited
+so far: the diagnostic triangle still renders on the swapchain directly.
 
 ## 5. Licensing boundary
 
@@ -459,27 +479,28 @@ buildable.
 - ~~Which rendering path is primary: forward, deferred, or both selectable at
   runtime as in the original?~~ Resolved: forward rendering is the primary
   path, matching the documented per-object model of four dynamic lights plus
-  sunlight. The deferred path stays planned as a later milestone rather than
-  a runtime alternative. See docs/implementation-status.md.
-- Does the Tetragramaton block set need to be reproduced faithfully, or is a
+  sunlight. The deferred path is implemented alongside it (milestone 5,
+  selectable at runtime with `--path forward` / `--path deferred`). See
+  docs/implementation-status.md.
+- ~~Does the Tetragramaton block set need to be reproduced faithfully, or is a
   functionally equivalent block vocabulary acceptable?~~ Resolved: a
   functionally equivalent block vocabulary is accepted. The original block
   set is not publicly documented, so the contract's registry holds block
   descriptions and the graph references them by name; the vocabulary is an
   engine-owned set of native functions registered through the script
   backend's registerFunction surface. See docs/implementation-status.md.
-- What is the save format's relationship to script state, given that AngelScript
+- ~~What is the save format's relationship to script state, given that AngelScript
   has no built-in object serialisation?~~ Resolved: the scene's state lives
   in engine-owned structures and the serialisation writes it into the OWD
   container; the script state holds behaviour rather than authoritative
   state, and the save file does not serialise script objects. See
   docs/implementation-status.md.
-- Is the original GRACE 2 codename scheme to be preserved for milestone naming,
+- ~~Is the original GRACE 2 codename scheme to be preserved for milestone naming,
   or is that an unnecessary affectation?~~ Resolved: it is not preserved.
   The milestone numbering (4b, 4c, the d-g increments) is the project's own
   numbering, not the original's, and the original engine's internal codenames
   are not reproduced. See docs/implementation-status.md.
-- Should the engine name remain OpenGrace, given the precedent set by OpenMW,
+- ~~Should the engine name remain OpenGrace, given the precedent set by OpenMW,
   OpenRCT2, OpenTTD and OpenSAGE?~~ Resolved: the engine name stays OpenGrace.
   The convention the four open-source reimplementation projects set is the
   one this project follows: the name carries the original product's name and

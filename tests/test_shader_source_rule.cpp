@@ -1,7 +1,8 @@
 // G0/G2 (decision 14): a real check that no shading-language source appears
-// outside the OpenGL backend's shader library. Scans the source tree given as
-// argv[1] for .hpp/.cpp files containing a shading-language marker ("#version")
-// outside src/render/opengl/ and tests/, prints every hit, and fails if any.
+// outside the render backends' shader libraries. Scans the source tree given
+// as argv[1] for .hpp/.cpp files containing a shading-language marker
+// ("#version") outside src/render/opengl/, src/render/vulkan/ and tests/,
+// prints every hit, and fails if any.
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -54,8 +55,10 @@ int main(int argc, char** argv)
         if (ext != ".hpp" && ext != ".cpp")
             continue;
         const std::string generic = fs::path(path).generic_string();
-        // The OpenGL backend owns all shader sources; tests use ids only.
+        // The render backends own all shader sources; tests use ids only.
         if (generic.find("/src/render/opengl/") != std::string::npos)
+            continue;
+        if (generic.find("/src/render/vulkan/") != std::string::npos)
             continue;
         if (generic.find("/tests/") != std::string::npos)
             continue;
@@ -84,7 +87,8 @@ int main(int argc, char** argv)
                         generic.c_str());
         }
     }
-    std::printf("shader-source rule: scanned %d files, %d hits outside src/render/opengl/ and tests/\n",
+    std::printf("shader-source rule: scanned %d files, %d hits outside"
+                " src/render/opengl/, src/render/vulkan/ and tests/\n",
                 filesScanned, hits);
     GRACE_CHECK_EQ(hits, 0);
     return grace::test::summary("shader_source_rule");

@@ -68,7 +68,7 @@ std::uint32_t childIndex(const NodeBounds& bounds, const core::vec3& p,
     return index;
 }
 }  // namespace
-class Scene::Impl
+struct Scene::Impl
 {
 public:
     std::vector<EntityDesc> entities;

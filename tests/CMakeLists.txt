@@ -346,3 +346,26 @@ if(GRACE_ENABLE_OPENGL)
             SKIP_RETURN_CODE 77)
     endforeach()
 endif()
+
+# Vulkan backend tests. The same shape as the OpenGL block: an X server for
+# the window-system side (xvfb-run -a when available), the "vulkan" label,
+# and exit code 77 when no Vulkan device can be created (SKIP_RETURN_CODE,
+# reported as Skipped; lavapipe satisfies it on machines without a GPU).
+if(GRACE_ENABLE_VULKAN)
+    add_executable(test_vulkan_render test_vulkan_render.cpp)
+    target_link_libraries(test_vulkan_render PRIVATE
+        grace_null_render grace_render_vulkan grace_warnings)
+    target_include_directories(test_vulkan_render PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR})
+    find_program(GRACE_XVFB_RUN_VK NAMES xvfb-run)
+    if(GRACE_XVFB_RUN_VK)
+        set(GRACE_VULKAN_LAUNCHER "${GRACE_XVFB_RUN_VK};-a")
+    else()
+        set(GRACE_VULKAN_LAUNCHER "")
+    endif()
+    add_test(NAME test_vulkan_render
+        COMMAND ${GRACE_VULKAN_LAUNCHER} $<TARGET_FILE:test_vulkan_render>)
+    set_tests_properties(test_vulkan_render PROPERTIES
+        LABELS "vulkan"
+        SKIP_RETURN_CODE 77)
+endif()

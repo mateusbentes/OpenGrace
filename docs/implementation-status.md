@@ -45,6 +45,7 @@ The `.docx` files in this directory are generated from the `.md` sources with
 | 15 | AI and gameplay services: the agent behaviours (idle, patrol, seek, flee) with the deterministic steering, the timers, the named properties, the event queue and the seeded random source (15a, 15b) (decision 40) | Done |
 | 16 | Video: the playback service -- the contract (16a), the deterministic null backend (16b) and the Ogg Theora decode layer behind GRACE_ENABLE_THEORA (16c) (decision 41) | Done |
 | 17 | Windows validation: the MinGW-w64 cross-compile builds the tree clean under -Werror (105 targets), the OpenGL backend links opengl32.dll and the Windows system libraries, the GL headers load glcorearb.h, and the SDL teardown releases the video subsystem by reference count with the context unbound before deletion (decision 42) | Done |
+| 18 | Vulkan render backend: the full 38-method contract on one backend for Linux, Windows and Android (decision 43), behind `GRACE_ENABLE_VULKAN` with its own GLSL 450-core shader library compiled to SPIR-V at build time by glslangValidator (decision 44). The loader declares its own types locally (no generated headers shipped); validated on Linux under lavapipe, cross-compiled for Windows (winevulkan) and for Android (NDK r27c, arm64-v8a, build only) | Done |
 ---
 
 ## Module status
@@ -53,7 +54,7 @@ The `.docx` files in this directory are generated from the `.md` sources with
 | --- | --- | --- |
 | core | Partial | Version, fixed-step clock, header-only math (vec/mat4/transform/camera). Dependency-free, enforced by grep in review. |
 | app | Partial | Application lifecycle driver and the CLI entry point. |
-| render | Partial | Contract, null backend, OpenGL backend, loader, API-neutral mesh/shader/material plus their OpenGL implementations; diagnostic triangle rebuilt on the foundation. |
+| render | Partial | Contract, null backend, OpenGL backend, Vulkan backend, loaders, API-neutral mesh/shader/material plus their OpenGL and Vulkan implementations; diagnostic triangle rebuilt on the foundation. |
 | physics | Partial | Contract (8a), null backend (8b), and the Bullet, Box2D and PhysX 3.4 adapters (8c) behind build options. PhysX is the extra-physics capability (decision 32); the classical layer is backend-neutral. |
 | owd | Partial | The OWD container (11a): the writer, the reader, the filters, the checksums and the overlay loader, plus the `owdtool` command line (11b), on zlib's Deflate. |
 | script | Partial | The contract (9a), the null backend (9b) and the AngelScript adapter behind GRACE_ENABLE_ANGELSCRIPT; the visual block system (10a, 10b) registers through the same surface. |
@@ -134,6 +135,11 @@ All results below are real runs, on the tree at the stated commit.
 | 2026-11-09 | same, middleware submodules | SDL2 re-pinned to release-2.30.12 (the last revision of the 2.30.x series the engine supports; the engine's window, context, GL attribute and `SDL_GL_GetProcAddress` uses are unchanged across the series), and the shader-source rule test reads the submodule paths out of `.gitmodules` and skips them (measured: bullet3's examples and PhysX's KaplaDemo carry shading-language sources; without the skip the rule reported 8 hits in third-party code, 2905 files scanned, 0 hits with the skip). The four open questions of architecture §7 are resolved and recorded in "Open decisions" (3, 4, 5, 6). Suites: default build 25/25 Debug, OpenGL build 41/41 (SDL2 2.30.12 built from the new pin), docs_structure 23 checks, 0 failures; zero warnings under -Werror |
 | 2026-11-09 | Ubuntu 26.04.1, x86_64, GCC 15.2.0, CMake 4.2.3, milestone 17 (decision 42) | Linux regression: the default build 25/25 Debug, the OpenGL build 41/41, zero warnings under -Werror |
 | 2026-11-09 | same, MinGW-w64 GCC 13.2.0 cross-compile (x86_64-w64-mingw32), Wine 9.0 + Xvfb, milestone 17 (decision 42) | The tree cross-compiles clean under -Werror: 105 targets in the default build and 111 in the OpenGL build (SDL2 2.30.12 built from the submodule for Windows by the ExternalProject). Under Wine the default build 25/25 and the OpenGL build 38/38 (the two path-argument tests pass with the repo root as argv[1]); opengl_render runs 193 checks, 0 failures, and the full render pipeline (context, mesh, shader, lighting, shadows, post chain, readback) executes on Windows. Validation is Wine, not a native Windows run: the engine code has not been executed on native Windows hardware |
+| 2026-11-10 | Ubuntu 26.04.1, x86_64, GCC 15.2.0, CMake 4.2.3, lavapipe (Vulkan 1.3.275 loader, Mesa llvmpipe ICD), Xvfb, milestone 18 (decisions 43 and 44) | The Vulkan build (GL and Vulkan on) compiles clean under -Werror; test_vulkan_render passes 42/42 in ctest (223 checks, 0 failures): clear colour readback within one unit per channel, depth 0.25 and stencil 7 read back exactly, a colour-only clear leaves depth untouched, the diagnostic triangle rasterizes over the clear, the contract checks, the texture-3D checks and the volume-layer checks pass on a second backend instance |
+| 2026-11-10 | same, milestone 18 | Linux regression with the Vulkan option on: the default build 25/25 and the OpenGL build 41/41 stay green; docs_structure 23 checks, 0 failures. The Vulkan ctest reports 42/42 (the new test is labelled `vulkan` and skips with exit 77 when no Vulkan loader or X display exists) |
+| 2026-11-10 | same, MinGW-w64 GCC 13.2.0 cross-compile (x86_64-w64-mingw32), Wine 9.0, milestone 18 | The tree with `GRACE_ENABLE_VULKAN=ON` cross-compiles clean under -Werror: the Vulkan backend compiles against winevulkan's loader surface (no generated headers shipped, the local loader resolves through SDL), 29 test executables link, and test_renderer runs 41 checks, 0 failures under Wine. The Vulkan backend itself was not executed on Windows in this increment (winevulkan's lavapipe-level ICD is not available under this Wine build); honest scope: compile-validated only |
+| 2026-11-10 | same, Android NDK r27c cross-compile (arm64-v8a, android-26), milestone 18 | The tree with `GRACE_ENABLE_VULKAN=ON` cross-compiles clean under -Werror with the NDK's clang: 23 test executables link for aarch64 (SDL2 2.30.12 built from the submodule for Android by the ExternalProject, joystick subsystem on because SDL2's SDL_android.c references the joystick hooks unconditionally). Not executed on Android hardware: build-only validation, the intended Android path is the primary target of the Vulkan backend (decision 43) |
+| 2026-11-10 | same, Release, milestone 18 (decision 45) | The Release build with the OpenGL backend compiles clean under -Werror with GCC 15 against glibc 2.42+: the C23 qualifier-generic `bsearch` macro made SDL 2.30's SDL_qsort.c emit -Wdiscarded-qualifiers, relaxed in the SDK builds' shared C flags only (decision 45). Default build 25/25; the MinGW and Android cross-compiles re-verified clean with the new flag |
 
 ## Defects found by the tests, and fixed
 
@@ -195,16 +201,18 @@ configuration when the corresponding option is enabled):
 ## Target and deviations
 
 The documented GRACE 2 target was Direct3D 9/10/11 and **OpenGL 3.0+**. This
-project implements the OpenGL path only, as a deliberate subset. The context
-request is 3.3 core with a fallback to 3.0 without a profile flag; profiles do
-not exist before GL 3.2, so "3.0 core" is not a valid request.
+project implements the OpenGL path and, since milestone 18, the Vulkan path
+(decision 43), as a deliberate subset. The OpenGL context request is 3.3 core
+with a fallback to 3.0 without a profile flag; profiles do not exist before
+GL 3.2, so "3.0 core" is not a valid request.
 
 ### Deliberate deviations from the original
 
 | Original | This project | Reason |
 | --- | --- | --- |
-| Direct3D 9/10/11 | Not implemented | Linux-only target; out of scope by decision |
-| Console and mobile platforms | Not implemented | Out of scope by decision |
+| Direct3D 9/10/11 | Not implemented | Out of scope by decision; OpenGL is the Windows path too (milestone 17) |
+| Android | Vulkan (decision 43), cross-compiled with NDK r27c; not executed on hardware | See 4.3 of the architecture document |
+| Consoles | Not implemented | Out of scope by decision |
 | "Fast SSE math library" | Scalar math, compiler autovectorisation | Hand-written intrinsics usually lose to the autovectoriser today and complicate the code substantially. Revisit only if profiling shows a need. |
 | Network-based editors and tools | Deferred | Not required for engine milestones |
 | Stereoscopic 3D | Deferred | No target hardware path in scope |
@@ -221,7 +229,8 @@ not exist before GL 3.2, so "3.0 core" is not a valid request.
    directly, and it keeps materials and the lighting pass simple and
    testable. The per-object dynamic light limit is enforced at exactly four
    (`kMaxDynamicLightsPerObject`), matching the documented behaviour. The
-   deferred path is **not** cancelled: it remains planned as milestone 5.
+   deferred path is **not** cancelled: it landed in milestone 5 (Done),
+   selectable at runtime with `--path forward` / `--path deferred`.
 
 2. **Readback inside the contract or OpenGL-only?** It currently lives in the
    OpenGL backend, so the shared contract checks cannot verify framebuffer
@@ -1304,6 +1313,32 @@ grep -rn 'GLuint\|GLenum\|SDL_\|Window' include/grace/render/render_backend.hpp 
     does not exist on the Vulkan path. See 4.3 and 4.5 of
     [grace-architecture.md](grace-architecture.md).
 
+44. **How do the Vulkan backend's shaders ship, and what compiles them?**
+    The Vulkan module carries its own GLSL shader library (450 core, the
+    same API-neutral source strings the OpenGL backend consumes, kept in
+    the Vulkan module so the two backends stay independent), and
+    **glslangValidator compiles it to SPIR-V at build time** into a
+    generated header (2026-11-10). No SPIR-V binary is committed and no
+    runtime compilation exists: the build fails at configure/build time if
+    a shader does not compile, which is the same feedback the OpenGL
+    backend surfaces at context creation. glslangValidator is a build-time
+    tool dependency of `GRACE_ENABLE_VULKAN` only, never linked. The
+    Vulkan module also declares its own Vulkan types, enums and function
+    pointer signatures locally in a single loader header (values verified
+    against the published `vulkan_core.h`), so no generated Vulkan header
+    ships in the repository — the same source-only rule the OpenGL loader
+    follows.
+
+45. **Why the SDK builds compile with `-Wno-discarded-qualifiers`.**
+    glibc 2.42 implemented the C23 qualifier-generic `bsearch` macro, which
+    returns `const void *` when the array argument is const-qualified, and
+    GCC 15's C23 default then flags SDL 2.30's `SDL_qsort.c` use of
+    `bsearch` with `-Wdiscarded-qualifiers`. The SDKs are third-party code
+    built outside the engine's warning set, so the qualifier warning is
+    relaxed in the SDK builds' shared C flags (2026-11-10) instead of
+    patching the pinned sources. The engine's own targets keep the full
+    warning set with `-Werror`; no engine source changes warning scope.
+
 ## Verification commands
 
 ```sh
@@ -1321,4 +1356,12 @@ ctest --test-dir build-gl -L opengl --output-on-failure
 # Release must stay warning-free under -Werror
 cmake -S . -B build-rel -G Ninja -DCMAKE_BUILD_TYPE=Release -DGRACE_ENABLE_OPENGL=ON
 cmake --build build-rel --parallel
+
+# With the Vulkan backend (Linux; needs glslangValidator, a Vulkan loader
+# and ICD, and an X display for the render test — the render test skips
+# with exit 77 without one)
+cmake -S . -B build-vulkan -G Ninja -DCMAKE_BUILD_TYPE=Debug \
+    -DGRACE_ENABLE_OPENGL=ON -DGRACE_ENABLE_VULKAN=ON
+cmake --build build-vulkan --parallel
+ctest --test-dir build-vulkan --output-on-failure
 ```

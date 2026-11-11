@@ -39,8 +39,9 @@ or TopWare Interactive.
 - Keep every subsystem behind a platform-neutral contract.
 - Target Linux x86_64 with OpenGL as the implemented platform. Windows is
   cross-compiled and validated under Wine (milestone 17) and Android remains
-  planned through Vulkan, with Windows and Linux Vulkan being the extra
-  capability; see the Platforms section.
+  build-only (milestone 17); Android goes through Vulkan (milestone 18,
+  cross-compiled with NDK r27c, not executed on hardware), with Windows and
+  Linux Vulkan being the extra capability; see the Platforms section.
 - Validate each subsystem with deterministic tests and observable behaviour.
 - Document design decisions, limitations, and validation results clearly.
 
@@ -93,15 +94,18 @@ be read back by the overlay loader.
 | --- | --- | --- |
 | Linux x86_64 | OpenGL 3.3 core, falling back to 3.0 | Implemented and validated |
 | Windows x86_64 | OpenGL | Cross-compiled, validated under Wine (milestone 17) |
-| Android | Vulkan | Planned, not started |
+| Linux x86_64 | Vulkan (extra capability) | Implemented, validated under lavapipe (milestone 18) |
+| Windows x86_64 | Vulkan (extra capability) | Cross-compiled against the winevulkan loader surface, not executed (milestone 18) |
+| Android (arm64-v8a) | Vulkan (primary target) | Cross-compiled with NDK r27c, not executed on hardware (milestone 18) |
 
 Linux is implemented and validated. Windows is cross-compiled with MinGW-w64
 and validated under Wine (milestone 17): the tree builds clean under -Werror
 and the full render pipeline (context, mesh, shader, lighting, shadows, post
 chain, readback) executes under Wine. This is Wine, not a native Windows run.
 Android is recorded here so the intended scope is explicit rather than
-implied, and nothing in this repository currently supports it; no build file,
-shader or source file has been adapted for it.
+implied: the Vulkan backend (milestone 18) is the Android path, the tree
+cross-compiles clean for Android with NDK r27c, and the Vulkan backend has
+not been executed on Android hardware in the delivered increments.
 
 Windows is expected to be a small change rather than a port. The window and the
 context come from SDL2, the render contract is API-neutral, and the OpenGL entry
@@ -113,13 +117,11 @@ runtime), the GL headers load glcorearb.h (MinGW's gl.h is GL 1.1 only) and
 shield the `near`/`far` pseudo-modifiers, and the PhysX adapter is Linux-only
 by build option.
 
-Android is planned through Vulkan, not OpenGL ES. The OpenGL ES profile is a
-different API profile with a different shading language: the shaders target
-GLSL 3.30 core and would need a GLSL ES 3.00 path, and that difference would
-have to be absorbed inside the OpenGL backend so the render contract stays
-API-neutral. The application lifecycle also differs, because the application
-does not own its window and the context can be lost and recreated. None of
-that is implemented.
+Vulkan (milestone 18, behind `GRACE_ENABLE_VULKAN`) is the one backend for
+Android, Windows and Linux, with Android as its primary target and the other
+two as the extra capability on top of the implemented OpenGL backend. The
+Android and Windows Vulkan rows are build-only validations: the engine has
+not executed Vulkan on either.
 
 The scripting backends are not wired yet, so neither platform introduces a
 dependency that is currently unavailable there. The physics backends are
@@ -133,6 +135,72 @@ build, not from milestone 17.
 ## Building
 
 Requirements: CMake 3.16 or newer and a C++17 compiler (GCC or Clang).
+The build fetches the SDL2 sources from the pinned submodule and builds
+them as part of the configure step, so the SDKs are not system packages.
+The `glslangValidator` tool is the one build-time prerequisite the
+`GRACE_ENABLE_VULKAN` option cannot provide itself: the CMake configuration
+fails with `find_program` if it is not on the `PATH` when that option is
+enabled. Install it per platform before configuring with Vulkan.
+
+### Linux
+
+On Kubuntu/Debian the build needs the compiler, CMake, Ninja and the
+GLVND OpenGL headers (linked when `GRACE_ENABLE_OPENGL=ON`):
+
+```
+sudo apt install build-essential cmake ninja-build \
+  libglvnd-dev libgl1-mesa-dev
+```
+
+For the Vulkan backend, add the validator and the runtime loader:
+
+```
+sudo apt install glslang-tools
+```
+
+To execute the Vulkan tests on a machine without a Vulkan-capable GPU,
+add the Mesa software driver (lavapipe) and the Vulkan utilities the
+validation records use:
+
+```
+sudo apt install mesa-vulkan-drivers vulkan-tools
+```
+
+### Windows (cross-compiled from Linux)
+
+The Windows build is a cross-compile from a Linux host with MinGW-w64
+and is validated under Wine:
+
+```
+sudo apt install gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 wine
+```
+
+The same `glslangValidator` from the host (`glslang-tools`) is used;
+the CMake `find_program` accepts it. The configure command is:
+
+```
+cmake -S . -B build-win -G Ninja -DCMAKE_BUILD_TYPE=Debug \
+  -DCMAKE_SYSTEM_NAME=Windows \
+  -DCMAKE_C_COMPILER=x86_64-w64-mingw32-gcc \
+  -DCMAKE_CXX_COMPILER=x86_64-w64-mingw32-g++ \
+  -DGRACE_ENABLE_OPENGL=ON
+```
+
+### Android (cross-compiled with the NDK)
+
+Download the NDK r27c and point the toolchain file at it:
+
+```
+cmake -S . -B build-android -G Ninja -DCMAKE_BUILD_TYPE=Debug \
+  -DCMAKE_TOOLCHAIN_FILE=$NDK/build/cmake/android.toolchain.cmake \
+  -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-26 \
+  -DGRACE_ENABLE_VULKAN=ON
+```
+
+The Android build is validated as build-only (the binaries are not
+executed on hardware in the delivered increments).
+
+### Default build
 
 ```
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
@@ -147,6 +215,7 @@ Build options:
 | `GRACE_BUILD_TESTS` | `ON` | Build and register the deterministic tests with CTest. |
 | `GRACE_WARNINGS_AS_ERRORS` | `ON` | Treat compiler warnings as errors. |
 | `GRACE_ENABLE_OPENGL` | `OFF` | OpenGL backend (SDL2 submodule, OpenGL at runtime). |
+| `GRACE_ENABLE_VULKAN` | `OFF` | Vulkan backend (SDL2 submodule, Vulkan at runtime, glslangValidator at build time). |
 | `GRACE_ENABLE_PHYSX` | `OFF` | PhysX 3.4 physics backend (the submodule). |
 | `GRACE_ENABLE_BULLET` | `OFF` | Bullet physics backend (the submodule). |
 | `GRACE_ENABLE_BOX2D` | `OFF` | Box2D physics backend (the submodule). |
@@ -167,6 +236,8 @@ static libraries it produces).
 | --- | --- | --- | --- |
 | SDL2 | zlib | Window, context and input | linked when `GRACE_ENABLE_OPENGL=ON` |
 | OpenGL and GLVND | MIT-style | Graphics API, resolved at runtime | linked when `GRACE_ENABLE_OPENGL=ON` |
+| Vulkan loader and ICD | Apache-2.0 | Graphics API, resolved at runtime through SDL | linked when `GRACE_ENABLE_VULKAN=ON` |
+| [glslangValidator](https://github.com/KhronosGroup/glslang) | Apache-2.0 / BSD-3 | Compiles the Vulkan shader library to SPIR-V at build time | build-time tool of `GRACE_ENABLE_VULKAN`, never linked |
 | zlib | zlib | Deflate codec behind the OWD container | linked unconditionally |
 | [NVIDIA PhysX SDK 3.4](https://github.com/NVIDIAGameWorks/PhysX-3.4) | 3-Clause BSD | Physics backend (extra physics: cloth, soft body) | linked when `GRACE_ENABLE_PHYSX=ON` |
 | [Bullet Physics SDK](https://github.com/bulletphysics/bullet3) | zlib | Physics backend | linked when `GRACE_ENABLE_BULLET=ON` |

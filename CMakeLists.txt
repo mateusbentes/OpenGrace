@@ -28,6 +28,7 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
 option(GRACE_BUILD_TESTS        "Build and register the deterministic tests" ON)
 option(GRACE_WARNINGS_AS_ERRORS "Treat compiler warnings as errors"         ON)
 option(GRACE_ENABLE_OPENGL      "Build the OpenGL backend"                 OFF)
+option(GRACE_ENABLE_VULKAN      "Build the Vulkan backend"                 OFF)
 option(GRACE_ENABLE_PHYSX       "Build the PhysX 3.4 physics backend"       OFF)
 option(GRACE_ENABLE_BULLET      "Build the Bullet physics backend"          OFF)
 option(GRACE_ENABLE_BOX2D       "Build the Box2D physics backend"          OFF)
@@ -60,7 +61,13 @@ set(GRACE_SDK_CMAKE_ARGS
     -DCMAKE_BUILD_TYPE=Release
     -DCMAKE_INSTALL_PREFIX=${GRACE_THIRD_PARTY}
     -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
-    -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER})
+    -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
+    # glibc 2.42+ made bsearch a C23 const-preserving macro, and GCC 15
+    # flags SDL 2.30's SDL_qsort.c use of it with -Wdiscarded-qualifiers.
+    # The SDK builds are third-party code outside the engine's warning
+    # set, so the qualifier warning is relaxed there instead of patching
+    # the pinned sources.
+    -DCMAKE_C_FLAGS=-Wno-discarded-qualifiers)
 if(CMAKE_TOOLCHAIN_FILE)
     # A cross-compile's toolchain file must reach the SDK builds, or they
     # configure for the build host and the engine's link fails at the
@@ -77,6 +84,20 @@ if(CMAKE_CROSSCOMPILING)
         -DCMAKE_SYSTEM_PROCESSOR=${CMAKE_SYSTEM_PROCESSOR}
         -DCMAKE_AR=${CMAKE_AR}
         -DCMAKE_RANLIB=${CMAKE_RANLIB})
+endif()
+if(ANDROID)
+    # SDL 2.30's SDL_android.c calls the joystick notification helpers even
+    # with the joystick subsystem off, and the NDK's clang makes the implicit
+    # declaration an error. The SDK builds are outside the engine's warning
+    # set, so the declaration-level error is relaxed there only.
+    list(APPEND GRACE_SDK_CMAKE_ARGS
+        -DCMAKE_C_FLAGS=-Wno-error=implicit-function-declaration)
+    # The NDK toolchain file derives its target from ANDROID_ABI and
+    # ANDROID_PLATFORM; they must reach the SDK builds or those configure
+    # for the build host's architecture.
+    list(APPEND GRACE_SDK_CMAKE_ARGS
+        -DANDROID_ABI=${ANDROID_ABI}
+        -DANDROID_PLATFORM=${ANDROID_PLATFORM})
 endif()
 # The adapter targets reference the prefix's include/lib directories before
 # the ExternalProject builds run; the directories must exist at configure
@@ -121,16 +142,16 @@ endif()
 endif()
 
 # ---------------------------------------------------------------------------
-# SDL2 (static; the OpenGL backend links it)
+# SDL2 (static; the OpenGL and the Vulkan backends link it)
 # ---------------------------------------------------------------------------
 
-if(GRACE_ENABLE_OPENGL)
+if(GRACE_ENABLE_OPENGL OR GRACE_ENABLE_VULKAN)
 ExternalProject_Add(grace_sdl2
     SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/sdl2
     CMAKE_ARGS ${GRACE_SDK_CMAKE_ARGS}
         -DSDL_SHARED=OFF -DSDL_STATIC=ON -DSDL_TEST_LIBRARY=OFF
         -DSDL_AUDIO=OFF -DSDL_RENDER=OFF -DSDL_EVENTS=ON
-        -DSDL_JOYSTICK=OFF -DSDL_HAPTIC=OFF -DSDL_POWER=OFF
+        -DSDL_POWER=OFF
         -DSDL_FILESYSTEM=OFF -DSDL_TIMERS=ON
         -DSDL_THREADS=ON
     BUILD_BYPRODUCTS ${GRACE_THIRD_PARTY}/lib/libSDL2.a)
@@ -498,17 +519,13 @@ if(GRACE_ENABLE_BOX2D)
 endif()
 
 # ---------------------------------------------------------------------------
-# OpenGL render backend
+# SDL2
 #
-# SDL2 provides window/context/input; OpenGL comes from GLVND (OpenGL::OpenGL,
-# never the legacy libGL) on Linux and from opengl32.dll on Windows. Entry
-# points beyond GL 1.1 are resolved at runtime through SDL_GL_GetProcAddress
-# by the internal loader in this module.
+# SDL2 comes from the pinned git submodule (grace_sdl2 above), built as
+# a static library into the third-party prefix. Both the OpenGL and the
+# Vulkan backends consume it through the same imported target.
 # ---------------------------------------------------------------------------
-
-if(GRACE_ENABLE_OPENGL)
-    # SDL2 comes from the pinned git submodule (grace_sdl2 above), built as
-    # a static library into the third-party prefix.
+if(GRACE_ENABLE_OPENGL OR GRACE_ENABLE_VULKAN)
     add_library(SDL2::SDL2 INTERFACE IMPORTED)
     target_include_directories(SDL2::SDL2 SYSTEM INTERFACE
         ${GRACE_THIRD_PARTY}/include)
@@ -522,7 +539,17 @@ if(GRACE_ENABLE_OPENGL)
             user32 gdi32 winmm imm32 ole32 oleaut32 version uuid
             advapi32 setupapi shell32)
     endif()
+endif()
 
+# ---------------------------------------------------------------------------
+# OpenGL render backend
+#
+# SDL2 provides window/context/input; OpenGL comes from GLVND
+# (OpenGL::OpenGL, never the legacy libGL) on Linux and from opengl32.dll
+# on Windows. Entry points beyond GL 1.1 are resolved at runtime through
+# SDL_GL_GetProcAddress by the internal loader in this module.
+# ---------------------------------------------------------------------------
+if(GRACE_ENABLE_OPENGL)
     set(OpenGL_GL_PREFERENCE GLVND)
     if(WIN32)
         # Windows: OpenGL 1.1 comes from opengl32.dll, the platform SDK's
@@ -553,6 +580,62 @@ if(GRACE_ENABLE_OPENGL)
         target_link_libraries(grace_render_opengl
             PUBLIC grace_render
             PRIVATE grace_warnings SDL2::SDL2 OpenGL::OpenGL)
+    endif()
+endif()
+
+# ---------------------------------------------------------------------------
+# Vulkan render backend
+#
+# SDL2 provides window/input; the Vulkan entry points are resolved at runtime
+# through SDL_Vulkan_GetVkGetInstanceProcAddr by the internal loader in this
+# module (no link-time Vulkan dependency, the same rule the OpenGL backend
+# follows). The shader library's GLSL 450 sources are compiled to SPIR-V at
+# build time by glslangValidator (the build-time prerequisite, decision 44),
+# and the generated header is embedded into the module.
+# ---------------------------------------------------------------------------
+
+if(GRACE_ENABLE_VULKAN)
+    # The SPIR-V step: every engine shader in vulkan_shader_library.hpp
+    # compiles to SPIR-V at build time; the generated header carries the
+    # per-shader byte arrays. The generator runs glslangValidator through
+    # the CMake command (the tool is a build-time prerequisite).
+    find_program(GRACE_GLSLANG_VALIDATOR glslangValidator
+        REQUIRED)
+    set(GRACE_SPIRV_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated/spirv")
+    file(MAKE_DIRECTORY "${GRACE_SPIRV_DIR}")
+    execute_process(
+        COMMAND ${CMAKE_COMMAND} -E env
+            python3 ${CMAKE_CURRENT_SOURCE_DIR}/tools/build-spirv.py
+            ${CMAKE_CURRENT_SOURCE_DIR} ${GRACE_SPIRV_DIR}
+            ${GRACE_GLSLANG_VALIDATOR}
+        RESULT_VARIABLE GRACE_SPIRV_RESULT
+        OUTPUT_VARIABLE GRACE_SPIRV_OUTPUT
+        ERROR_VARIABLE GRACE_SPIRV_OUTPUT)
+    if(NOT GRACE_SPIRV_RESULT EQUAL 0)
+        message(FATAL_ERROR "the Vulkan backend's SPIR-V step failed:\n"
+            "${GRACE_SPIRV_OUTPUT}")
+    endif()
+
+    add_library(grace_render_vulkan STATIC
+        src/render/vulkan/vk_loader.cpp
+        src/render/vulkan/vulkan_shader.cpp
+        src/render/vulkan/vulkan_mesh.cpp
+        src/render/vulkan/vulkan_render_target.cpp
+        src/render/vulkan/vulkan_render_backend.cpp)
+    target_include_directories(grace_render_vulkan PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
+    target_include_directories(grace_render_vulkan PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/render/vulkan)
+    target_include_directories(grace_render_vulkan PRIVATE
+        ${GRACE_SPIRV_DIR})
+    add_dependencies(grace_render_vulkan grace_sdl2)
+    target_link_libraries(grace_render_vulkan
+        PUBLIC grace_render
+        PRIVATE grace_warnings SDL2::SDL2)
+    if(ANDROID)
+        # SDL2's Android backend references the NDK's platform libraries
+        # (the native window, the log and the sensor manager).
+        target_link_libraries(grace_render_vulkan PRIVATE android log)
     endif()
 endif()
 
@@ -763,6 +846,11 @@ target_link_libraries(grace PRIVATE grace_app grace_null_render grace_warnings)
 if(GRACE_ENABLE_OPENGL)
     target_link_libraries(grace PRIVATE grace_render_opengl)
     target_compile_definitions(grace PRIVATE GRACE_HAVE_OPENGL=1)
+endif()
+
+if(GRACE_ENABLE_VULKAN)
+    target_link_libraries(grace PRIVATE grace_render_vulkan)
+    target_compile_definitions(grace PRIVATE GRACE_HAVE_VULKAN=1)
 endif()
 
 # ---------------------------------------------------------------------------
