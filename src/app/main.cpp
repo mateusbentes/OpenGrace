@@ -14,12 +14,16 @@
 #ifdef GRACE_HAVE_OPENGL
 #include "grace/render/opengl_render_backend.hpp"
 #endif
+#ifdef GRACE_HAVE_VULKAN
+#include "grace/render/vulkan_render_backend.hpp"
+#endif
 
 namespace {
 
 struct Options
 {
     bool headless = false;
+    bool vulkan = false;
     bool post = true;  // 6e: the post chain is the default (decision 23); --no-post opts out
     bool dof = false;   ///< enable the 6d depth-of-field post pass (with --post)
     bool mlaa = false;  ///< enable the 6d morphological AA post pass (with --post)
@@ -45,8 +49,9 @@ void printUsage(std::FILE* out)
                  "Usage: grace [options]\n"
                  "\n"
                  "Backend selection:\n"
-                 "  (default)           OpenGL backend, when built with GRACE_ENABLE_OPENGL=ON.\n"
-                 "  --headless          Null (headless) render backend.\n"
+                "  (default)           OpenGL backend, when built with GRACE_ENABLE_OPENGL=ON.\n"
+                "  --vulkan            Vulkan backend, when built with GRACE_ENABLE_VULKAN=ON.\n"
+                "  --headless          Null (headless) render backend.\n"
                  "  --post              Post chain (HDR, bloom, tonemap, SSAO, MLAA) — DEFAULT.\n"
                  "  --no-post           Legacy compatibility path: linear -> 8-bit, no chain.\n"
                  "  --dof               With the chain: depth of field (off by default).\n"
@@ -61,10 +66,10 @@ void printUsage(std::FILE* out)
                  "  --max-steps <n>       Step cap per frame (default: 5).\n"
                  "  --width <px>          Frame width in pixels (default: 1280).\n"
                  "  --height <px>         Frame height in pixels (default: 720).\n"
-                 "  --hidden              Create the window hidden (OpenGL backend; Xvfb runs).\n"
-                 "  --readback            Read back the centre pixel before the buffer swap\n"
-                 "                        (OpenGL backend).\n"
-                 "  --swap-interval <n>   Buffer swap interval (OpenGL backend, default: 1).\n"
+                "  --hidden              Create the window hidden (OpenGL backend; Xvfb runs).\n"
+                "  --readback            Read back the centre pixel before the buffer swap\n"
+                "                        (OpenGL and Vulkan backends).\n"
+                "  --swap-interval <n>   Buffer swap interval (OpenGL and Vulkan backends, default: 1).\n"
                  "  -v, --verbose         Print backend details (GL version, vendor, renderer).\n"
                  "  -h, --help            Print this help and exit.\n"
                  "\n"
@@ -104,6 +109,10 @@ int main(int argc, char** argv)
         else if (arg == "--headless")
         {
             options.headless = true;
+        }
+        else if (arg == "--vulkan")
+        {
+            options.vulkan = true;
         }
         else if (arg == "--post")
         {
@@ -205,6 +214,14 @@ int main(int argc, char** argv)
         return usageError("no render backend selected; this build provides --headless only "
                           "(configure with -DGRACE_ENABLE_OPENGL=ON for the OpenGL backend)");
 #endif
+#ifndef GRACE_HAVE_VULKAN
+    if (options.vulkan)
+        return usageError("--vulkan requires a Vulkan build "
+                          "(configure with -DGRACE_ENABLE_VULKAN=ON)");
+#endif
+
+    if (options.vulkan && options.headless)
+        return usageError("--vulkan and --headless are mutually exclusive");
 
     // Deterministic clear colour for every run.
     constexpr grace::render::ClearColor kClearColor{0x1E, 0x1E, 0x1E, 0xFF};
@@ -230,9 +247,12 @@ int main(int argc, char** argv)
     {
         std::unique_ptr<grace::render::RenderBackend> backend;
         grace::render::NullRenderBackend* null_backend = nullptr;
+#ifdef GRACE_HAVE_VULKAN
+        grace::render::VulkanRenderBackend* vulkan_backend = nullptr;
+#endif
 #ifdef GRACE_HAVE_OPENGL
         grace::render::OpenGLRenderBackend* gl_backend = nullptr;
-        if (!options.headless)
+        if (!options.headless && !options.vulkan)
         {
             grace::render::OpenGLBackendConfig gl_config;
             gl_config.width = options.width;
@@ -243,6 +263,23 @@ int main(int argc, char** argv)
             auto concrete = std::make_unique<grace::render::OpenGLRenderBackend>(gl_config);
             concrete->initialise();
             gl_backend = concrete.get();
+            backend = std::move(concrete);
+        }
+        else
+#endif
+#ifdef GRACE_HAVE_VULKAN
+        if (options.vulkan)
+        {
+            grace::render::VulkanBackendConfig vulkan_config;
+            vulkan_config.width = options.width;
+            vulkan_config.height = options.height;
+            vulkan_config.hidden = options.hidden;
+            vulkan_config.readback_center = options.readback;
+            vulkan_config.swap_interval = options.swap_interval;
+            auto concrete =
+                std::make_unique<grace::render::VulkanRenderBackend>(vulkan_config);
+            concrete->initialise();
+            vulkan_backend = concrete.get();
             backend = std::move(concrete);
         }
         else
@@ -285,6 +322,31 @@ int main(int argc, char** argv)
                             static_cast<int>(pixel.b), static_cast<int>(pixel.a),
                             static_cast<double>(gl_backend->centerDepth()),
                             static_cast<int>(gl_backend->centerStencil()));
+            }
+        }
+        else
+#endif
+#ifdef GRACE_HAVE_VULKAN
+        if (vulkan_backend != nullptr)
+        {
+            std::printf("grace: violations=%" PRIu64 "\n",
+                        vulkan_backend->violationCount());
+            if (options.verbose)
+            {
+                std::printf("grace: detail: %s\n", vulkan_backend->describe().c_str());
+                std::printf("grace: hidden=%d swap_interval=%d readback=%d\n",
+                            static_cast<int>(options.hidden),
+                            static_cast<int>(options.swap_interval),
+                            static_cast<int>(options.readback));
+            }
+            if (options.readback && vulkan_backend->hasCenterPixel())
+            {
+                const grace::render::ClearColor pixel = vulkan_backend->centerPixel();
+                std::printf("grace: center_pixel=%d,%d,%d,%d depth=%.6f stencil=%d\n",
+                            static_cast<int>(pixel.r), static_cast<int>(pixel.g),
+                            static_cast<int>(pixel.b), static_cast<int>(pixel.a),
+                            static_cast<double>(vulkan_backend->centerDepth()),
+                            static_cast<int>(vulkan_backend->centerStencil()));
             }
         }
         else

@@ -15,6 +15,11 @@ namespace vulkan {
 
 using VkBool32 = std::uint32_t;
 using VkFlags = std::uint32_t;
+// The spec's VkDeviceSize: every size and offset field of the memory, the
+// buffer and the copy structures is 64-bit. A 32-bit field in one of those
+// positions shifts every following member and the driver reads past the
+// struct's end (the memory allocate segfault this fixes on real hardware).
+using VkDeviceSize = std::uint64_t;
 
 // Vulkan handles are opaque pointers for the types the engine uses.
 using VkInstance = void*;
@@ -60,6 +65,8 @@ enum class Format : std::uint32_t
     R32G32B32Sfloat = 106,
     R16G16B16A16Sfloat = 97,
     D24UnormS8Uint = 129,
+    D32Sfloat = 126,
+    D16Unorm = 125,
     R32Uint = 98,
     R32Sint = 99,
     Rg32Sint = 102,
@@ -287,9 +294,18 @@ enum class Result : std::int32_t
     NotReady = 2,
     ErrorExtensionNotPresent = -7,
     ErrorInitializationFailed = -3,
+    ErrorOutOfDateKHR = -1000001004,
+    ErrorSurfaceLostKHR = -1000000000,
+    SuboptimalKHR = 1000001003,
 };
 
 enum class Filter : std::uint32_t
+{
+    Nearest = 0,
+    Linear = 1,
+};
+
+enum class MipmapMode : std::uint32_t
 {
     Nearest = 0,
     Linear = 1,
@@ -335,10 +351,18 @@ enum class CompositeAlpha : std::uint32_t
 {
     Opaque = 1,
 };
+enum class FormatFeature : std::uint32_t
+{
+    SampledImage = 0x1u,
+    DepthStencilAttachment = 0x2u,
+};
 
 enum class PresentMode : std::uint32_t
 {
     Fifo = 2,
+    FifoRelaxed = 3,
+    Immediate = 0,
+    Mailbox = 1,
 };
 
 enum class ImageTiling : std::uint32_t
@@ -438,7 +462,7 @@ struct VkMemoryAllocateInfo
 {
     StructureType sType = StructureType::MemoryAllocateInfo;
     const void* pNext = nullptr;
-    std::uint32_t allocationSize = 0;
+    VkDeviceSize allocationSize = 0;
     std::uint32_t memoryTypeIndex = 0;
 };
 
@@ -447,8 +471,8 @@ struct VkMappedMemoryRange
     StructureType sType = StructureType::MappedMemoryRange;
     const void* pNext = nullptr;
     VkDeviceMemory memory = nullptr;
-    std::uint32_t offset = 0;
-    std::size_t size = 0;
+    VkDeviceSize offset = 0;
+    VkDeviceSize size = 0;
 };
 
 struct VkFenceCreateInfo
@@ -958,6 +982,7 @@ struct VkSamplerCreateInfo
     VkFlags flags = 0;
     Filter magFilter = Filter::Nearest;
     Filter minFilter = Filter::Nearest;
+    MipmapMode mipmapMode = MipmapMode::Nearest;
     SamplerAddressMode addressModeU = SamplerAddressMode::ClampToEdge;
     SamplerAddressMode addressModeV = SamplerAddressMode::ClampToEdge;
     SamplerAddressMode addressModeW = SamplerAddressMode::ClampToEdge;
@@ -1242,6 +1267,12 @@ struct VkExtensionProperties
     char extensionName[256];
     std::uint32_t specVersion;
 };
+struct VkFormatProperties
+{
+    VkFlags linearTilingFeatures;
+    VkFlags optimalTilingFeatures;
+    VkFlags bufferFeatures;
+};
 
 struct VkSurfaceCapabilitiesKHR
 {
@@ -1362,6 +1393,9 @@ using FnDestroyInstance = void (*)(VkInstance, const void*);
 using FnEnumeratePhysicalDevices = Result (*)(VkInstance, std::uint32_t*,
                                               VkPhysicalDevice*);
 using FnGetPhysicalDeviceProperties = void (*)(VkPhysicalDevice, void*);
+using FnGetPhysicalDeviceFormatProperties = void (*)(VkPhysicalDevice,
+                                                     Format,
+                                                     VkFormatProperties*);
 using FnGetPhysicalDeviceFeatures = void (*)(VkPhysicalDevice, void*);
 using FnGetPhysicalDeviceMemoryProperties = void (*)(VkPhysicalDevice, void*);
 using FnGetPhysicalDeviceQueueFamilyProperties =
@@ -1545,6 +1579,10 @@ using FnGetPhysicalDeviceSurfaceFormatsKHR = Result (*)(VkPhysicalDevice,
                                                         VkSurfaceKHR,
                                                         std::uint32_t*,
                                                         VkSurfaceFormatKHR*);
+using FnGetPhysicalDeviceSurfacePresentModesKHR = Result (*)(VkPhysicalDevice,
+                                                             VkSurfaceKHR,
+                                                             std::uint32_t*,
+                                                             PresentMode*);
 using FnCreateSwapchainKHR = Result (*)(VkDevice,
                                         const VkSwapchainCreateInfoKHR*,
                                         const void*, VkSwapchainKHR*);
@@ -1598,6 +1636,8 @@ public:
     FnDestroyInstance vkDestroyInstance = nullptr;
     FnEnumeratePhysicalDevices vkEnumeratePhysicalDevices = nullptr;
     FnGetPhysicalDeviceProperties vkGetPhysicalDeviceProperties = nullptr;
+    FnGetPhysicalDeviceFormatProperties vkGetPhysicalDeviceFormatProperties =
+        nullptr;
     FnGetPhysicalDeviceFeatures vkGetPhysicalDeviceFeatures = nullptr;
     FnGetPhysicalDeviceMemoryProperties vkGetPhysicalDeviceMemoryProperties =
         nullptr;
@@ -1687,6 +1727,8 @@ public:
         vkGetPhysicalDeviceSurfaceCapabilitiesKHR = nullptr;
     FnGetPhysicalDeviceSurfaceFormatsKHR
         vkGetPhysicalDeviceSurfaceFormatsKHR = nullptr;
+    FnGetPhysicalDeviceSurfacePresentModesKHR
+        vkGetPhysicalDeviceSurfacePresentModesKHR = nullptr;
     FnCreateSwapchainKHR vkCreateSwapchainKHR = nullptr;
     FnDestroySwapchainKHR vkDestroySwapchainKHR = nullptr;
     FnGetSwapchainImagesKHR vkGetSwapchainImagesKHR = nullptr;

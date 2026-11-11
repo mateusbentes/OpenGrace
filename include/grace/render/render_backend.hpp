@@ -33,6 +33,21 @@ constexpr bool operator!=(const ClearColor& lhs, const ClearColor& rhs) noexcept
     return !(lhs == rhs);
 }
 
+/// Buffer selection for clear(), as a platform-neutral bitmask. Every
+/// backend's config carries its own default; the mask values are shared.
+enum class ClearBuffer : std::uint32_t
+{
+    Color = 1u << 0,
+    Depth = 1u << 1,
+    Stencil = 1u << 2
+};
+
+constexpr ClearBuffer operator|(ClearBuffer lhs, ClearBuffer rhs) noexcept
+{
+    return static_cast<ClearBuffer>(static_cast<std::uint32_t>(lhs) |
+                                    static_cast<std::uint32_t>(rhs));
+}
+
 /// One pixel sample produced by readback().
 struct ReadbackSample
 {

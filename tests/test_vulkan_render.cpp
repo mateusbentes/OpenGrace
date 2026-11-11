@@ -104,6 +104,38 @@ int main()
     GRACE_CHECK(withinOne(backend->centerPixel(), triangle_color));
 
     GRACE_CHECK_EQ(backend->violationCount(), 0u);
+    // Milestone 19: the depth-only shadow target's view binds on the
+    // contract's cascade unit (the layout table's unit rule), and a
+    // pass that clears into it records without violations — the same
+    // bind-and-render path the shadow passes run on hardware.
+    {
+        grace::render::RenderTargetDesc shadow_desc;
+        shadow_desc.width = 64;
+        shadow_desc.height = 64;
+        shadow_desc.colorAttachmentCount = 0;
+        shadow_desc.depthAttachment = true;
+        shadow_desc.depthFormat =
+            grace::render::PixelFormat::Depth24Stencil8;
+        grace::render::RenderTarget* shadow_target =
+            backend->createRenderTarget(shadow_desc);
+        GRACE_CHECK(shadow_target != nullptr);
+        grace::render::TextureView* shadow_view =
+            backend->renderTargetTexture(shadow_target);
+        GRACE_CHECK(shadow_view != nullptr);
+        GRACE_CHECK(shadow_view->isDepth());
+        backend->bindTexture(shadow_view, 0u);
+        GRACE_CHECK_EQ(backend->violationCount(), 0u);
+        backend->beginRenderPass(shadow_target);
+        backend->clear();
+        backend->endRenderPass();
+        GRACE_CHECK_EQ(backend->violationCount(), 0u);
+        backend->releaseRenderTarget(shadow_target);
+    }
+    // The describe() string names the API and the device (the contract's
+    // renderer identity, the same fields the OpenGL backend's describe()
+    // carries).
+    GRACE_CHECK(backend->describe().find("vulkan") == 0);
+    GRACE_CHECK(backend->describe().find("renderer=") != std::string::npos);
     backend->shutdown();
 
     // The same shared contract checks produce the same lifecycle on the null

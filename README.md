@@ -94,7 +94,7 @@ be read back by the overlay loader.
 | --- | --- | --- |
 | Linux x86_64 | OpenGL 3.3 core, falling back to 3.0 | Implemented and validated |
 | Windows x86_64 | OpenGL | Cross-compiled, validated under Wine (milestone 17) |
-| Linux x86_64 | Vulkan (extra capability) | Implemented, validated under lavapipe (milestone 18) |
+| Linux x86_64 | Vulkan (extra capability) | Implemented, validated under lavapipe (milestones 18 and 19) |
 | Windows x86_64 | Vulkan (extra capability) | Cross-compiled against the winevulkan loader surface, not executed (milestone 18) |
 | Android (arm64-v8a) | Vulkan (primary target) | Cross-compiled with NDK r27c, not executed on hardware (milestone 18) |
 
@@ -122,6 +122,13 @@ Android, Windows and Linux, with Android as its primary target and the other
 two as the extra capability on top of the implemented OpenGL backend. The
 Android and Windows Vulkan rows are build-only validations: the engine has
 not executed Vulkan on either.
+
+Milestone 19 (decision 46) closes what the presentation engine on hardware
+needs: the swap interval maps onto the present mode, the acquire retries on
+the out-of-date resize, the depth attachment format is picked from the
+device's format properties, and the sampler descriptors are written at draw
+time from the bound texture views. The Vulkan backend is closed — the next
+milestone has no Vulkan work.
 
 The scripting backends are not wired yet, so neither platform introduces a
 dependency that is currently unavailable there. The physics backends are
@@ -201,13 +208,14 @@ The Android build is validated as build-only (the binaries are not
 executed on hardware in the delivered increments).
 
 ### Default build
-
 ```
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
 cmake --build build --parallel
 ctest --test-dir build --output-on-failure
 ```
-
+The Vulkan backend's CLI runs on the same binary: `grace --vulkan` selects
+the Vulkan backend when the build has `GRACE_ENABLE_VULKAN=ON` (with
+`--hidden` and `--swap-interval` for the presentation engine's two knobs).
 Build options:
 
 | Option | Default | Meaning |

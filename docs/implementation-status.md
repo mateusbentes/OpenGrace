@@ -46,6 +46,7 @@ The `.docx` files in this directory are generated from the `.md` sources with
 | 16 | Video: the playback service -- the contract (16a), the deterministic null backend (16b) and the Ogg Theora decode layer behind GRACE_ENABLE_THEORA (16c) (decision 41) | Done |
 | 17 | Windows validation: the MinGW-w64 cross-compile builds the tree clean under -Werror (105 targets), the OpenGL backend links opengl32.dll and the Windows system libraries, the GL headers load glcorearb.h, and the SDL teardown releases the video subsystem by reference count with the context unbound before deletion (decision 42) | Done |
 | 18 | Vulkan render backend: the full 38-method contract on one backend for Linux, Windows and Android (decision 43), behind `GRACE_ENABLE_VULKAN` with its own GLSL 450-core shader library compiled to SPIR-V at build time by glslangValidator (decision 44). The loader declares its own types locally (no generated headers shipped); validated on Linux under lavapipe, cross-compiled for Windows (winevulkan) and for Android (NDK r27c, arm64-v8a, build only) | Done |
+| 19 | Vulkan hardware path: the presentation engine (the swap interval maps onto the present mode, the acquire retries on the out-of-date resize, the present result steers the next frame), the depth attachment format picked from the device's format properties (D24S8, D32Sfloat, D16Unorm in that order), and the sampler descriptors written at draw time from the bound texture views (the layout table's unit rule, the default 1x1 white texture for unbound slots) (decision 46) | Done |
 ---
 
 ## Module status
@@ -140,6 +141,10 @@ All results below are real runs, on the tree at the stated commit.
 | 2026-11-10 | same, MinGW-w64 GCC 13.2.0 cross-compile (x86_64-w64-mingw32), Wine 9.0, milestone 18 | The tree with `GRACE_ENABLE_VULKAN=ON` cross-compiles clean under -Werror: the Vulkan backend compiles against winevulkan's loader surface (no generated headers shipped, the local loader resolves through SDL), 29 test executables link, and test_renderer runs 41 checks, 0 failures under Wine. The Vulkan backend itself was not executed on Windows in this increment (winevulkan's lavapipe-level ICD is not available under this Wine build); honest scope: compile-validated only |
 | 2026-11-10 | same, Android NDK r27c cross-compile (arm64-v8a, android-26), milestone 18 | The tree with `GRACE_ENABLE_VULKAN=ON` cross-compiles clean under -Werror with the NDK's clang: 23 test executables link for aarch64 (SDL2 2.30.12 built from the submodule for Android by the ExternalProject, joystick subsystem on because SDL2's SDL_android.c references the joystick hooks unconditionally). Not executed on Android hardware: build-only validation, the intended Android path is the primary target of the Vulkan backend (decision 43) |
 | 2026-11-10 | same, Release, milestone 18 (decision 45) | The Release build with the OpenGL backend compiles clean under -Werror with GCC 15 against glibc 2.42+: the C23 qualifier-generic `bsearch` macro made SDL 2.30's SDL_qsort.c emit -Wdiscarded-qualifiers, relaxed in the SDK builds' shared C flags only (decision 45). Default build 25/25; the MinGW and Android cross-compiles re-verified clean with the new flag |
+| 2026-11-11 | Ubuntu 24.04.5, x86_64, GCC 13.3.0, CMake 4.4.4, lavapipe (Vulkan 1.3.275 loader, Mesa lavapipe ICD 25.2.8), Xvfb, milestone 19 (decision 46) | The Vulkan build (GL and Vulkan on) compiles clean under -Werror; test_vulkan_render passes 42/42 in ctest (230 checks, 0 failures): the sampler binds and the shadow pass record without violations, `describe()` reports the API version and the device, and the contract, texture-3D and volume-layer checks pass unchanged on a second backend instance |
+| 2026-11-11 | same, milestone 19 | Linux regression: the default build 25/25 and the OpenGL build 41/41 stay green; docs_structure 23 checks, 0 failures. Validation is lavapipe only: the engine's Vulkan path has not been executed on dedicated hardware in this environment — the hardware run on the project's Iris Xe host is recorded by the user's own validation |
+| 2026-11-11 | same, MinGW-w64 GCC 13.2.0 cross-compile (x86_64-w64-mingw32), Wine 9.0, milestone 19 | The tree with `GRACE_ENABLE_VULKAN=ON` cross-compiles clean under -Werror: 41 test executables link for x86_64 and test_renderer runs 41 checks, 0 failures under Wine. Honest scope: compile-validated only |
+| 2026-11-11 | same, Android NDK r27c cross-compile (arm64-v8a, android-26), milestone 19 | The tree with `GRACE_ENABLE_VULKAN=ON` cross-compiles clean under -Werror with the NDK's clang (r27c): 23 test executables link for aarch64. Not executed on Android hardware: build-only validation, the intended Android path is the primary target of the Vulkan backend (decision 43) |
 
 ## Defects found by the tests, and fixed
 
@@ -1338,6 +1343,31 @@ grep -rn 'GLuint\|GLenum\|SDL_\|Window' include/grace/render/render_backend.hpp 
     relaxed in the SDK builds' shared C flags (2026-11-10) instead of
     patching the pinned sources. The engine's own targets keep the full
     warning set with `-Werror`; no engine source changes warning scope.
+
+46. **What the Vulkan backend's hardware path is, as a whole.**
+    The milestone 18 backend implemented the contract on lavapipe; the
+    hardware path (2026-11-11) closes what a real presentation engine
+    needs. The swap interval maps onto the present mode: the default 1
+    is FIFO (the only mode every implementation guarantees); the swap
+    interval 0 is the immediate mode, which a device may not carry —
+    the query decides, FIFO stays the fallback. The acquire retries on
+    the out-of-date result (a surface resize, a minimise) by recreating
+    the swapchain, its views, its depth attachment and its render pass
+    against the surface's current extent, and the present result steers
+    the next frame: a present that reports out-of-date or suboptimal
+    marks the swapchain stale, and the next frame's acquire recreates
+    it. The depth attachment format is picked from the device's format
+    properties (D24S8, D32Sfloat, D16Unorm in that order) instead of
+    being assumed, and every depth attachment, render pass and readback
+    unpack uses the picked one. The sampler descriptors are written at
+    draw time from the bound texture views: the layout table's sampler
+    entry maps the engine's GL-style texture units onto (binding, array
+    element), element e of an array landing on unitBase + unitStride * e,
+    and an unbound slot keeps the default 1x1 opaque white texture (the
+    contract's tolerance: the shader samples a valid, opaque image
+    either way). The descriptor pool carries the samplers' descriptors
+    and the writes are the same descriptor set the draw binds. **The
+    Vulkan backend is closed** — the next milestone has no Vulkan work.
 
 ## Verification commands
 

@@ -24,6 +24,20 @@ namespace grace::render::vulkan {
 class VkShaderProgram final : public ShaderProgram
 {
 public:
+    /// One sampler entry of the program's layout table: the binding the
+    /// GLSL declares and the descriptor count (the sampler2D arrays declare
+    /// 4 or 2 elements, the scalar samplers one).
+    struct SamplerEntry
+    {
+        std::string name;
+        std::uint32_t binding;
+        std::uint32_t count;
+        // The engine's texture-unit rule for the entry's elements (the
+        // layout table declares it): element e lands on unit = unitBase
+        // + unitStride * e.
+        std::uint32_t unitBase;
+        std::uint32_t unitStride;
+    };
     /// Compiles the library sources for `id` and prepares the std140
     /// staging buffer. Throws std::runtime_error when the id has no
     /// library entry.
@@ -77,13 +91,20 @@ public:
     /// Sampler binding of a sampler uniform name on set 1; -1 when the name
     /// is not a sampler of this program.
     std::int32_t samplerBinding(const std::string& name) const;
-    /// The program's sampler bindings (name -> binding on set 0), read from
-    /// the layout table: the backend's descriptor set layout declares one
-    /// CombinedImageSampler per entry, so the pipeline layout matches the
-    /// SPIR-V's decorations.
+    /// The program's sampler entries (name -> binding on set 0), read from
+    /// the layout table. The backend's descriptor set layout declares one
+    /// CombinedImageSampler descriptor per entry, with the entry's count
+    /// (the sampler2D arrays declare 4 or 2), so the pipeline layout matches
+    /// the SPIR-V's decorations.
     const std::map<std::string, std::int32_t>& samplers() const noexcept
     {
         return m_sampler_bindings;
+    }
+    /// The program's sampler entries with the descriptor counts (the draw's
+    /// descriptor set layout and the writes follow these).
+    const std::vector<SamplerEntry>& samplerEntries() const noexcept
+    {
+        return m_sampler_entries;
     }
 
 private:
@@ -98,6 +119,7 @@ private:
     const ShaderBlockLayout::Member* m_members = nullptr;
     std::uint32_t m_member_count = 0;
     std::map<std::string, std::int32_t> m_sampler_bindings;
+    std::vector<SamplerEntry> m_sampler_entries;
     std::vector<std::byte> m_uniform_bytes;
     bool m_uniform_staged = false;
 };

@@ -9,20 +9,6 @@
 
 namespace grace::render {
 
-/// Buffer selection for clear(), as a platform-neutral bitmask.
-enum class ClearBuffer : std::uint32_t
-{
-    Color = 1u << 0,
-    Depth = 1u << 1,
-    Stencil = 1u << 2
-};
-
-constexpr ClearBuffer operator|(ClearBuffer lhs, ClearBuffer rhs) noexcept
-{
-    return static_cast<ClearBuffer>(static_cast<std::uint32_t>(lhs) |
-                                    static_cast<std::uint32_t>(rhs));
-}
-
 /// Configuration of the OpenGL backend. Plain data only: no SDL, OpenGL or
 /// window types appear in this header.
 struct OpenGLBackendConfig

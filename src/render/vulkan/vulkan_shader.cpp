@@ -212,13 +212,17 @@ VkShaderProgram::VkShaderProgram(ShaderProgramId id)
                     m_sampler_bindings.emplace(
                         sampler.name,
                         static_cast<std::int32_t>(sampler.binding));
+                    m_sampler_entries.push_back(
+                        SamplerEntry{sampler.name, sampler.binding,
+                                     sampler.count, sampler.unitBase,
+                                     sampler.unitStride});
                 }
             }
             break;
         }
     }
     const std::size_t byte_count =
-        m_members != nullptr
+        m_members != nullptr && m_member_count > 0
             ? static_cast<std::size_t>(
                   m_members[m_member_count - 1].offset)
                   + m_members[m_member_count - 1].size

@@ -9,22 +9,6 @@
 
 namespace grace::render {
 
-/// Buffer selection for clear(), as a platform-neutral bitmask (the same
-/// values the OpenGL backend's config uses; each backend's header carries its
-/// own copy so no backend header includes another).
-enum class ClearBuffer : std::uint32_t
-{
-    Color = 1u << 0,
-    Depth = 1u << 1,
-    Stencil = 1u << 2
-};
-
-constexpr ClearBuffer operator|(ClearBuffer lhs, ClearBuffer rhs) noexcept
-{
-    return static_cast<ClearBuffer>(static_cast<std::uint32_t>(lhs) |
-                                    static_cast<std::uint32_t>(rhs));
-}
-
 /// Configuration of the Vulkan backend. Plain data only: no SDL, Vulkan or
 /// window types appear in this header.
 struct VulkanBackendConfig

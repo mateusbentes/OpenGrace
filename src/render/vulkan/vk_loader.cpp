@@ -121,9 +121,17 @@ bool VkLoader::loadInstance(ResolveFn resolveFn, VkInstance instance,
         return false;
     }
     if (!resolveInstance(vkGetInstanceProcAddr, instance,
-                 "vkGetPhysicalDeviceMemoryProperties",
+                "vkGetPhysicalDeviceMemoryProperties",
+                reinterpret_cast<void**>(
+                    &vkGetPhysicalDeviceMemoryProperties),
+                missingSymbol))
+    {
+        return false;
+    }
+    if (!resolveInstance(vkGetInstanceProcAddr, instance,
+                 "vkGetPhysicalDeviceFormatProperties",
                  reinterpret_cast<void**>(
-                     &vkGetPhysicalDeviceMemoryProperties),
+                     &vkGetPhysicalDeviceFormatProperties),
                  missingSymbol))
     {
         return false;
@@ -191,9 +199,17 @@ bool VkLoader::loadInstance(ResolveFn resolveFn, VkInstance instance,
         return false;
     }
     if (!resolveInstance(vkGetInstanceProcAddr, instance,
-            "vkGetPhysicalDeviceSurfaceFormatsKHR",
+           "vkGetPhysicalDeviceSurfaceFormatsKHR",
+           reinterpret_cast<void**>(
+               &vkGetPhysicalDeviceSurfaceFormatsKHR),
+           missingSymbol))
+    {
+        return false;
+    }
+    if (!resolveInstance(vkGetInstanceProcAddr, instance,
+            "vkGetPhysicalDeviceSurfacePresentModesKHR",
             reinterpret_cast<void**>(
-                &vkGetPhysicalDeviceSurfaceFormatsKHR),
+                &vkGetPhysicalDeviceSurfacePresentModesKHR),
             missingSymbol))
     {
         return false;

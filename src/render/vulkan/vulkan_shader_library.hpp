@@ -43,6 +43,18 @@ struct ShaderSampler
 {
     const char* name;
     std::uint32_t binding;
+    // The GLSL declaration's descriptor count: the engine's sampler2D
+    // arrays (shadowMaps[4], pointShadowFront[2], pointShadowBack[2])
+    // declare an array of samplers, one descriptor per element; the scalar
+    // samplers (gbufAlbedo, volumeTex, srcTex, ...) carry one.
+    std::uint32_t count;
+    // The engine's texture-unit rule for the entry's elements: the engine
+    // binds the array element e at unit = unitBase + unitStride * e (the
+    // same units the OpenGL backend's glUniform1i contract uses), the
+    // scalar samplers at unitBase alone. The engine's unit rule is the
+    // GL declaration's one, the same rule the OpenGL contract follows.
+    std::uint32_t unitBase;
+    std::uint32_t unitStride;
 };
 
 struct ShaderLayoutEntry
@@ -1607,7 +1619,7 @@ constexpr ShaderBlockLayout::Member kTriangleVertexShaderMembers[] = {
 };
 
 constexpr ShaderSampler kTriangleVertexShaderSamplers[] = {
-    {nullptr, 0},
+    {nullptr, 0, 0, 0, 1},
 };
 
 constexpr ShaderBlockLayout::Member kTriangleFragmentShaderMembers[] = {
@@ -1615,7 +1627,7 @@ constexpr ShaderBlockLayout::Member kTriangleFragmentShaderMembers[] = {
 };
 
 constexpr ShaderSampler kTriangleFragmentShaderSamplers[] = {
-    {nullptr, 0},
+    {nullptr, 0, 0, 0, 1},
 };
 
 constexpr ShaderBlockLayout::Member kLightingVertexShaderMembers[] = {
@@ -1625,7 +1637,7 @@ constexpr ShaderBlockLayout::Member kLightingVertexShaderMembers[] = {
 };
 
 constexpr ShaderSampler kLightingVertexShaderSamplers[] = {
-    {nullptr, 0},
+    {nullptr, 0, 0, 0, 1},
 };
 
 constexpr ShaderBlockLayout::Member kLightingFragmentShaderMembers[] = {
@@ -1670,10 +1682,10 @@ constexpr ShaderBlockLayout::Member kLightingFragmentShaderMembers[] = {
 };
 
 constexpr ShaderSampler kLightingFragmentShaderSamplers[] = {
-    {"shadowMaps", 1},
-    {"pointShadowFront", 2},
-    {"pointShadowBack", 3},
-    {"volumeTex", 4},
+    {"shadowMaps", 1, 4, 0, 1},
+    {"pointShadowFront", 2, 2, 4, 2},
+    {"pointShadowBack", 3, 2, 5, 2},
+    {"volumeTex", 4, 1, 9, 1},
 };
 
 constexpr ShaderBlockLayout::Member kShadowDepthVertexShaderMembers[] = {
@@ -1681,7 +1693,7 @@ constexpr ShaderBlockLayout::Member kShadowDepthVertexShaderMembers[] = {
 };
 
 constexpr ShaderSampler kShadowDepthVertexShaderSamplers[] = {
-    {nullptr, 0},
+    {nullptr, 0, 0, 0, 1},
 };
 
 constexpr ShaderBlockLayout::Member kShadowDepthFragmentShaderMembers[] = {
@@ -1689,7 +1701,7 @@ constexpr ShaderBlockLayout::Member kShadowDepthFragmentShaderMembers[] = {
 };
 
 constexpr ShaderSampler kShadowDepthFragmentShaderSamplers[] = {
-    {nullptr, 0},
+    {nullptr, 0, 0, 0, 1},
 };
 
 constexpr ShaderBlockLayout::Member kParaboloidDepthVertexShaderMembers[] = {
@@ -1701,7 +1713,7 @@ constexpr ShaderBlockLayout::Member kParaboloidDepthVertexShaderMembers[] = {
 };
 
 constexpr ShaderSampler kParaboloidDepthVertexShaderSamplers[] = {
-    {nullptr, 0},
+    {nullptr, 0, 0, 0, 1},
 };
 
 constexpr ShaderBlockLayout::Member kParaboloidDepthFragmentShaderMembers[] = {
@@ -1710,7 +1722,7 @@ constexpr ShaderBlockLayout::Member kParaboloidDepthFragmentShaderMembers[] = {
 };
 
 constexpr ShaderSampler kParaboloidDepthFragmentShaderSamplers[] = {
-    {nullptr, 0},
+    {nullptr, 0, 0, 0, 1},
 };
 
 constexpr ShaderBlockLayout::Member kGBufferVertexShaderMembers[] = {
@@ -1719,7 +1731,7 @@ constexpr ShaderBlockLayout::Member kGBufferVertexShaderMembers[] = {
 };
 
 constexpr ShaderSampler kGBufferVertexShaderSamplers[] = {
-    {nullptr, 0},
+    {nullptr, 0, 0, 0, 1},
 };
 
 constexpr ShaderBlockLayout::Member kGBufferFragmentShaderMembers[] = {
@@ -1729,7 +1741,7 @@ constexpr ShaderBlockLayout::Member kGBufferFragmentShaderMembers[] = {
 };
 
 constexpr ShaderSampler kGBufferFragmentShaderSamplers[] = {
-    {nullptr, 0},
+    {nullptr, 0, 0, 0, 1},
 };
 
 constexpr ShaderBlockLayout::Member kDeferredLightVertexShaderMembers[] = {
@@ -1737,7 +1749,7 @@ constexpr ShaderBlockLayout::Member kDeferredLightVertexShaderMembers[] = {
 };
 
 constexpr ShaderSampler kDeferredLightVertexShaderSamplers[] = {
-    {nullptr, 0},
+    {nullptr, 0, 0, 0, 1},
 };
 
 constexpr ShaderBlockLayout::Member kDeferredLightFragmentShaderMembers[] = {
@@ -1780,13 +1792,13 @@ constexpr ShaderBlockLayout::Member kDeferredLightFragmentShaderMembers[] = {
 };
 
 constexpr ShaderSampler kDeferredLightFragmentShaderSamplers[] = {
-    {"gbufAlbedo", 1},
-    {"gbufNormal", 2},
-    {"gbufDepth", 3},
-    {"shadowMaps", 4},
-    {"pointShadowFront", 5},
-    {"pointShadowBack", 6},
-    {"volumeTex", 7},
+    {"gbufAlbedo", 1, 1, 0, 1},
+    {"gbufNormal", 2, 1, 1, 1},
+    {"gbufDepth", 3, 1, 2, 1},
+    {"shadowMaps", 4, 4, 0, 1},
+    {"pointShadowFront", 5, 2, 4, 2},
+    {"pointShadowBack", 6, 2, 5, 2},
+    {"volumeTex", 7, 1, 9, 1},
 };
 
 constexpr ShaderBlockLayout::Member kFlatVertexShaderMembers[] = {
@@ -1794,7 +1806,7 @@ constexpr ShaderBlockLayout::Member kFlatVertexShaderMembers[] = {
 };
 
 constexpr ShaderSampler kFlatVertexShaderSamplers[] = {
-    {nullptr, 0},
+    {nullptr, 0, 0, 0, 1},
 };
 
 constexpr ShaderBlockLayout::Member kFlatFragmentShaderMembers[] = {
@@ -1802,7 +1814,7 @@ constexpr ShaderBlockLayout::Member kFlatFragmentShaderMembers[] = {
 };
 
 constexpr ShaderSampler kFlatFragmentShaderSamplers[] = {
-    {nullptr, 0},
+    {nullptr, 0, 0, 0, 1},
 };
 
 constexpr ShaderBlockLayout::Member kBrokenVertexShaderMembers[] = {
@@ -1810,7 +1822,7 @@ constexpr ShaderBlockLayout::Member kBrokenVertexShaderMembers[] = {
 };
 
 constexpr ShaderSampler kBrokenVertexShaderSamplers[] = {
-    {nullptr, 0},
+    {nullptr, 0, 0, 0, 1},
 };
 
 constexpr ShaderBlockLayout::Member kBrokenFragmentShaderMembers[] = {
@@ -1818,7 +1830,7 @@ constexpr ShaderBlockLayout::Member kBrokenFragmentShaderMembers[] = {
 };
 
 constexpr ShaderSampler kBrokenFragmentShaderSamplers[] = {
-    {nullptr, 0},
+    {nullptr, 0, 0, 0, 1},
 };
 
 constexpr ShaderBlockLayout::Member kPostBrightFragmentShaderMembers[] = {
@@ -1827,7 +1839,7 @@ constexpr ShaderBlockLayout::Member kPostBrightFragmentShaderMembers[] = {
 };
 
 constexpr ShaderSampler kPostBrightFragmentShaderSamplers[] = {
-    {"srcTex", 1},
+    {"srcTex", 1, 1, 0, 1},
 };
 
 constexpr ShaderBlockLayout::Member kPostBlurFragmentShaderMembers[] = {
@@ -1836,7 +1848,7 @@ constexpr ShaderBlockLayout::Member kPostBlurFragmentShaderMembers[] = {
 };
 
 constexpr ShaderSampler kPostBlurFragmentShaderSamplers[] = {
-    {"srcTex", 1},
+    {"srcTex", 1, 1, 0, 1},
 };
 
 constexpr ShaderBlockLayout::Member kPostTonemapFragmentShaderMembers[] = {
@@ -1847,11 +1859,11 @@ constexpr ShaderBlockLayout::Member kPostTonemapFragmentShaderMembers[] = {
 };
 
 constexpr ShaderSampler kPostTonemapFragmentShaderSamplers[] = {
-    {"hdrTex", 1},
-    {"hdrAmbient", 2},
-    {"bloomTex", 3},
-    {"ssaoTex", 4},
-    {"volTex", 5},
+    {"hdrTex", 1, 1, 0, 1},
+    {"hdrAmbient", 2, 1, 1, 1},
+    {"bloomTex", 3, 1, 2, 1},
+    {"ssaoTex", 4, 1, 3, 1},
+    {"volTex", 5, 1, 4, 1},
 };
 
 constexpr ShaderBlockLayout::Member kPostSSAOFragmentShaderMembers[] = {
@@ -1864,7 +1876,7 @@ constexpr ShaderBlockLayout::Member kPostSSAOFragmentShaderMembers[] = {
 };
 
 constexpr ShaderSampler kPostSSAOFragmentShaderSamplers[] = {
-    {"depthTex", 1},
+    {"depthTex", 1, 1, 0, 1},
 };
 
 constexpr ShaderBlockLayout::Member kPostSSAOStfFragmentShaderMembers[] = {
@@ -1878,10 +1890,10 @@ constexpr ShaderBlockLayout::Member kPostSSAOStfFragmentShaderMembers[] = {
 };
 
 constexpr ShaderSampler kPostSSAOStfFragmentShaderSamplers[] = {
-    {"depthTex", 1},
-    {"ssaoRawTex", 2},
-    {"historyTex", 3},
-    {"historyDepthTex", 4},
+    {"depthTex", 1, 1, 0, 1},
+    {"ssaoRawTex", 2, 1, 1, 1},
+    {"historyTex", 3, 1, 2, 1},
+    {"historyDepthTex", 4, 1, 3, 1},
 };
 
 constexpr ShaderBlockLayout::Member kPostMLAAFragmentShaderMembers[] = {
@@ -1891,8 +1903,8 @@ constexpr ShaderBlockLayout::Member kPostMLAAFragmentShaderMembers[] = {
 };
 
 constexpr ShaderSampler kPostMLAAFragmentShaderSamplers[] = {
-    {"srcTex", 1},
-    {"depthTex", 2},
+    {"srcTex", 1, 1, 0, 1},
+    {"depthTex", 2, 1, 0, 1},
 };
 
 constexpr ShaderBlockLayout::Member kPostBlitFragmentShaderMembers[] = {
@@ -1900,7 +1912,7 @@ constexpr ShaderBlockLayout::Member kPostBlitFragmentShaderMembers[] = {
 };
 
 constexpr ShaderSampler kPostBlitFragmentShaderSamplers[] = {
-    {"srcTex", 1},
+    {"srcTex", 1, 1, 0, 1},
 };
 
 constexpr ShaderBlockLayout::Member kPostDOFFragmentShaderMembers[] = {
@@ -1913,9 +1925,9 @@ constexpr ShaderBlockLayout::Member kPostDOFFragmentShaderMembers[] = {
 };
 
 constexpr ShaderSampler kPostDOFFragmentShaderSamplers[] = {
-    {"srcTex", 1},
-    {"srcAmbient", 2},
-    {"depthTex", 3},
+    {"srcTex", 1, 1, 0, 1},
+    {"srcAmbient", 2, 1, 1, 1},
+    {"depthTex", 3, 1, 0, 1},
 };
 
 constexpr ShaderBlockLayout::Member kPostVolumetricFragmentShaderMembers[] = {
@@ -1940,9 +1952,9 @@ constexpr ShaderBlockLayout::Member kPostVolumetricFragmentShaderMembers[] = {
 };
 
 constexpr ShaderSampler kPostVolumetricFragmentShaderSamplers[] = {
-    {"depthTex", 1},
-    {"pointShadowFront", 2},
-    {"pointShadowBack", 3},
+    {"depthTex", 1, 1, 0, 1},
+    {"pointShadowFront", 2, 2, 4, 2},
+    {"pointShadowBack", 3, 2, 5, 2},
 };
 
 constexpr ShaderBlockLayout::Member kVolumeInjectFragmentShaderMembers[] = {
@@ -1962,7 +1974,7 @@ constexpr ShaderBlockLayout::Member kVolumeInjectFragmentShaderMembers[] = {
 };
 
 constexpr ShaderSampler kVolumeInjectFragmentShaderSamplers[] = {
-    {nullptr, 0},
+    {nullptr, 0, 0, 0, 1},
 };
 
 constexpr ShaderBlockLayout::Member kVolumePropagateFragmentShaderMembers[] = {
@@ -1972,7 +1984,7 @@ constexpr ShaderBlockLayout::Member kVolumePropagateFragmentShaderMembers[] = {
 };
 
 constexpr ShaderSampler kVolumePropagateFragmentShaderSamplers[] = {
-    {"volumeIn", 1},
+    {"volumeIn", 1, 1, 0, 1},
 };
 
 // The layout table itself, indexed by ShaderProgramId order: the

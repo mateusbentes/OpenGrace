@@ -226,7 +226,7 @@ executed on either platform).
 | Console platforms | Out of scope. |
 | Windows | Cross-compiled (MinGW-w64) and validated under Wine; the same backend; see 4.3. |
 | macOS | Not a target. Apple deprecated OpenGL in macOS 10.14, so a backend would be possible but would have no future; see 4.3. |
-| Mobile platforms | Android goes through Vulkan, not OpenGL ES. The Vulkan backend is implemented (milestone 18) and cross-compiled for Android (NDK r27c, arm64-v8a); executing it on hardware is a later milestone. See 4.3. |
+| Mobile platforms | Android goes through Vulkan, not OpenGL ES. The Vulkan backend is implemented (milestone 18) and cross-compiled for Android (NDK r27c, arm64-v8a); executing it on hardware is recorded by the user's validation run. See 4.3. |
 | PhysX / Bullet / Box2D | Plugin contract preserved; backends chosen by licence fit. |
 | OpenAL / OpenSL / XAudio2 / MultiStream | Plugin contract preserved; OpenAL Soft on Linux. |
 | AngelScript + Tetragramaton | Both reimplemented as engine services. |
@@ -285,7 +285,7 @@ script layer holding behaviour rather than authoritative state.
 | --- | --- | --- |
 | Linux x86_64 | OpenGL 3.3 core, falling back to 3.0 | Implemented and validated |
 | Windows x86_64 | OpenGL | Cross-compiled, validated under Wine (milestone 17) |
-| Linux x86_64 | Vulkan (extra capability) | Implemented, validated under lavapipe (milestone 18) |
+| Linux x86_64 | Vulkan (extra capability) | Implemented, validated under lavapipe (milestones 18 and 19) |
 | Windows x86_64 | Vulkan (extra capability) | Cross-compiled against the winevulkan loader surface, not executed (milestone 18) |
 | Android (arm64-v8a) | Vulkan (primary target) | Cross-compiled with NDK r27c, not executed on hardware (milestone 18) |
 
@@ -302,7 +302,12 @@ lavapipe, cross-compiled clean under -Werror for Windows (the local loader
 resolves through SDL's Vulkan bridge, so winevulkan's surface needs no
 generated headers) and for Android with NDK r27c (arm64-v8a) — the Android
 and Windows validation is build-only, and the engine has not executed Vulkan
-on either.
+on either. Milestone 19 (decision 46) closes what a real presentation engine
+needs: the swap interval's present mode, the acquire retry on the out-of-date
+resize, the depth attachment format picked from the device's format
+properties, and the sampler descriptors written at draw time from the bound
+texture views. The Vulkan backend is closed — the next milestone has no
+Vulkan work.
 
 Windows is expected to be a small change rather than a port. The window and the
 context come from SDL2, the render contract is API-neutral, and the OpenGL entry
@@ -367,13 +372,15 @@ the specification. Nothing in it names a graphics API or a host platform.
 ### 4.5 Future rendering backends
 
 OpenGL was the only backend implemented on Linux x86_64 and Windows x86_64;
-milestone 18 added Vulkan. The render contract is API-neutral by construction
+milestone 18 added Vulkan and milestone 19 closed its hardware path. The
+render contract is API-neutral by construction
 and the boundary is checked by grep in every milestone, so a second backend is
 a new implementation of the same contract rather than a rewrite.
 
 **Vulkan** covers Windows, Linux and Android with one backend, implemented in
-milestone 18 (decision 43) behind `GRACE_ENABLE_VULKAN`: validated on Linux
-under lavapipe, build-validated for Windows (winevulkan loader surface) and
+milestone 18 (decision 43) behind `GRACE_ENABLE_VULKAN`, with the hardware
+path closed in milestone 19 (decision 46): validated on Linux under
+lavapipe, build-validated for Windows (winevulkan loader surface) and
 Android (NDK r27c, arm64-v8a). On Windows and Linux it is the extra capability
 (the OpenGL backend remains the supported path there), and on Android it is
 the primary target. **Metal** would cover macOS and iOS with one backend, and

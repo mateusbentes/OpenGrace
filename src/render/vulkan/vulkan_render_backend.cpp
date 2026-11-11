@@ -84,6 +84,37 @@ vulkan::Format toVkFormat(PixelFormat format)
     return vulkan::Format::R8G8B8A8Unorm;
 }
 
+/// The device's depth/stencil attachment format: D24UnormS8Uint when the
+/// device supports it, falling back to D32Sfloat and then D16Unorm through
+/// vkGetPhysicalDeviceFormatProperties (the depth attachment's format
+/// feature support is a device property, not an assumption).
+vulkan::Format pickDepthFormat(vulkan::VkLoader& loader,
+                               vulkan::VkPhysicalDevice physicalDevice)
+{
+    const vulkan::Format candidates[] = {
+        vulkan::Format::D24UnormS8Uint,
+        vulkan::Format::D32Sfloat,
+        vulkan::Format::D16Unorm,
+    };
+    for (const vulkan::Format candidate : candidates)
+    {
+        vulkan::VkFormatProperties properties{};
+        loader.vkGetPhysicalDeviceFormatProperties(
+            physicalDevice, candidate, &properties);
+        if ((properties.optimalTilingFeatures
+             & static_cast<vulkan::VkFlags>(
+                 vulkan::FormatFeature::DepthStencilAttachment))
+            != 0u)
+        {
+            return candidate;
+        }
+    }
+    // The device reports no depth attachment format: D24S8 stays the
+    // contract's declared format and the device's failure surfaces at
+    // image creation (the same explicit error the OpenGL backend gives).
+    return vulkan::Format::D24UnormS8Uint;
+}
+
 /// The SDL_Vulkan bridge's vkGetInstanceProcAddr, matching the loader's
 /// ResolveFn signature (void* (*)(const char*)).
 vulkan::VkLoader::ResolveFn sdlResolve()
@@ -177,6 +208,10 @@ struct VulkanRenderBackend::Impl
     std::vector<vulkan::VkFramebuffer> swapchainFramebuffers;
     vulkan::VkRenderPass swapchainRenderPass = nullptr;
     std::uint32_t swapchainClearMask = 0;
+    // The device's depth/stencil attachment format (the fallback chain D24S8
+    // -> D32Sfloat -> D16Unorm ran at initialise; every depth attachment, the
+    // render passes and the readback unpack use this one).
+    vulkan::Format depthFormat = vulkan::Format::D24UnormS8Uint;
     vulkan::VkSemaphore imageAcquired = nullptr;
     vulkan::VkSemaphore renderDone = nullptr;
     vulkan::VkFence frameDone = nullptr;
@@ -184,6 +219,9 @@ struct VulkanRenderBackend::Impl
     // Whether the open frame acquired a swapchain image (an off-screen
     // target's frame has no semaphore to wait on and nothing to present).
     bool swapchain_frame = false;
+    // A present that returns OUT_OF_DATE or SUBOPTIMAL marks the swapchain
+    // stale: the next frame's acquire recreates it (the surface resize path).
+    bool swapchainStale = false;
     State state = State::Created;
     int api_major = 0;
     int api_minor = 0;
@@ -207,6 +245,20 @@ struct VulkanRenderBackend::Impl
     vulkan::VkBuffer readbackBuffer = nullptr;
     vulkan::VkDeviceMemory readbackMemory = nullptr;
     void* readbackMapped = nullptr;
+
+    // The one shared sampler (nearest, clamp-to-edge): the GLSL's
+    // sampler2D/sampler3D uniforms each combine a sampler with an image
+    // view at descriptor time, and the engine's sampling rules (the
+    // shadow maps, the volumes, the post-chain inputs) are all nearest
+    // with clamp-to-edge, the same rules the OpenGL backend's
+    // GL_NEAREST/GL_CLAMP_TO_EDGE state implements.
+    vulkan::VkSampler sharedSampler = nullptr;
+    // The default texture (1x1 opaque white): the descriptor set's sampler
+    // bindings the engine never writes still name an image view, and the
+    // shader samples a valid, opaque image either way.
+    vulkan::VkImage defaultImage = nullptr;
+    vulkan::VkDeviceMemory defaultImageMemory = nullptr;
+    vulkan::VkImageView defaultImageView = nullptr;
 
     ClearColor clear_color{0, 0, 0, 0};
     std::uint32_t clear_mask = static_cast<std::uint32_t>(ClearBuffer::Color);
@@ -358,7 +410,7 @@ struct VulkanRenderBackend::Impl
     {
         vulkan::VkMemoryAllocateInfo info{};
         info.allocationSize =
-            static_cast<std::uint32_t>(bytes);
+            static_cast<vulkan::VkDeviceSize>(bytes);
         info.memoryTypeIndex =
             findMemoryType(0xFFFFFFFFu, properties);
         if (info.memoryTypeIndex == 0xFFFFFFFFu)
@@ -381,7 +433,7 @@ struct VulkanRenderBackend::Impl
     {
         vulkan::VkMemoryAllocateInfo info{};
         info.allocationSize =
-            static_cast<std::uint32_t>(bytes);
+            static_cast<vulkan::VkDeviceSize>(bytes);
         info.memoryTypeIndex = findMemoryType(typeBits, properties);
         if (info.memoryTypeIndex == 0xFFFFFFFFu)
             throw std::runtime_error(
@@ -867,7 +919,7 @@ struct VulkanRenderBackend::Impl
 
     /// Creates a VkRenderPass for the given attachment-format combination.
     vulkan::VkRenderPass createRenderPass(vulkan::Format colorFormat,
-                                          vulkan::Format depthFormat,
+                                          vulkan::Format depthFormatParam,
                                           std::uint32_t clearMask,
                                           bool withDepth = true,
                                           bool withColor = true,
@@ -892,7 +944,7 @@ struct VulkanRenderBackend::Impl
         colorAttachment.initialLayout = colourInitialLayout;
         colorAttachment.finalLayout = colourFinalLayout;
         vulkan::VkAttachmentDescription depthAttachment{};
-        depthAttachment.format = depthFormat;
+        depthAttachment.format = depthFormatParam;
         depthAttachment.samples = vulkan::SampleCount::One;
         depthAttachment.loadOp = depthLoadOp(clearMask);
         depthAttachment.storeOp = vulkan::AttachmentStoreOp::Store;
@@ -1083,6 +1135,8 @@ struct VulkanRenderBackend::Impl
         // image sampler per entry of the program's layout table: the SPIR-V
         // decorates those bindings, and a pipeline layout that omits them
         // makes vkCreateGraphicsPipelines invalid (the lavapipe crash).
+        // The layout table's sampler entries are the GLSL declaration
+        // (binding 1..7), the same binding numbers the SPIR-V carries.
         vulkan::VkDescriptorSetLayoutBinding uniformBinding{};
         uniformBinding.binding = 0;
         uniformBinding.descriptorType =
@@ -1092,14 +1146,13 @@ struct VulkanRenderBackend::Impl
             vulkan::ShaderStage::Vertex | vulkan::ShaderStage::Fragment;
         std::vector<vulkan::VkDescriptorSetLayoutBinding> bindings;
         bindings.push_back(uniformBinding);
-        for (const auto& sampler : program->samplers())
+        for (const auto& sampler : program->samplerEntries())
         {
             vulkan::VkDescriptorSetLayoutBinding samplerBinding{};
-            samplerBinding.binding =
-                static_cast<std::uint32_t>(sampler.second);
+            samplerBinding.binding = sampler.binding;
             samplerBinding.descriptorType =
                 vulkan::DescriptorType::CombinedImageSampler;
-            samplerBinding.descriptorCount = 1;
+            samplerBinding.descriptorCount = sampler.count;
             samplerBinding.stageFlags =
                 static_cast<vulkan::ShaderStage>(
                     static_cast<vulkan::VkFlags>(
@@ -1116,13 +1169,25 @@ struct VulkanRenderBackend::Impl
             != vulkan::Result::Success)
             throw std::runtime_error(
                 "VulkanRenderBackend: vkCreateDescriptorSetLayout failed");
-        vulkan::VkDescriptorPoolSize poolSize{};
-        poolSize.type = vulkan::DescriptorType::UniformBuffer;
-        poolSize.descriptorCount = 1;
+        // The pool carries the uniform block and the samplers' descriptors
+        // (the set is written again at draw time: sampler writes are the
+        // same descriptor set the draw binds).
+        vulkan::VkDescriptorPoolSize poolSizes[2]{};
+        poolSizes[0].type = vulkan::DescriptorType::UniformBuffer;
+        poolSizes[0].descriptorCount = 1;
+        poolSizes[1].type = vulkan::DescriptorType::CombinedImageSampler;
+        // The sampler count is the sum of the entries' descriptor counts
+        // (the sampler2D arrays declare 4 or 2 elements, the scalar samplers
+        // one). The write is the same: the set is written again at draw
+        // time, the same descriptor set the draw binds.
+        std::uint32_t samplerCount = 0;
+        for (const auto& sampler : program->samplerEntries())
+            samplerCount += sampler.count;
+        poolSizes[1].descriptorCount = samplerCount;
         vulkan::VkDescriptorPoolCreateInfo poolInfo{};
         poolInfo.maxSets = 1;
-        poolInfo.poolSizeCount = 1;
-        poolInfo.pPoolSizes = &poolSize;
+        poolInfo.poolSizeCount = 2;
+        poolInfo.pPoolSizes = poolSizes;
         vulkan::VkDescriptorPool descriptorPool = nullptr;
         if (loader.vkCreateDescriptorPool(device, &poolInfo, nullptr,
                                           &descriptorPool)
@@ -1223,6 +1288,217 @@ struct VulkanRenderBackend::Impl
         }
     }
 
+    /// Creates the swapchain resources: the surface query, the swapchain
+    /// itself, the image views, the depth attachment. The initialisation
+    /// runs it once; the acquire path runs it again when the swapchain
+    /// goes out of date (a surface resize).
+    void createSwapchainResources()
+    {
+        // Swapchain: the surface's current extent and the first supported
+        // format (R8G8B8A8Unorm preferred, the format the readback
+        // expects).
+        vulkan::VkSurfaceCapabilitiesKHR caps{};
+        if (loader.vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
+                physicalDevice, surface, &caps)
+            != vulkan::Result::Success)
+            throw std::runtime_error(
+                "VulkanRenderBackend: "
+                "vkGetPhysicalDeviceSurfaceCapabilitiesKHR failed");
+        std::uint32_t format_count = 0;
+        loader.vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, surface,
+                                                    &format_count, nullptr);
+        std::vector<vulkan::VkSurfaceFormatKHR> formats(format_count);
+        loader.vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, surface,
+                                                    &format_count,
+                                                    formats.data());
+        // The swapchain format is the readback's contract: RGBA8 (37) is
+        // the format the readback expects, B8G8R8A8 (44) reads back with
+        // the R and B bytes swapped, and an SRGB format (50) would need
+        // the sRGB decode the UNORM formats avoid, so an UNORM format is
+        // always preferred.
+        swapchainFormat = formats.empty()
+            ? vulkan::Format::R8G8B8A8Unorm
+            : formats[0].format;
+        for (const vulkan::VkSurfaceFormatKHR& surface_format : formats)
+        {
+            if (surface_format.format == vulkan::Format::B8G8R8A8Unorm)
+            {
+                swapchainFormat = surface_format.format;
+                break;
+            }
+        }
+        for (const vulkan::VkSurfaceFormatKHR& surface_format : formats)
+        {
+            if (surface_format.format == vulkan::Format::R8G8B8A8Unorm)
+            {
+                swapchainFormat = surface_format.format;
+                break;
+            }
+        }
+        swapchainExtent = caps.currentExtent;
+        vulkan::VkSwapchainCreateInfoKHR swapInfo{};
+        swapInfo.surface = surface;
+        swapInfo.minImageCount = caps.minImageCount + 1;
+        if (caps.maxImageCount != 0
+            && swapInfo.minImageCount > caps.maxImageCount)
+            swapInfo.minImageCount = caps.maxImageCount;
+        swapInfo.imageFormat = swapchainFormat;
+        swapInfo.imageColorSpace = vulkan::ColorSpace::SrgbNonlinear;
+        swapInfo.imageExtent = swapchainExtent;
+        swapInfo.imageUsage = static_cast<vulkan::VkFlags>(
+            vulkan::ImageUsage::ColorAttachment
+            | vulkan::ImageUsage::TransferSrc);
+        swapInfo.preTransform = vulkan::SurfaceTransform::Identity;
+        swapInfo.compositeAlpha = vulkan::CompositeAlpha::Opaque;
+        // The swap interval maps onto the present mode: 0 is the
+        // immediate mode, which a device may not carry — the query
+        // decides, FIFO stays the fallback.
+        swapInfo.presentMode = vulkan::PresentMode::Fifo;
+        if (config.swap_interval == 0)
+        {
+            std::uint32_t mode_count = 0;
+            loader.vkGetPhysicalDeviceSurfacePresentModesKHR(
+                physicalDevice, surface, &mode_count, nullptr);
+            std::vector<vulkan::PresentMode> modes(mode_count);
+            loader.vkGetPhysicalDeviceSurfacePresentModesKHR(
+                physicalDevice, surface, &mode_count, modes.data());
+            for (vulkan::PresentMode mode : modes)
+            {
+                if (mode == vulkan::PresentMode::Immediate)
+                {
+                    swapInfo.presentMode = vulkan::PresentMode::Immediate;
+                    break;
+                }
+            }
+        }
+        swapInfo.clipped = 1;
+        if (loader.vkCreateSwapchainKHR(device, &swapInfo, nullptr,
+                                        &swapchain)
+            != vulkan::Result::Success)
+            throw std::runtime_error(
+                "VulkanRenderBackend: vkCreateSwapchainKHR failed");
+        std::uint32_t image_count = 0;
+        loader.vkGetSwapchainImagesKHR(device, swapchain, &image_count,
+                                       nullptr);
+        swapchainImages.resize(image_count);
+        loader.vkGetSwapchainImagesKHR(device, swapchain, &image_count,
+                                       swapchainImages.data());
+        swapchainViews.reserve(image_count);
+        for (vulkan::VkImage image : swapchainImages)
+        {
+            swapchainViews.push_back(createImageView(
+                image, swapchainFormat, vulkan::ImageAspect::Color));
+        }
+
+        // The default framebuffer's depth attachment (the device's depth
+        // format) and the shared swapchain render pass + framebuffers.
+        swapchainDepthImage = createImage(
+            depthFormat, swapchainExtent.width, swapchainExtent.height,
+            static_cast<vulkan::VkFlags>(
+                vulkan::ImageUsage::DepthStencilAttachment
+                | vulkan::ImageUsage::TransferSrc),
+            static_cast<vulkan::VkFlags>(vulkan::SampleCount::One));
+        vulkan::VkMemoryRequirements depthRequirements{};
+        loader.vkGetImageMemoryRequirements(device, swapchainDepthImage,
+                                            &depthRequirements);
+        swapchainDepthMemory = allocateMemoryFor(
+            depthRequirements.memoryTypeBits,
+            static_cast<std::size_t>(depthRequirements.size),
+            vulkan::MemoryProperty::DeviceLocal);
+        loader.vkBindImageMemory(device, swapchainDepthImage,
+                                 swapchainDepthMemory, 0);
+        swapchainDepthView = createImageView(
+            swapchainDepthImage, depthFormat,
+            static_cast<vulkan::ImageAspect>(
+                static_cast<std::uint32_t>(vulkan::ImageAspect::Depth)
+                | static_cast<std::uint32_t>(
+                    vulkan::ImageAspect::Stencil)));
+        // A fresh depth buffer reads 1.0f (the OpenGL clear default): the
+        // attachment starts as undefined content, so a clear-once pass
+        // gives the first clear's loadOp=Load a defined 1.0f to test
+        // against.
+        {
+            vulkan::VkCommandBuffer oneOff = beginOneOff();
+            recordLayoutTransition(
+                oneOff, swapchainDepthImage,
+                static_cast<vulkan::ImageAspect>(
+                    static_cast<std::uint32_t>(vulkan::ImageAspect::Depth)
+                    | static_cast<std::uint32_t>(
+                        vulkan::ImageAspect::Stencil)),
+                vulkan::ImageLayout::Undefined,
+                vulkan::ImageLayout::TransferDstOptimal);
+            vulkan::VkClearDepthStencilValue clearDepth{};
+            clearDepth.depth = 1.0f;
+            clearDepth.stencil = 0;
+            vulkan::VkImageSubresourceRange range{};
+            range.aspectMask = static_cast<vulkan::ImageAspect>(
+                static_cast<std::uint32_t>(vulkan::ImageAspect::Depth)
+                | static_cast<std::uint32_t>(
+                    vulkan::ImageAspect::Stencil));
+            range.levelCount = 1;
+            range.layerCount = 1;
+            loader.vkCmdClearDepthStencilImage(
+                oneOff, swapchainDepthImage,
+                vulkan::ImageLayout::TransferDstOptimal, &clearDepth, 1,
+                &range);
+            recordLayoutTransition(
+                oneOff, swapchainDepthImage,
+                static_cast<vulkan::ImageAspect>(
+                    static_cast<std::uint32_t>(vulkan::ImageAspect::Depth)
+                    | static_cast<std::uint32_t>(
+                        vulkan::ImageAspect::Stencil)),
+                vulkan::ImageLayout::TransferDstOptimal,
+                vulkan::ImageLayout::DepthStencilAttachmentOptimal);
+            loader.vkEndCommandBuffer(oneOff);
+            submitOneOff(oneOff);
+        }
+    }
+
+    /// Recreates the swapchain resources after an out-of-date acquire:
+    /// the stale swapchain and its resources are destroyed first, then
+    /// the same creation path runs against the surface's current extent.
+    /// The depth image's device memory is unregistered before the free,
+    /// so the shutdown's memory loop does not free it a second time.
+    void recreateSwapchainResources()
+    {
+        loader.vkDeviceWaitIdle(device);
+        for (vulkan::VkFramebuffer framebuffer : swapchainFramebuffers)
+            loader.vkDestroyFramebuffer(device, framebuffer, nullptr);
+        swapchainFramebuffers.clear();
+        if (swapchainRenderPass != nullptr)
+            loader.vkDestroyRenderPass(device, swapchainRenderPass,
+                                       nullptr);
+        swapchainRenderPass = nullptr;
+        swapchainClearMask = 0;
+        for (vulkan::VkImageView view : swapchainViews)
+            loader.vkDestroyImageView(device, view, nullptr);
+        swapchainViews.clear();
+        if (swapchainDepthView != nullptr)
+            loader.vkDestroyImageView(device, swapchainDepthView, nullptr);
+        swapchainDepthView = nullptr;
+        if (swapchainDepthImage != nullptr)
+            loader.vkDestroyImage(device, swapchainDepthImage, nullptr);
+        swapchainDepthImage = nullptr;
+        if (swapchainDepthMemory != nullptr)
+        {
+            for (auto block = memory_blocks.begin();
+                 block != memory_blocks.end(); ++block)
+            {
+                if (*block == swapchainDepthMemory)
+                {
+                    memory_blocks.erase(block);
+                    break;
+                }
+            }
+            loader.vkFreeMemory(device, swapchainDepthMemory, nullptr);
+            swapchainDepthMemory = nullptr;
+        }
+        if (swapchain != nullptr)
+            loader.vkDestroySwapchainKHR(device, swapchain, nullptr);
+        swapchain = nullptr;
+        createSwapchainResources();
+    }
+
     void present()
     {
         // An off-screen frame never acquired an image: nothing to present.
@@ -1238,7 +1514,14 @@ struct VulkanRenderBackend::Impl
         present.swapchainCount = 1;
         present.pSwapchains = &swapchain;
         present.pImageIndices = &nextImageIndex;
-        loader.vkQueuePresentKHR(queue, &present);
+        // A present that reports the swapchain as out of date (or only
+        // suboptimal) marks it stale: the next frame's acquire recreates
+        // it (the surface resize path). The frame itself was already
+        // submitted; the present result only steers the next frame.
+        const vulkan::Result presented = loader.vkQueuePresentKHR(queue,
+                                                                 &present);
+        swapchainStale = presented == vulkan::Result::ErrorOutOfDateKHR
+            || presented == vulkan::Result::SuboptimalKHR;
     }
 
     /// Copies one pixel of the bound target's colour (or the swapchain's)
@@ -1297,7 +1580,7 @@ struct VulkanRenderBackend::Impl
         if (depth_image != nullptr)
         {
             transitionImageLayout(
-                depth_image, vulkan::Format::D24UnormS8Uint,
+                depth_image, depthFormat,
                 regions[1].imageSubresource.aspectMask,
                 vulkan::ImageLayout::DepthStencilAttachmentOptimal,
                 vulkan::ImageLayout::TransferSrcOptimal);
@@ -1306,7 +1589,7 @@ struct VulkanRenderBackend::Impl
                 vulkan::ImageLayout::TransferSrcOptimal, readbackBuffer, 1,
                 &regions[1]);
             transitionImageLayout(
-                depth_image, vulkan::Format::D24UnormS8Uint,
+                depth_image, depthFormat,
                 regions[1].imageSubresource.aspectMask,
                 vulkan::ImageLayout::TransferSrcOptimal,
                 vulkan::ImageLayout::DepthStencilAttachmentOptimal);
@@ -1427,7 +1710,7 @@ struct VulkanRenderBackend::Impl
         if (target->hasDepthAttachment())
         {
             vulkan::VkImage image = createImage(
-                vulkan::Format::D24UnormS8Uint, width, height,
+                depthFormat, width, height,
                 static_cast<vulkan::VkFlags>(
                     vulkan::ImageUsage::DepthStencilAttachment
                     | vulkan::ImageUsage::TransferSrc),
@@ -1444,7 +1727,7 @@ struct VulkanRenderBackend::Impl
             res.images.push_back(image);
             res.memories.push_back(memory);
             res.views.push_back(createImageView(
-                image, vulkan::Format::D24UnormS8Uint,
+                image, depthFormat,
                 vulkan::ImageAspect::Depth));
             // The depth view reports the depth format the descriptor asks
             // for and the depth kind (the contract's isDepth()).
@@ -1460,7 +1743,7 @@ struct VulkanRenderBackend::Impl
             res.renderPass = createRenderPass(
                 toVkFormat(target->colorFormat(0)),
                 target->hasDepthAttachment()
-                    ? vulkan::Format::D24UnormS8Uint
+                    ? depthFormat
                     : vulkan::Format::R8G8B8A8Unorm,
                 static_cast<std::uint32_t>(ClearBuffer::Color
                                            | ClearBuffer::Depth
@@ -1471,7 +1754,7 @@ struct VulkanRenderBackend::Impl
         {
             res.renderPass = createRenderPass(
                 vulkan::Format::R8G8B8A8Unorm,
-                vulkan::Format::D24UnormS8Uint,
+                depthFormat,
                 static_cast<std::uint32_t>(ClearBuffer::Depth
                                            | ClearBuffer::Stencil),
                 true, false);
@@ -1545,6 +1828,21 @@ struct VulkanRenderBackend::Impl
             vulkan::MemoryProperty::DeviceLocal);
         loader.vkBindImageMemory(device, res.image, res.memory, 0);
         volume->setImage(res.image);
+        // The volume's sampler view (the drawMesh descriptor write binds
+        // it): a 3D view of the whole image, the aspect the sampler3D
+        // declaration reads.
+        vulkan::VkImageViewCreateInfo viewInfo{};
+        viewInfo.image = res.image;
+        viewInfo.viewType = vulkan::ImageType::Type3D;
+        viewInfo.format = toVkFormat(desc.format);
+        viewInfo.components = vulkan::VkComponentMapping{};
+        viewInfo.subresourceRange.aspectMask = vulkan::ImageAspect::Color;
+        viewInfo.subresourceRange.levelCount = 1;
+        viewInfo.subresourceRange.layerCount = 1;
+        if (loader.vkCreateImageView(device, &viewInfo, nullptr, &res.view)
+            != vulkan::Result::Success)
+            throw std::runtime_error(
+                "VulkanRenderBackend: vkCreateImageView failed");
         transitionImageLayout(res.image, toVkFormat(desc.format),
                               vulkan::ImageAspect::Color,
                               vulkan::ImageLayout::Undefined,
@@ -1559,6 +1857,8 @@ struct VulkanRenderBackend::Impl
         auto it = volumeResources.find(volume);
         if (it == volumeResources.end())
             return;
+        if (it->second.view != nullptr)
+            loader.vkDestroyImageView(device, it->second.view, nullptr);
         loader.vkDestroyImage(device, it->second.image, nullptr);
         for (auto block = memory_blocks.begin();
              block != memory_blocks.end(); ++block)
@@ -1667,6 +1967,71 @@ struct VulkanRenderBackend::Impl
         loader.vkCmdBindPipeline(commandBuffer,
                                  vulkan::PipelineBindPoint::Graphics,
                                  pipeline);
+        // The sampler descriptors are written at draw time from the
+        // bound texture views: the layout table's sampler entry maps the
+        // engine's GL-style texture units onto (binding, array element),
+        // element e of an array landing on unitBase + unitStride * e. An
+        // unbound unit keeps the default view (the contract's tolerance:
+        // the shader samples a valid, opaque image either way).
+        std::vector<vulkan::VkDescriptorImageInfo> samplerInfos;
+        std::vector<vulkan::VkWriteDescriptorSet> samplerWrites;
+        std::vector<std::uint32_t> samplerInfoOffsets;
+        samplerInfos.reserve(program->samplerEntries().size());
+        for (const auto& sampler : program->samplerEntries())
+        {
+            samplerInfoOffsets.push_back(
+                static_cast<std::uint32_t>(samplerInfos.size()));
+            for (std::uint32_t element = 0; element < sampler.count;
+                 ++element)
+            {
+                const std::uint32_t unit =
+                    sampler.unitBase + sampler.unitStride * element;
+                const TextureView* view =
+                    unit < boundTextures.size()
+                        ? boundTextures[unit]
+                        : nullptr;
+                vulkan::VkImageView imageView = nullptr;
+                if (view != nullptr)
+                {
+                    if (const auto* vkView =
+                            dynamic_cast<const vulkan::VkTextureView*>(view))
+                        imageView = vkView->imageView();
+                    else if (const auto* volume =
+                                 dynamic_cast<const vulkan::VkTexture3DView*>(
+                                     view))
+                    {
+                        const auto it = volumeResources.find(volume);
+                        if (it != volumeResources.end())
+                            imageView = it->second.view;
+                    }
+                }
+                if (imageView == nullptr)
+                    imageView = defaultImageView;
+                vulkan::VkDescriptorImageInfo info{};
+                info.sampler = sharedSampler;
+                info.imageView = imageView;
+                info.imageLayout =
+                    vulkan::ImageLayout::ShaderReadOnlyOptimal;
+                samplerInfos.push_back(info);
+            }
+        }
+        for (const auto& sampler : program->samplerEntries())
+        {
+            vulkan::VkWriteDescriptorSet write{};
+            write.dstSet = resources.set;
+            write.dstBinding = sampler.binding;
+            write.dstArrayElement = 0;
+            write.descriptorCount = sampler.count;
+            write.descriptorType =
+                vulkan::DescriptorType::CombinedImageSampler;
+            samplerWrites.push_back(write);
+        }
+        for (std::size_t i = 0; i < samplerWrites.size(); ++i)
+            samplerWrites[i].pImageInfo = &samplerInfos[samplerInfoOffsets[i]];
+        if (!samplerWrites.empty())
+            loader.vkUpdateDescriptorSets(
+                device, static_cast<std::uint32_t>(samplerWrites.size()),
+                samplerWrites.data(), 0, nullptr);
         loader.vkCmdBindDescriptorSets(
             commandBuffer, vulkan::PipelineBindPoint::Graphics,
             resources.pipelineLayout, 0, 1, &resources.set, 0, nullptr);
@@ -1726,7 +2091,7 @@ struct VulkanRenderBackend::Impl
         }
         swapchainClearMask = clear_mask;
         swapchainRenderPass = createRenderPass(
-            swapchainFormat, vulkan::Format::D24UnormS8Uint, clear_mask);
+            swapchainFormat, depthFormat, clear_mask);
         for (vulkan::VkImageView view : swapchainViews)
         {
             const vulkan::VkImageView attachments[2] = {
@@ -1755,13 +2120,26 @@ struct VulkanRenderBackend::Impl
             // the swapchain's image pool and block the next acquire forever.
             if (target == nullptr)
             {
-                vulkan::Result acquired = loader.vkAcquireNextImageKHR(
-                    device, swapchain, ~0ull, imageAcquired, nullptr,
-                    &nextImageIndex);
-                if (acquired != vulkan::Result::Success)
-                    throw std::runtime_error(
-                        "VulkanRenderBackend: "
-                        "vkAcquireNextImageKHR failed");
+                vulkan::Result acquired = vulkan::Result::ErrorOutOfDateKHR;
+                for (;;)
+                {
+                    acquired = loader.vkAcquireNextImageKHR(
+                        device, swapchain, ~0ull, imageAcquired, nullptr,
+                        &nextImageIndex);
+                    if (acquired == vulkan::Result::Success
+                        || acquired == vulkan::Result::SuboptimalKHR)
+                        break;
+                    if (acquired != vulkan::Result::ErrorOutOfDateKHR)
+                        throw std::runtime_error(
+                            "VulkanRenderBackend: "
+                            "vkAcquireNextImageKHR failed");
+                    // The swapchain is out of date (a surface resize, a
+                    // minimise): the recreate path runs before the acquire
+                    // can succeed. The render pass and framebuffers are
+                    // rebuilt against the new extent too.
+                    recreateSwapchainResources();
+                }
+                swapchainStale = acquired == vulkan::Result::SuboptimalKHR;
             }
             vulkan::VkCommandBufferBeginInfo begin{};
             if (loader.vkResetCommandBuffer(commandBuffer, 0)
@@ -2162,6 +2540,34 @@ void VulkanRenderBackend::initialise()
     impl.loader.vkGetDeviceQueue(impl.device, impl.queueFamily, 0,
                                  &impl.queue);
 
+    // The device's depth/stencil attachment format: the pick runs once
+    // (the fallback chain D24S8 -> D32Sfloat -> D16Unorm queries the
+    // device's format properties) and every depth attachment, render
+    // pass and readback unpack use this one.
+    impl.depthFormat = pickDepthFormat(impl.loader, impl.physicalDevice);
+
+    // The one shared sampler (nearest, clamp-to-edge): the GLSL's
+    // sampler2D/sampler3D uniforms each combine a sampler with an image
+    // view at descriptor time, and the engine's sampling rules (the
+    // shadow maps, the volumes, the post-chain inputs) are all nearest
+    // with clamp-to-edge, the same rules the OpenGL backend's
+    // GL_NEAREST/GL_CLAMP_TO_EDGE state implements.
+    vulkan::VkSamplerCreateInfo samplerInfo{};
+    samplerInfo.magFilter = vulkan::Filter::Nearest;
+    samplerInfo.minFilter = vulkan::Filter::Nearest;
+    samplerInfo.addressModeU = vulkan::SamplerAddressMode::ClampToEdge;
+    samplerInfo.addressModeV = vulkan::SamplerAddressMode::ClampToEdge;
+    samplerInfo.addressModeW = vulkan::SamplerAddressMode::ClampToEdge;
+    if (impl.loader.vkCreateSampler(impl.device, &samplerInfo, nullptr,
+                                    &impl.sharedSampler)
+        != vulkan::Result::Success)
+    {
+        const std::string message("vkCreateSampler failed");
+        impl.shutdownPartial();
+        sdlVideoRelease();
+        throw std::runtime_error(message);
+    }
+
     vulkan::VkCommandPoolCreateInfo poolInfo{};
     poolInfo.queueFamilyIndex = impl.queueFamily;
     if (impl.loader.vkCreateCommandPool(impl.device, &poolInfo, nullptr,
@@ -2174,149 +2580,79 @@ void VulkanRenderBackend::initialise()
         throw std::runtime_error(message);
     }
 
-    // Swapchain: the surface's current extent and the first supported
-    // format (R8G8B8A8Unorm preferred, the format the readback expects).
-    vulkan::VkSurfaceCapabilitiesKHR caps{};
-    if (impl.loader.vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
-            impl.physicalDevice, impl.surface, &caps)
-        != vulkan::Result::Success)
-    {
-        const std::string message("vkGetPhysicalDeviceSurfaceCapabilitiesKHR"
-                                  " failed");
-        impl.shutdownPartial();
-        sdlVideoRelease();
-        throw std::runtime_error(message);
-    }
-    std::uint32_t format_count = 0;
-    impl.loader.vkGetPhysicalDeviceSurfaceFormatsKHR(impl.physicalDevice,
-                                                     impl.surface,
-                                                     &format_count, nullptr);
-    std::vector<vulkan::VkSurfaceFormatKHR> formats(format_count);
-    impl.loader.vkGetPhysicalDeviceSurfaceFormatsKHR(impl.physicalDevice,
-                                                     impl.surface,
-                                                     &format_count,
-                                                     formats.data());
-    // The swapchain format is the readback's contract: RGBA8 (37) is the
-    // format the readback expects, B8G8R8A8 (44) reads back with the R and
-    // B bytes swapped, and an SRGB format (50) would need the sRGB decode
-    // the UNORM formats avoid, so an UNORM format is always preferred.
-    impl.swapchainFormat = formats.empty()
-        ? vulkan::Format::R8G8B8A8Unorm
-        : formats[0].format;
-    for (const vulkan::VkSurfaceFormatKHR& surface_format : formats)
-    {
-        if (surface_format.format == vulkan::Format::B8G8R8A8Unorm)
-        {
-            impl.swapchainFormat = surface_format.format;
-            break;
-        }
-    }
-    for (const vulkan::VkSurfaceFormatKHR& surface_format : formats)
-    {
-        if (surface_format.format == vulkan::Format::R8G8B8A8Unorm)
-        {
-            impl.swapchainFormat = surface_format.format;
-            break;
-        }
-    }
-    impl.swapchainExtent = caps.currentExtent;
-    vulkan::VkSwapchainCreateInfoKHR swapInfo{};
-    swapInfo.surface = impl.surface;
-    swapInfo.minImageCount = caps.minImageCount + 1;
-    if (caps.maxImageCount != 0 && swapInfo.minImageCount > caps.maxImageCount)
-        swapInfo.minImageCount = caps.maxImageCount;
-    swapInfo.imageFormat = impl.swapchainFormat;
-    swapInfo.imageColorSpace = vulkan::ColorSpace::SrgbNonlinear;
-    swapInfo.imageExtent = impl.swapchainExtent;
-    swapInfo.imageUsage = static_cast<vulkan::VkFlags>(
-        vulkan::ImageUsage::ColorAttachment
-        | vulkan::ImageUsage::TransferSrc);
-    swapInfo.preTransform = vulkan::SurfaceTransform::Identity;
-    swapInfo.compositeAlpha = vulkan::CompositeAlpha::Opaque;
-    swapInfo.presentMode = vulkan::PresentMode::Fifo;
-    swapInfo.clipped = 1;
-    if (impl.loader.vkCreateSwapchainKHR(impl.device, &swapInfo, nullptr,
-                                         &impl.swapchain)
-        != vulkan::Result::Success)
-    {
-        const std::string message("vkCreateSwapchainKHR failed");
-        impl.shutdownPartial();
-        sdlVideoRelease();
-        throw std::runtime_error(message);
-    }
-    std::uint32_t image_count = 0;
-    impl.loader.vkGetSwapchainImagesKHR(impl.device, impl.swapchain,
-                                        &image_count, nullptr);
-    impl.swapchainImages.resize(image_count);
-    impl.loader.vkGetSwapchainImagesKHR(impl.device, impl.swapchain,
-                                        &image_count,
-                                        impl.swapchainImages.data());
-    impl.swapchainViews.reserve(image_count);
-    for (vulkan::VkImage image : impl.swapchainImages)
-    {
-        impl.swapchainViews.push_back(impl.createImageView(
-            image, impl.swapchainFormat, vulkan::ImageAspect::Color));
-    }
-
-    // The default framebuffer's depth attachment (D24S8) and the shared
-    // swapchain render pass + framebuffers.
-    impl.swapchainDepthImage = impl.createImage(
-        vulkan::Format::D24UnormS8Uint, impl.swapchainExtent.width,
-        impl.swapchainExtent.height,
+    // The default texture (1x1 opaque white): the descriptor set's sampler
+    // bindings the engine never writes still name an image view (the
+    // device's own samplers on the OpenGL contract's unbound slots), and
+    // the shader samples a valid, opaque image either way.
+    impl.defaultImage = impl.createImage(
+        vulkan::Format::R8G8B8A8Unorm, 1, 1,
         static_cast<vulkan::VkFlags>(
-            vulkan::ImageUsage::DepthStencilAttachment
-            | vulkan::ImageUsage::TransferSrc),
+            vulkan::ImageUsage::TransferDst
+            | vulkan::ImageUsage::Sampled),
         static_cast<vulkan::VkFlags>(vulkan::SampleCount::One));
-    vulkan::VkMemoryRequirements depthRequirements{};
-    impl.loader.vkGetImageMemoryRequirements(impl.device,
-                                             impl.swapchainDepthImage,
-                                             &depthRequirements);
-    impl.swapchainDepthMemory = impl.allocateMemoryFor(
-        depthRequirements.memoryTypeBits,
-        static_cast<std::size_t>(depthRequirements.size),
-        vulkan::MemoryProperty::DeviceLocal);
-    impl.loader.vkBindImageMemory(impl.device, impl.swapchainDepthImage,
-                                  impl.swapchainDepthMemory, 0);
-    impl.swapchainDepthView = impl.createImageView(
-        impl.swapchainDepthImage, vulkan::Format::D24UnormS8Uint,
-        static_cast<vulkan::ImageAspect>(
-            static_cast<std::uint32_t>(vulkan::ImageAspect::Depth)
-            | static_cast<std::uint32_t>(vulkan::ImageAspect::Stencil)));
-    // A fresh depth buffer reads 1.0f (the OpenGL clear default): the
-    // attachment starts as undefined content, so a clear-once pass gives
-    // the first clear's loadOp=Load a defined 1.0f to test against.
     {
+        vulkan::VkMemoryRequirements defaultRequirements{};
+        impl.loader.vkGetImageMemoryRequirements(
+            impl.device, impl.defaultImage, &defaultRequirements);
+        impl.defaultImageMemory = impl.allocateMemoryFor(
+            defaultRequirements.memoryTypeBits,
+            static_cast<std::size_t>(defaultRequirements.size),
+            vulkan::MemoryProperty::DeviceLocal);
+        impl.loader.vkBindImageMemory(impl.device, impl.defaultImage,
+                                      impl.defaultImageMemory, 0);
+        impl.defaultImageView = impl.createImageView(
+            impl.defaultImage, vulkan::Format::R8G8B8A8Unorm,
+            vulkan::ImageAspect::Color);
+        // The one pixel is opaque white: the staging buffer carries the
+        // RGBA8 bytes and the one-off submit copies them into the image.
+        vulkan::VkBuffer stagingBuffer = nullptr;
+        vulkan::VkDeviceMemory stagingMemory = nullptr;
+        impl.createHostBuffer(
+            static_cast<vulkan::VkFlags>(vulkan::BufferUsage::TransferSrc),
+            4, stagingBuffer, stagingMemory);
+        void* mapped = nullptr;
+        impl.loader.vkMapMemory(impl.device, stagingMemory, 0, 4, 0,
+                                &mapped);
+        const std::uint8_t white[4] = {0xFF, 0xFF, 0xFF, 0xFF};
+        std::memcpy(mapped, white, sizeof(white));
+        impl.loader.vkUnmapMemory(impl.device, stagingMemory);
+        vulkan::VkBufferImageCopy region{};
+        region.imageSubresource.aspectMask = vulkan::ImageAspect::Color;
+        region.imageSubresource.layerCount = 1;
+        region.imageExtent = {1, 1, 1};
         vulkan::VkCommandBuffer oneOff = impl.beginOneOff();
         impl.recordLayoutTransition(
-            oneOff, impl.swapchainDepthImage,
-            static_cast<vulkan::ImageAspect>(
-                static_cast<std::uint32_t>(vulkan::ImageAspect::Depth)
-                | static_cast<std::uint32_t>(
-                    vulkan::ImageAspect::Stencil)),
+            oneOff, impl.defaultImage, vulkan::ImageAspect::Color,
             vulkan::ImageLayout::Undefined,
             vulkan::ImageLayout::TransferDstOptimal);
-        vulkan::VkClearDepthStencilValue clearDepth{};
-        clearDepth.depth = 1.0f;
-        clearDepth.stencil = 0;
-        vulkan::VkImageSubresourceRange range{};
-        range.aspectMask = static_cast<vulkan::ImageAspect>(
-            static_cast<std::uint32_t>(vulkan::ImageAspect::Depth)
-            | static_cast<std::uint32_t>(vulkan::ImageAspect::Stencil));
-        range.levelCount = 1;
-        range.layerCount = 1;
-        impl.loader.vkCmdClearDepthStencilImage(
-            oneOff, impl.swapchainDepthImage,
-            vulkan::ImageLayout::TransferDstOptimal, &clearDepth, 1, &range);
+        impl.loader.vkCmdCopyBufferToImage(
+            oneOff, stagingBuffer, impl.defaultImage,
+            vulkan::ImageLayout::TransferDstOptimal, 1, &region);
         impl.recordLayoutTransition(
-            oneOff, impl.swapchainDepthImage,
-            static_cast<vulkan::ImageAspect>(
-                static_cast<std::uint32_t>(vulkan::ImageAspect::Depth)
-                | static_cast<std::uint32_t>(
-                    vulkan::ImageAspect::Stencil)),
+            oneOff, impl.defaultImage, vulkan::ImageAspect::Color,
             vulkan::ImageLayout::TransferDstOptimal,
-            vulkan::ImageLayout::DepthStencilAttachmentOptimal);
+            vulkan::ImageLayout::ShaderReadOnlyOptimal);
         impl.loader.vkEndCommandBuffer(oneOff);
         impl.submitOneOff(oneOff);
+        impl.loader.vkDestroyBuffer(impl.device, stagingBuffer, nullptr);
+        // The staging memory stays in memory_blocks: the shutdown's free
+        // loop releases every allocation exactly once.
+    }
+
+    // The swapchain resources: the surface query, the swapchain itself,
+    // the image views and the depth attachment. The initialisation runs
+    // it once; the acquire path runs it again when the swapchain goes
+    // out of date (a surface resize), so a failed first run cleans up
+    // the same partial state the recreate path would.
+    try
+    {
+        impl.createSwapchainResources();
+    }
+    catch (const std::exception&)
+    {
+        impl.shutdownPartial();
+        sdlVideoRelease();
+        throw;
     }
     vulkan::VkSemaphoreCreateInfo semaphoreInfo{};
     if (impl.loader.vkCreateSemaphore(impl.device, &semaphoreInfo, nullptr,
@@ -2466,6 +2802,17 @@ void VulkanRenderBackend::shutdownImpl(bool countViolation)
     for (vulkan::VkImageView view : impl.swapchainViews)
         impl.loader.vkDestroyImageView(impl.device, view, nullptr);
     impl.swapchainViews.clear();
+    if (impl.defaultImageView != nullptr)
+        impl.loader.vkDestroyImageView(impl.device, impl.defaultImageView,
+                                       nullptr);
+    impl.defaultImageView = nullptr;
+    if (impl.defaultImage != nullptr)
+        impl.loader.vkDestroyImage(impl.device, impl.defaultImage, nullptr);
+    impl.defaultImage = nullptr;
+    if (impl.sharedSampler != nullptr)
+        impl.loader.vkDestroySampler(impl.device, impl.sharedSampler,
+                                     nullptr);
+    impl.sharedSampler = nullptr;
     if (impl.readbackMapped != nullptr)
     {
         impl.loader.vkUnmapMemory(impl.device, impl.readbackMemory);
