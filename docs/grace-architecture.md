@@ -440,6 +440,40 @@ prediction: the resource and pass mapping survived unchanged, depth state
 is a pipeline-creation property on the Metal side too, and the recorded
 `submit(DrawSubmission)` shape carried over directly.
 
+### 4.6 Core completion
+
+The original's core module lists four capabilities the engine had not yet
+implemented, and milestone 21 closes them: the curve set, the task-based
+multithreading, the built-in profiler and the compressed-texture support.
+All four are platform-neutral and live in the core library, so the same
+code compiles on Linux, Windows and macOS without any build change.
+
+The curves implement the three kinds the documented feature set names:
+the Catmull-Rom spline (which passes through its keys), the uniform cubic
+B-spline (C2 continuous, which does not pass through its keys and suits
+camera paths) and the TCB interpolation (Kochanek-Bartels) — the
+superset whose zero tension, continuity and bias reproduce the
+Catmull-Rom. One class, one evaluation interface, deterministic: the
+same keys and parameter produce the same point on every platform.
+
+The task system implements the documented "task-based multithreading"
+shape: a host declares a dependency graph, a pool of workers runs it, and
+a task's closure is a pure function of its own inputs. The system never
+shares data between tasks implicitly — the deterministic tests rely on
+the same final state no matter which worker ran what. The scheduler
+rejects cycles at declaration time and drops the batch at shutdown.
+
+The profiler implements the documented "built-in profiler and runtime
+data validator": an RAII zone times a named scope on the steady clock
+into 64-bit accumulators a host reads between frames, and the violation
+counters are the same channel the engine's own contract handlers report
+through. The compressed-texture support implements the CPU-side BC1-BC5
+decoder of the published block layouts — the formats every one of the
+three render backends can carry — decoding into the row-major RGBA8 the
+existing fill calls already use. The PVR/ETC/ATC entries of the
+original's list are the platform-specific formats of other vendors and
+have no meaning on the API trio this project targets.
+
 ## 5. Licensing boundary
 
 This section records what may and may not be done, so the boundary is explicit

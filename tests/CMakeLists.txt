@@ -30,6 +30,30 @@ target_include_directories(test_math PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
 add_test(NAME math COMMAND test_math)
 
+# Milestone 21: the core-completion subsystems. Curves (21a) evaluate
+# deterministically; the task scheduler (21b) proves result determinism on
+# a thread pool; the profiler (21c) counts zones and violations; the
+# compressed-texture decoder (21d) decodes BC1-BC5 bit-exactly on the CPU.
+add_executable(test_curves test_curves.cpp)
+target_link_libraries(test_curves PRIVATE grace_core grace_warnings)
+target_include_directories(test_curves PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME curves COMMAND test_curves)
+
+add_executable(test_tasks test_tasks.cpp)
+target_link_libraries(test_tasks PRIVATE grace_core grace_warnings)
+target_include_directories(test_tasks PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME tasks COMMAND test_tasks)
+
+add_executable(test_profiler test_profiler.cpp)
+target_link_libraries(test_profiler PRIVATE grace_core grace_warnings)
+target_include_directories(test_profiler PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME profiler COMMAND test_profiler)
+
+add_executable(test_compressed_textures test_compressed_textures.cpp)
+target_link_libraries(test_compressed_textures PRIVATE grace_core grace_warnings)
+target_include_directories(test_compressed_textures PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME compressed_textures COMMAND test_compressed_textures)
+
 # Physics contract (8a) and null backend (8b): deterministic manual
 # integration, no physics SDK.
 add_executable(test_physics test_physics.cpp)

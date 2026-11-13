@@ -48,13 +48,14 @@ The `.docx` files in this directory are generated from the `.md` sources with
 | 18 | Vulkan render backend: the full 38-method contract on one backend for Linux, Windows and Android (decision 43), behind `GRACE_ENABLE_VULKAN` with its own GLSL 450-core shader library compiled to SPIR-V at build time by glslangValidator (decision 44). The loader declares its own types locally (no generated headers shipped); validated on Linux under lavapipe, cross-compiled for Windows (winevulkan) and for Android (NDK r27c, arm64-v8a, build only) | Done |
 | 19 | Vulkan hardware path: the presentation engine (the swap interval maps onto the present mode, the acquire retries on the out-of-date resize, the present result steers the next frame), the depth attachment format picked from the device's format properties (D24S8, D32Sfloat, D16Unorm in that order), and the sampler descriptors written at draw time from the bound texture views (the layout table's unit rule, the default 1x1 white texture for unbound slots) (decision 46) | Done |
 | 20 | Metal render backend: macOS and iOS behind `GRACE_ENABLE_METAL` — the same 38-method contract, the self-declared loader resolving the Objective-C runtime and the Metal framework at runtime (dlopen/dlsym, no Apple SDK header in the tree, the module compiles on any platform), MSL 2.0 shader sources compiled at runtime by MTLLibrary (no build-time shader step), presentation through SDL's CAMetalLayer bridge, and the pure mapping tests (pixel formats, compare ops, blend, load/store, sampler states, index types) running on Linux. Hardware run executed on the Apple A18 Pro: 10 frames, violations 0, test_metal_render 31/31 (decision 47) | Done |
+| 21 | Core completion: the documented curve set (spline, B-spline and TCB), the task-based multithreading (a pool of workers running a declared dependency graph, the deterministic-closure rule), the built-in profiler (zone timers and the violation counters) and the compressed-texture support (BC1-BC5 decoded on the CPU into RGBA8, the published block layouts) (decision 48) | Done |
 ---
 
 ## Module status
 
 | Module | State | Notes |
 | --- | --- | --- |
-| core | Partial | Version, fixed-step clock, header-only math (vec/mat4/transform/camera). Dependency-free, enforced by grep in review. |
+| core | Partial | Version, fixed-step clock, header-only math (vec/mat4/transform/camera), the curve set (spline, B-spline, TCB), the task scheduler, the profiler (zone timers and violation counters) and the CPU-side BC1-BC5 texture decoder (milestone 21). Dependency-free, enforced by grep in review. |
 | app | Partial | Application lifecycle driver and the CLI entry point. |
 | render | Partial | Contract, null backend, OpenGL backend, Vulkan backend, loaders, API-neutral mesh/shader/material plus their OpenGL and Vulkan implementations; diagnostic triangle rebuilt on the foundation. |
 | physics | Partial | Contract (8a), null backend (8b), and the Bullet, Box2D and PhysX 3.4 adapters (8c) behind build options. PhysX is the extra-physics capability (decision 32); the classical layer is backend-neutral. |
@@ -147,6 +148,7 @@ All results below are real runs, on the tree at the stated commit.
 | 2026-11-11 | Kubuntu, x86_64, Mesa Intel Iris Xe (ADL GT2), milestone 19 | The first hardware run of the Vulkan path segfaulted inside vkAllocateMemory on the driver (ANV), at the default texture's allocation. The loader's hand-written structures carried two layout defects the software device never punished: VkMemoryAllocateInfo's allocationSize was 32-bit where the spec's VkDeviceSize is 64 (the driver read the memory type index past the structure's end), and VkSamplerCreateInfo lacked the mipmapMode field, shifting every following member by 4 bytes. Both fixed, and every loader structure's size now matches the published layout exactly; grace --vulkan then ran the 10-frame forward path on the Iris Xe with violations 0, exit 0 |
 | 2026-11-11 | Ubuntu 24.04.5, x86_64, GCC 13.3.0, CMake 4.4.4, no Apple SDK, milestone 20 (decision 47) | The Metal build compiles clean under -Werror on Linux with `GRACE_ENABLE_METAL=ON` (the loader declares its own types; no Apple SDK exists in this environment, and none is needed). test_metal_render runs on Linux: the pure mapping checks pass (the published MTLPixelFormat, MTLCompareFunction, MTLBlendFactor, MTLLoadAction/MTLStoreAction, MTLSamplerAddressMode and MTLIndexType values, and the shared std140 layout table's 27 entries), and the device-dependent block skips with exit 77 — no Metal framework exists here. Honest scope: the hardware run of the Metal path is pending until someone builds and runs on a Mac; nothing in this record claims otherwise |
 | 2026-11-12 | macOS, Apple A18 Pro (iPhone 17), milestone 20 (decision 47) | The first hardware run of the Metal path executes the 10-frame forward path on the Apple A18 Pro: grace --metal --frames 10 -v reports renderer Apple A18 Pro, frame 1280x720, frames=10 steps=20 clamps=0, violations=0, exit 0. test_metal_render passes 31 checks, 0 failures and the Metal build's ctest runs 26/26, 100% tests passed. The milestone's hardware run is no longer pending — the validation scope is now the Linux compile, the pure mapping tests and the real-device run on the A18 Pro (decision 47) |
+| 2026-11-13 | Ubuntu 24.04.5, x86_64, GCC 13.3.0, milestone 21 (decision 48) | The default build's ctest runs 29/29, 100% tests passed (the 25 suites of milestone 20 plus the four new ones: curves 37 checks, tasks 16 checks, profiler 18 checks, compressed_textures 360 checks — all zero failures). The OpenGL build's ctest runs 45/45 and the Metal build's ctest runs 30/30, both 100% passed (the Metal device-dependent block skips with exit 77 on Linux, as recorded). The MinGW-w64 x86_64 and the Android NDK r27c arm64-v8a cross-compiles build the whole tree clean under -Werror, 117 targets each — the new core modules are platform-neutral and the CPU-only BC decoder is the same code everywhere |
 | 2026-11-11 | same, MinGW-w64 GCC 13.2.0 cross-compile (x86_64-w64-mingw32), Wine 9.0, milestone 19 | The tree with `GRACE_ENABLE_VULKAN=ON` cross-compiles clean under -Werror: 41 test executables link for x86_64 and test_renderer runs 41 checks, 0 failures under Wine. Honest scope: compile-validated only |
 | 2026-11-11 | same, Android NDK r27c cross-compile (arm64-v8a, android-26), milestone 19 | The tree with `GRACE_ENABLE_VULKAN=ON` cross-compiles clean under -Werror with the NDK's clang (r27c): 23 test executables link for aarch64. Not executed on Android hardware: build-only validation, the intended Android path is the primary target of the Vulkan backend (decision 43) |
 
@@ -1407,6 +1409,35 @@ grep -rn 'GLuint\|GLenum\|SDL_\|Window' include/grace/render/render_backend.hpp 
     Linux compile, (b) the pure mapping tests and (c) the hardware
     run on the A18 Pro — and it is complete on all three (decision
     47).
+
+48. **What the core-completion milestone adds, and why its subsystems
+    are shaped the way they are.** The milestone 21 subsystems close
+    the core module's documented gaps: the curve set (GRACE 2's
+    documented spline, B-spline and TCB), the task-based
+    multithreading, the built-in profiler and the compressed-texture
+    support. The curves are one class with three kinds — the spline
+    (Catmull-Rom), the B-spline (C2 continuous, the camera-path
+    choice) and the TCB (Kochanek-Bartels, the superset whose zero
+    parameters reproduce Catmull-Rom) — evaluated from a normalised
+    span index, deterministic, header-free of any dependency. The task
+    system declares a dependency graph, runs it on a pool of workers
+    and keeps a task's closure a pure function of its own inputs: the
+    system never shares data between tasks implicitly, so the result
+    of a batch is the same no matter which worker ran what — the
+    deterministic tests hold. The profiler is zone-based: an RAII
+    scope times a named zone on the steady clock, the counters are
+    64-bit integers a host reads between frames, and the violation
+    counters are the same mechanism the engine's own contract
+    handlers already report through. The compressed-texture support
+    is the CPU-side BC1-BC5 decoder (the published block layouts,
+    deterministic bit-exact decoding) — the formats every one of the
+    three render backends can carry, and the layout every fill call
+    already uses (row-major RGBA8, no padding). What is deliberately
+    not here: GPU-side compressed sampling (the backends can carry
+    the formats; the engine's own texture path is the RGBA8 decoder
+    feeding the existing fill calls), the stereoscopic 3D output
+    (deferred, as recorded in the target mapping), and the localisation
+    beyond the UTF-8 the UI contract already carries (decision 48).
 
 ## Verification commands
 

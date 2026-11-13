@@ -141,6 +141,15 @@ validation is the Linux compile, the pure mapping tests and the hardware
 run on the Apple A18 Pro — the 10-frame forward path with violations 0 and
 test_metal_render 31 checks, 0 failures (decision 47).
 
+The core-completion milestone (milestone 21) adds the four core
+capabilities the documented feature set names that the engine had not yet
+implemented: the curve set (spline, B-spline and TCB), the task-based
+multithreading (a pool of workers running a declared dependency graph,
+with the deterministic-closure rule), the built-in profiler (zone timers
+and the violation counters) and the compressed-texture support (BC1-BC5
+decoded on the CPU into RGBA8). All four are platform-neutral and live in
+the core library; the same code compiles on Linux, Windows and macOS (decision 48).
+
 The scripting backends are not wired yet, so neither platform introduces a
 dependency that is currently unavailable there. The physics backends are
 behind build options and the PhysX adapter is Linux-only: the adapter links
