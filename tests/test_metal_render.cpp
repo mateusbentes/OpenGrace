@@ -89,6 +89,32 @@ int main()
     GRACE_CHECK_EQ(
         static_cast<std::uint64_t>(MTLPrimitiveType::Triangle), 3u);
     GRACE_CHECK_EQ(static_cast<std::uint64_t>(MTLIndexType::UInt32), 1u);
+    // The published texture types (the M19 lesson: the values the device
+    // receives must be the API's own).
+    GRACE_CHECK_EQ(static_cast<std::uint64_t>(
+                       grace::render::metal::MTLTextureType::Type2D),
+                   2u);
+    GRACE_CHECK_EQ(static_cast<std::uint64_t>(
+                       grace::render::metal::MTLTextureType::Type3D),
+                   7u);
+    GRACE_CHECK_EQ(static_cast<std::uint64_t>(
+                       grace::render::metal::MTLTextureType::Type2DArray),
+                   3u);
+    // The published storage modes and the packed resource options (the
+    // API's own shift: the storage mode lives at bits 4-7, the cache
+    // mode at bits 0-3).
+    GRACE_CHECK_EQ(static_cast<std::uint64_t>(
+                       grace::render::metal::MTLStorageMode::Shared),
+                   0u);
+    GRACE_CHECK_EQ(static_cast<std::uint64_t>(
+                       grace::render::metal::MTLStorageMode::Private),
+                   2u);
+    GRACE_CHECK_EQ(static_cast<std::uint64_t>(
+                       grace::render::metal::MTLResourceOptions::Stage),
+                   0u);
+    GRACE_CHECK_EQ(static_cast<std::uint64_t>(
+                       grace::render::metal::MTLResourceOptions::GpuPrivate),
+                   32u);
     // The published clear colour struct: doubles, the Metal ABI's one
     // (the Vulkan clear value's floats are not).
     GRACE_CHECK_EQ(sizeof(grace::render::metal::MTLClearColor),

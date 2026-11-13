@@ -219,7 +219,7 @@ int main(int argc, char** argv)
     }
 
 #ifndef GRACE_HAVE_OPENGL
-    if (!options.headless)
+    if (!options.headless && !options.vulkan && !options.metal)
         return usageError("no render backend selected; this build provides --headless only "
                           "(configure with -DGRACE_ENABLE_OPENGL=ON for the OpenGL backend)");
 #endif

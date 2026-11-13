@@ -183,18 +183,18 @@ enum class MTLVertexStepFunction : NSUInteger
 
 enum class MTLTextureType : NSUInteger
 {
-    Type2D = 1,
-    Type3D = 5,
-    Type2DArray = 6,
+    Type2D = 2,
+    Type2DArray = 3,
+    Type3D = 7,
 };
 
 // The storage mode the backend's own resources use. The published
-// values: 0 Managed (macOS), 1 Private, 2 Shared, 3 Memoryless.
+// values: 0 Shared, 1 Managed (macOS only), 2 Private, 3 Memoryless.
 enum class MTLStorageMode : NSUInteger
 {
-    Managed = 0,
-    Private = 1,
-    Shared = 2,
+    Shared = 0,
+    Managed = 1,
+    Private = 2,
     Memoryless = 3,
 };
 
@@ -206,11 +206,13 @@ enum class MTLResourceUsage : NSUInteger
 
 enum class MTLResourceOptions : NSUInteger
 {
-    // The published allocation mode bits (storage mode at bits 0-3, the
-    // cache mode at bits 4-7). The backend builds the value from a
-    // storage mode plus the default cache mode (0 = Default cache).
-    Stage = static_cast<NSUInteger>(MTLStorageMode::Shared),
-    GpuPrivate = static_cast<NSUInteger>(MTLStorageMode::Private),
+    // The published resource options: the CPU cache mode at bits 0-3,
+    // the storage mode at bits 4-7 and the hazard tracking mode at
+    // bits 8-9 (MTLResource.h's published shift macros). The backend
+    // builds the value from a storage mode plus the default cache mode
+    // (0 = Default cache) and the default hazard tracking mode.
+    Stage = static_cast<NSUInteger>(MTLStorageMode::Shared) << 4,
+    GpuPrivate = static_cast<NSUInteger>(MTLStorageMode::Private) << 4,
 };
 
 // The published texture usage bits.
@@ -355,6 +357,23 @@ inline void msgSendVoid1(void* self, void* op, void* arg)
 {
     using Fn = void (*)(void*, void*, void*);
     reinterpret_cast<Fn>(objc_msgSend)(self, op, arg);
+}
+// Double-argument messages (the pass descriptor's clear depth setter
+// takes a double on the Metal ABI; the FP register carries the value).
+inline void msgSendDouble(void* self, void* op, double arg)
+{
+    using Fn = void (*)(void*, void*, double);
+    reinterpret_cast<Fn>(objc_msgSend)(self, op, arg);
+}
+// BOOL-returning messages (the published property getters, e.g. the
+// device's isDepth24Stencil8PixelFormatSupported): the runtime's BOOL
+// is bool on arm64 and signed char on x86_64, and both return in the
+// same register's low byte, so the bool cast is the ABI's own reading
+// rule on both architectures.
+inline bool msgSendBOOL(void* self, void* op)
+{
+    using Fn = bool (*)(void*, void*);
+    return reinterpret_cast<Fn>(objc_msgSend)(self, op);
 }
 
 // The Metal framework's selectors the backend sends. Declared once so a

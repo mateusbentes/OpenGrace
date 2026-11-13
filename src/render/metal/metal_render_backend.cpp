@@ -89,6 +89,10 @@ struct MetalRenderBackend::Impl
     // The presentation layer (CAMetalLayer the SDL window hosts).
     metal::CAMetalLayerHandle layer = nullptr;
     metal::MTLPixelFormat layerFormat = metal::MTLPixelFormat::Rgba8Unorm;
+    // The drawable the frame acquired (the one object nextDrawable
+    // handed out; the present presents it, a new acquisition would
+    // discard the frame's own texture).
+    void* currentDrawable = nullptr;
     // The frame's command buffer and encoder (encoded per frame, one
     // render pass per encoder).
     metal::MTLCommandBufferHandle commandBuffer = nullptr;
@@ -97,8 +101,8 @@ struct MetalRenderBackend::Impl
     State state = State::Created;
     std::string device_name;
     // The depth attachment format the device supports (the pick queries
-    // the device once; Depth24Unorm_Stencil8 on macOS, Depth32Float_
-    // Stencil8 where the 24-bit packed format is unavailable).
+    // the device once; Depth24Unorm_Stencil8 where the device answers
+    // yes, Depth32Float_Stencil8 where it does not).
     metal::MTLPixelFormat depthFormat = metal::MTLPixelFormat::Depth24Unorm_Stencil8;
     // Clear state (the same recorded state the Vulkan backend keeps; the
     // clear lands in the pass's load actions when the frame encodes).
@@ -237,22 +241,25 @@ struct MetalRenderBackend::Impl
     {
         if (device == nullptr)
             return metal::MTLPixelFormat::Depth32Float_Stencil8;
-        // The honest platform split: the published Depth24Unorm_
-        // Stencil8 format is macOS-only (iOS 13 SDK mirror), so the
-        // runtime check is the OS the process runs on — the NSProcessInfo
-        // selector-based check would need a second class handle; the
-        // documented split below keys on the SDL platform name the same
-        // way the module's other platform-dependent picks do.
-        const char* platform = SDL_GetPlatform();
-        if (platform != nullptr && std::strcmp(platform, "Mac OS X") == 0)
-            return metal::MTLPixelFormat::Depth24Unorm_Stencil8;
-        return metal::MTLPixelFormat::Depth32Float_Stencil8;
+        // The published property the device answers: isDepth24Stencil8
+        // PixelFormatSupported (the MTLDevice getter, macOS 10.11+;
+        // unavailable on iOS, where the selector never responds yes).
+        // The device's own answer, not a platform key: the same hardware
+        // path runs on both platforms, so the Intel/AMD Macs that do
+        // support the packed format keep it and the Apple Silicon GPUs
+        // that do not get the fallback - no SDL_GetPlatform() compare.
+        return metal::msgSendBOOL(
+                   device,
+                   metal::sel_registerName(
+                       "isDepth24Stencil8PixelFormatSupported"))
+                   ? metal::MTLPixelFormat::Depth24Unorm_Stencil8
+                   : metal::MTLPixelFormat::Depth32Float_Stencil8;
     }
 
     /// Creates a texture from a descriptor (the framework's own alloc/
     /// init path: a descriptor object is allocated, its fields set
-    /// through the property setters, and the device's newTexture message
-    /// materialises it).
+    /// through the property setters, and the device's
+    /// newTextureWithDescriptor: message materialises it).
     metal::MTLTextureHandle createTexture(metal::MTLPixelFormat format,
                                           std::uint32_t width,
                                           std::uint32_t height,
@@ -287,7 +294,8 @@ struct MetalRenderBackend::Impl
         metal::msgSendUL(descriptor,
                          metal::sel_registerName("setUsage:"), usage);
         return metal::msgSend1(device,
-                               metal::sel_registerName("newTexture:"),
+                               metal::sel_registerName(
+                                   "newTextureWithDescriptor:"),
                                descriptor);
     }
 
@@ -298,11 +306,15 @@ struct MetalRenderBackend::Impl
                                         metal::MTLStorageMode mode)
     {
         using Fn = void* (*)(void*, void*, NSUInteger, NSUInteger);
+        // The published resource options: the storage mode at bits 4-7
+        // (MTLResourceStorageModeShift), the default cache mode at bits
+        // 0-3 and the default hazard tracking mode at bits 8-9.
+        NSUInteger options = static_cast<NSUInteger>(mode) << 4;
         return reinterpret_cast<Fn>(metal::objc_msgSend)(
             device,
             metal::sel_registerName("newBufferWithLength:options:"),
             static_cast<NSUInteger>(bytes),
-            static_cast<NSUInteger>(mode));
+            options);
     }
 
     /// Writes bytes into a shared-mode buffer's base pointer (the CPU
@@ -334,19 +346,20 @@ struct MetalRenderBackend::Impl
                          static_cast<NSUInteger>(
                              metal::MTLSamplerMinMagFilter::Nearest));
         metal::msgSendUL(
-            descriptor, metal::sel_registerName("setAddressModeS:"),
+            descriptor, metal::sel_registerName("setSAddressMode:"),
             static_cast<NSUInteger>(
                 metal::MTLSamplerAddressMode::ClampToEdge));
         metal::msgSendUL(
-            descriptor, metal::sel_registerName("setAddressModeT:"),
+            descriptor, metal::sel_registerName("setTAddressMode:"),
             static_cast<NSUInteger>(
                 metal::MTLSamplerAddressMode::ClampToEdge));
         metal::msgSendUL(
-            descriptor, metal::sel_registerName("setAddressModeR:"),
+            descriptor, metal::sel_registerName("setRAddressMode:"),
             static_cast<NSUInteger>(
                 metal::MTLSamplerAddressMode::ClampToEdge));
         return metal::msgSend1(device,
-                               metal::sel_registerName("newSamplerState:"),
+                               metal::sel_registerName(
+                                   "newSamplerStateWithDescriptor:"),
                                descriptor);
     }
 
@@ -421,23 +434,26 @@ struct MetalRenderBackend::Impl
             queue, metal::sel_registerName("commandBuffer"));
         void* blit = metal::msgSend0(copy,
                                      metal::sel_registerName(
-                                         "blitEncoder"));
+                                         "blitCommandEncoder"));
         using Fn = void (*)(void*, void*, metal::MTLBufferHandle,
                             NSUInteger, NSUInteger, NSUInteger,
+                            metal::MTLSize,
                             metal::MTLTextureHandle, NSUInteger,
-                            NSUInteger, metal::MTLOrigin, metal::MTLSize);
+                            NSUInteger, metal::MTLOrigin);
         reinterpret_cast<Fn>(metal::objc_msgSend)(
             blit,
             metal::sel_registerName("copyFromBuffer:sourceOffset:"
                                     "sourceBytesPerRow:"
-                                    "sourceBytesPerImage:toTexture:"
+                                    "sourceBytesPerImage:sourceSize:"
+                                    "toTexture:"
                                     "destinationSlice:destinationLevel:"
-                                    "destinationOrigin:destinationSize:"),
+                                    "destinationOrigin:"),
             staging, 0u, static_cast<NSUInteger>(bytesPerRow),
-            static_cast<NSUInteger>(bytesPerImage), texture, 0u, 0u,
-            metal::MTLOrigin{0, 0, 0},
+            static_cast<NSUInteger>(bytesPerImage),
             metal::MTLSize{static_cast<NSUInteger>(width),
-                            static_cast<NSUInteger>(height), 1});
+                            static_cast<NSUInteger>(height), 1},
+            texture, 0u, 0u,
+            metal::MTLOrigin{0, 0, 0});
         metal::msgSendVoid(blit, metal::sel_registerName("endEncoding"));
         metal::msgSendVoid(copy, metal::sel_registerName("commit"));
         metal::msgSendVoid(copy,
@@ -487,6 +503,63 @@ struct MetalRenderBackend::Impl
             metal::sel_registerName("alloc"));
         descriptor = metal::msgSend0(descriptor,
                                      metal::sel_registerName("init"));
+        // The MSL's vertex inputs carry [[attribute(n)]]: the pipeline
+        // descriptor needs the vertex descriptor naming the attribute
+        // bindings (the engine's meshes store position at attribute 0,
+        // one binding 0 stride 3-floats row the FlatUnlit path reads;
+        // the draw binds the vertex buffer at index 1, the uniform
+        // buffer at index 0, the same layout the Vulkan backend's
+        // vertex input state records).
+        void* vertexDescriptor = metal::msgSend0(
+            loader.cls_MTLVertexDescriptor,
+            metal::sel_registerName("vertexDescriptor"));
+        if (vertexDescriptor != nullptr)
+        {
+            void* attributes = metal::msgSend0(
+                vertexDescriptor,
+                metal::sel_registerName("attributes"));
+            void* attribute0Desc = metal::msgSendUL(
+                attributes,
+                metal::sel_registerName("objectAtIndexedSubscript:"),
+                0u);
+            if (attribute0Desc != nullptr)
+            {
+                metal::msgSendUL(attribute0Desc,
+                                 metal::sel_registerName("setFormat:"),
+                                 static_cast<NSUInteger>(
+                                     metal::MTLVertexFormat::Float3));
+                metal::msgSendUL(attribute0Desc,
+                                 metal::sel_registerName("setOffset:"),
+                                 0u);
+                metal::msgSendUL(attribute0Desc,
+                                 metal::sel_registerName(
+                                     "setBufferIndex:"),
+                                 1u);
+            }
+            void* layout0 = metal::msgSend0(
+                vertexDescriptor,
+                metal::sel_registerName("layouts"));
+            void* layout0Desc = metal::msgSendUL(
+                layout0,
+                metal::sel_registerName("objectAtIndexedSubscript:"),
+                0u);
+            if (layout0Desc != nullptr)
+            {
+                metal::msgSendUL(layout0Desc,
+                                 metal::sel_registerName("setStride:"),
+                                 3 * sizeof(float));
+                metal::msgSendUL(layout0Desc,
+                                 metal::sel_registerName(
+                                     "setStepFunction:"),
+                                 static_cast<NSUInteger>(
+                                     metal::MTLVertexStepFunction::
+                                         PerVertex));
+            }
+            metal::msgSend1(descriptor,
+                            metal::sel_registerName(
+                                "setVertexDescriptor:"),
+                            vertexDescriptor);
+        }
         if (vertexLibrary != nullptr)
         {
             void* fn = metal::msgSend1(
@@ -511,12 +584,17 @@ struct MetalRenderBackend::Impl
                          metal::sel_registerName("setDepthAttachmentPixelFormat:"
                                                  ),
                          static_cast<NSUInteger>(depthFormatValue));
-        void* colorAttachment = metal::msgSend0(
+        void* colorAttachments = metal::msgSend0(
             descriptor,
             metal::sel_registerName("colorAttachments"));
         // The first colour attachment carries the pixel format; the
-        // blend state is off (the contract's write-through rule).
-        metal::msgSendUL(colorAttachment,
+        // blend state is off (the contract's write-through rule). The
+        // property returns the indexed array; the position-0 descriptor
+        // object comes out of the array subscription.
+        void* colorAttachmentDesc = metal::msgSendUL(
+            colorAttachments,
+            metal::sel_registerName("objectAtIndexedSubscript:"), 0u);
+        metal::msgSendUL(colorAttachmentDesc,
                          metal::sel_registerName("setPixelFormat:"),
                          static_cast<NSUInteger>(colorFormat));
         using FnPipe = void* (*)(void*, void*, void*, void**);
@@ -614,17 +692,97 @@ struct MetalRenderBackend::Impl
             // target for this frame).
             void* drawable = metal::msgSend0(
                 layer,
-                metal::sel_registerName("currentDrawable"));
+                metal::sel_registerName("nextDrawable"));
+            currentDrawable = drawable;
             if (drawable != nullptr)
                 colorAttachment = metal::msgSend0(
                     drawable, metal::sel_registerName("texture"));
             depthAttachment = swapchainDepthTexture;
         }
-        // The encoder records against the descriptor's attachments; the
-        // clear values come from the device state (the recorded state
-        // the setClearColor/setClearBuffers calls keep).
-        (void)colorAttachment;
-        (void)depthAttachment;
+        // The pass descriptor's attachments carry the load/store
+        // actions (the Vulkan render pass's loadOp/storeOp pair, one
+        // descriptor object here) and the clear values come from the
+        // device state (the recorded state the setClearColor/
+        // setClearBuffers calls keep). The render command encoder
+        // records against the descriptor's attachments: the pass
+        // descriptor's colour attachment loads the clear colour (or
+        // the previous contents) and stores (the same rule the
+        // Vulkan backend's render pass applies).
+        // The descriptor object comes from the class method (the
+        // autoreleased object the framework hands out: no balancing
+        // release is needed, the runtime's own pool does).
+        void* passDescriptor = metal::msgSend0(
+            loader.cls_MTLRenderPassDescriptor,
+            metal::sel_registerName("renderPassDescriptor"));
+        if (passDescriptor == nullptr)
+            throw std::runtime_error(
+                "MetalRenderBackend: render pass descriptor failed");
+        void* colorAttachments = metal::msgSend0(
+            passDescriptor,
+            metal::sel_registerName("colorAttachments"));
+        void* colorAttachmentDesc = metal::msgSendUL(
+            colorAttachments,
+            metal::sel_registerName("objectAtIndexedSubscript:"), 0u);
+        metal::msgSend1(colorAttachmentDesc,
+                        metal::sel_registerName("setTexture:"),
+                        colorAttachment);
+        metal::msgSendUL(colorAttachmentDesc,
+                         metal::sel_registerName("setLoadAction:"),
+                         static_cast<NSUInteger>(
+                             (clear_mask
+                              & static_cast<std::uint32_t>(
+                                  ClearBuffer::Color))
+                                 != 0u
+                                 ? metal::MTLLoadAction::Clear
+                                 : metal::MTLLoadAction::Load));
+        metal::msgSendUL(
+            colorAttachmentDesc,
+            metal::sel_registerName("setStoreAction:"),
+            static_cast<NSUInteger>(metal::MTLStoreAction::Store));
+        metal::MTLClearColor clearValue{
+            static_cast<double>(clear_color.r) / 255.0,
+            static_cast<double>(clear_color.g) / 255.0,
+            static_cast<double>(clear_color.b) / 255.0,
+            static_cast<double>(clear_color.a) / 255.0};
+        using FnClearColor = void (*)(void*, void*, metal::MTLClearColor);
+        reinterpret_cast<FnClearColor>(metal::objc_msgSend)(
+            colorAttachmentDesc,
+            metal::sel_registerName("setClearColor:"),
+            clearValue);
+        if (depthAttachment != nullptr)
+        {
+            void* depthAttachmentDesc = metal::msgSend0(
+                passDescriptor,
+                metal::sel_registerName("depthAttachment"));
+            metal::msgSend1(depthAttachmentDesc,
+                            metal::sel_registerName("setTexture:"),
+                            depthAttachment);
+            metal::msgSendUL(
+                depthAttachmentDesc,
+                metal::sel_registerName("setLoadAction:"),
+                static_cast<NSUInteger>(
+                    (clear_mask
+                     & static_cast<std::uint32_t>(
+                         ClearBuffer::Depth | ClearBuffer::Stencil))
+                            != 0u
+                        ? metal::MTLLoadAction::Clear
+                        : metal::MTLLoadAction::Load));
+            metal::msgSendUL(
+                depthAttachmentDesc,
+                metal::sel_registerName("setStoreAction:"),
+                static_cast<NSUInteger>(metal::MTLStoreAction::Store));
+            metal::msgSendDouble(
+                depthAttachmentDesc,
+                metal::sel_registerName("setClearDepth:"),
+                static_cast<double>(clear_depth));
+        }
+        encoder = metal::msgSend1(
+            commandBuffer,
+            metal::sel_registerName("renderCommandEncoderWithDescriptor:"),
+            passDescriptor);
+        if (encoder == nullptr)
+            throw std::runtime_error(
+                "MetalRenderBackend: render command encoder failed");
         pass_open = true;
         applyDynamicViewport(backend);
     }
@@ -720,8 +878,7 @@ struct MetalRenderBackend::Impl
         }
         else
         {
-            void* drawable = metal::msgSend0(layer,
-                metal::sel_registerName("currentDrawable"));
+            void* drawable = currentDrawable;
             if (drawable != nullptr)
                 colour_texture = metal::msgSend0(
                     drawable, metal::sel_registerName("texture"));
@@ -741,44 +898,46 @@ struct MetalRenderBackend::Impl
         }
         void* blit = metal::msgSend0(commandBuffer,
                                      metal::sel_registerName(
-                                         "blitEncoder"));
+                                         "blitCommandEncoder"));
         if (colour_texture != nullptr)
         {
             using Fn = void (*)(void*, void*, metal::MTLTextureHandle,
                                 NSUInteger, NSUInteger,
+                                metal::MTLOrigin, metal::MTLSize,
                                 metal::MTLBufferHandle, NSUInteger,
-                                NSUInteger, NSUInteger,
-                                metal::MTLOrigin, metal::MTLSize);
+                                NSUInteger, NSUInteger);
             reinterpret_cast<Fn>(metal::objc_msgSend)(
                 blit,
                 metal::sel_registerName("copyFromTexture:sourceSlice:"
-                                        "sourceLevel:toBuffer:"
+                                        "sourceLevel:sourceOrigin:"
+                                        "sourceSize:toBuffer:"
                                         "destinationOffset:"
                                         "destinationBytesPerRow:"
-                                        "destinationBytesPerImage:"
-                                        "sourceOrigin:sourceSize:"),
-                colour_texture, 0u, 0u, staging, 0u, 4u, 4u,
+                                        "destinationBytesPerImage:"),
+                colour_texture, 0u, 0u,
                 metal::MTLOrigin{x, y, 0},
-                metal::MTLSize{1, 1, 1});
+                metal::MTLSize{1, 1, 1},
+                staging, 0u, 4u, 4u);
         }
         if (depth_texture != nullptr)
         {
             using Fn = void (*)(void*, void*, metal::MTLTextureHandle,
                                 NSUInteger, NSUInteger,
+                                metal::MTLOrigin, metal::MTLSize,
                                 metal::MTLBufferHandle, NSUInteger,
-                                NSUInteger, NSUInteger,
-                                metal::MTLOrigin, metal::MTLSize);
+                                NSUInteger, NSUInteger);
             reinterpret_cast<Fn>(metal::objc_msgSend)(
                 blit,
                 metal::sel_registerName("copyFromTexture:sourceSlice:"
-                                        "sourceLevel:toBuffer:"
+                                        "sourceLevel:sourceOrigin:"
+                                        "sourceSize:toBuffer:"
                                         "destinationOffset:"
                                         "destinationBytesPerRow:"
-                                        "destinationBytesPerImage:"
-                                        "sourceOrigin:sourceSize:"),
-                depth_texture, 0u, 0u, staging, 16u, 8u, 8u,
+                                        "destinationBytesPerImage:"),
+                depth_texture, 0u, 0u,
                 metal::MTLOrigin{x, y, 0},
-                metal::MTLSize{1, 1, 1});
+                metal::MTLSize{1, 1, 1},
+                staging, 16u, 8u, 8u);
         }
         metal::msgSendVoid(blit, metal::sel_registerName("endEncoding"));
         metal::msgSendVoid(commandBuffer,
@@ -987,9 +1146,8 @@ struct MetalRenderBackend::Impl
         // present.
         if (!swapchain_frame)
             return;
-        void* drawable = metal::msgSend0(
-                layer,
-                metal::sel_registerName("currentDrawable"));
+        void* drawable = currentDrawable;
+        currentDrawable = nullptr;
         if (drawable != nullptr)
             metal::msgSendVoid(drawable,
                                metal::sel_registerName("present"));
@@ -1118,23 +1276,24 @@ struct MetalRenderBackend::Impl
             createBuffer(sizeBytes, metal::MTLStorageMode::Shared);
         void* blit = metal::msgSend0(commandBuffer,
                                      metal::sel_registerName(
-                                         "blitEncoder"));
+                                         "blitCommandEncoder"));
         using Fn = void (*)(void*, void*, metal::MTLTextureHandle,
                             NSUInteger, NSUInteger,
+                            metal::MTLOrigin, metal::MTLSize,
                             metal::MTLBufferHandle, NSUInteger,
-                            NSUInteger, NSUInteger,
-                            metal::MTLOrigin, metal::MTLSize);
+                            NSUInteger, NSUInteger);
         reinterpret_cast<Fn>(metal::objc_msgSend)(
             blit,
             metal::sel_registerName("copyFromTexture:sourceSlice:"
-                                    "sourceLevel:toBuffer:"
+                                    "sourceLevel:sourceOrigin:"
+                                    "sourceSize:toBuffer:"
                                     "destinationOffset:"
                                     "destinationBytesPerRow:"
-                                    "destinationBytesPerImage:"
-                                    "sourceOrigin:sourceSize:"),
+                                    "destinationBytesPerImage:"),
             volume->texture(), static_cast<NSUInteger>(sliceLayer), 0u,
-            staging, 0u, 0u, 0u, metal::MTLOrigin{0, 0, 0},
-            metal::MTLSize{volume->width(), volume->height(), 1});
+            metal::MTLOrigin{0, 0, 0},
+            metal::MTLSize{volume->width(), volume->height(), 1},
+            staging, 0u, 0u, 0u);
         metal::msgSendVoid(blit, metal::sel_registerName("endEncoding"));
         metal::msgSendVoid(commandBuffer,
                            metal::sel_registerName("commit"));
@@ -1166,7 +1325,7 @@ struct MetalRenderBackend::Impl
             queue, metal::sel_registerName("commandBuffer"));
         void* blit = metal::msgSend0(copy,
                                      metal::sel_registerName(
-                                         "blitEncoder"));
+                                         "blitCommandEncoder"));
         using Fn = void (*)(void*, void*, metal::MTLTextureHandle,
                             NSUInteger, NSUInteger, metal::MTLOrigin,
                             metal::MTLSize, metal::MTLTextureHandle,
@@ -1305,9 +1464,9 @@ void MetalRenderBackend::initialise()
             impl.layer, metal::sel_registerName("setDrawableSize:"),
             drawableSize);
     }
-    // The default framebuffer's depth attachment (the pick runs once:
-    // Depth24Unorm_Stencil8 on macOS, Depth32Float_Stencil8 where the
-    // packed format is unavailable).
+    // The default framebuffer's depth attachment (the pick runs once,
+    // the device's own answer: the packed 24-bit format where the
+    // device supports it, Depth32Float_Stencil8 where it does not).
     impl.depthFormat = impl.pickDepthFormat();
     impl.swapchainDepthTexture = impl.createTexture(
         impl.depthFormat, impl.config.width, impl.config.height, 1,
@@ -1325,7 +1484,8 @@ void MetalRenderBackend::initialise()
     impl.sharedSampler = impl.createSharedSampler();
     if (impl.sharedSampler == nullptr)
     {
-        const std::string message("newSamplerState failed");
+        const std::string message(
+            "newSamplerStateWithDescriptor failed");
         SDL_DestroyWindow(impl.window);
         impl.window = nullptr;
         sdlVideoRelease();

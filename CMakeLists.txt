@@ -62,13 +62,18 @@ set(GRACE_SDK_CMAKE_ARGS
     -DCMAKE_BUILD_TYPE=Release
     -DCMAKE_INSTALL_PREFIX=${GRACE_THIRD_PARTY}
     -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
-    -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
-    # glibc 2.42+ made bsearch a C23 const-preserving macro, and GCC 15
-    # flags SDL 2.30's SDL_qsort.c use of it with -Wdiscarded-qualifiers.
-    # The SDK builds are third-party code outside the engine's warning
-    # set, so the qualifier warning is relaxed there instead of patching
-    # the pinned sources.
-    -DCMAKE_C_FLAGS=-Wno-discarded-qualifiers)
+    -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER})
+# glibc 2.42+ made bsearch a C23 const-preserving macro, and GCC 15
+# flags SDL 2.30's SDL_qsort.c use of it with -Wdiscarded-qualifiers.
+# The SDK builds are third-party code outside the engine's warning
+# set, so the qualifier warning is relaxed there instead of patching
+# the pinned sources. The flag is GCC-only: AppleClang does not know
+# it and its "unknown warning option" note poisons the SDK builds'
+# flag checks (SDL 2.30's configure fails its -fobjc-arc probe), so
+# the relaxation only applies to the GNU compilers.
+if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
+    list(APPEND GRACE_SDK_CMAKE_ARGS -DCMAKE_C_FLAGS=-Wno-discarded-qualifiers)
+endif()
 if(CMAKE_TOOLCHAIN_FILE)
     # A cross-compile's toolchain file must reach the SDK builds, or they
     # configure for the build host and the engine's link fails at the
@@ -539,6 +544,19 @@ if(GRACE_ENABLE_OPENGL OR GRACE_ENABLE_VULKAN OR GRACE_ENABLE_METAL)
         target_link_libraries(SDL2::SDL2 INTERFACE
             user32 gdi32 winmm imm32 ole32 oleaut32 version uuid
             advapi32 setupapi shell32)
+    elseif(APPLE)
+        # A static SDL2 on macOS needs the Apple frameworks that the SDL2
+        # CMake build records as its own dependencies; the SDL2::SDL2
+        # imported target it exports does not carry that list, so the
+        # engine's link would fail with undefined NSWindow/IOHID symbols.
+        target_link_libraries(SDL2::SDL2 INTERFACE
+            "-Wl,-framework,Cocoa" "-Wl,-framework,Carbon"
+            "-Wl,-framework,Foundation" "-Wl,-framework,CoreVideo"
+            "-Wl,-framework,CoreAudio" "-Wl,-framework,AudioToolbox"
+            "-Wl,-framework,AVFoundation" "-Wl,-framework,IOKit"
+            "-Wl,-framework,ForceFeedback"
+            "-Wl,-weak_framework,Metal" "-Wl,-weak_framework,QuartzCore"
+            "-Wl,-weak_framework,GameController" "-Wl,-weak_framework,CoreHaptics")
     endif()
 endif()
 

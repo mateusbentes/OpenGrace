@@ -14,8 +14,9 @@ namespace metal {
 /// Metal module only, the same scoping rule the OpenGL and the Vulkan
 /// backends follow). Rgba16F maps onto RGBA16Float, R8 onto R8Unorm; the
 /// depth/stencil pair maps onto the platform's depth format (the pick
-/// runs at initialise time; Depth24Unorm_Stencil8 is macOS only,
-/// Depth32Float_Stencil8 covers both). Declared here so the mapping
+/// runs at initialise time; Depth24Unorm_Stencil8 where the device
+/// supports it, Depth32Float_Stencil8 where it does not). Declared here
+/// so the mapping
 /// tests (which run on every platform) can call it directly.
 MTLPixelFormat toMtlFormat(grace::render::PixelFormat format);
 /// One Metal shader program: the MSL source strings of its two stages plus

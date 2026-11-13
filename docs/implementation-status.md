@@ -1385,9 +1385,13 @@ grep -rn 'GLuint\|GLenum\|SDL_\|Window' include/grace/render/render_backend.hpp 
     Presentation goes through SDL's CAMetalLayer bridge: the drawable
     is the frame's colour attachment, and there is no acquire/recreate
     semaphore dance to map. The depth attachment format is picked once
-    at initialise time: Depth24Unorm_Stencil8 on macOS,
-    Depth32Float_Stencil8 where the packed 24-bit format does not
-    exist (iOS 9.0+). The uniform staging buffer and the sampler
+    at initialise time: the device answers the published
+    isDepth24Stencil8PixelFormatSupported getter (macOS 10.11+) and
+    Depth24Unorm_Stencil8 is used where the device answers yes, the
+    Depth32Float_Stencil8 fallback where it does not (the packed
+    format is unavailable on iOS and on the Apple Silicon GPUs, and
+    the Intel/AMD Macs that do support it keep it). The uniform
+    staging buffer and the sampler
     layout table are shared with the Vulkan library — one std140
     table, two shading languages stating the same offsets. **The
     validation scope is recorded honestly**: this environment has no
