@@ -227,8 +227,8 @@ GL 3.2, so "3.0 core" is not a valid request.
 | Android | Vulkan (decision 43), cross-compiled with NDK r27c; not executed on hardware | See 4.3 of the architecture document |
 | Consoles | Not implemented | Out of scope by decision |
 | "Fast SSE math library" | Scalar math, compiler autovectorisation | Hand-written intrinsics usually lose to the autovectoriser today and complicate the code substantially. Revisit only if profiling shows a need. |
-| Network-based editors and tools | Deferred | Not required for engine milestones |
-| Stereoscopic 3D | Deferred | No target hardware path in scope |
+| Network-based editors and tools | Planned as a possible future milestone | Tooling, not the engine; the runtime loads all data through the resource container |
+| Stereoscopic 3D | Out of scope (decision 50) | No target hardware path exists; the original targeted 3D Vision-era displays |
 
 ---
 
@@ -1438,7 +1438,7 @@ grep -rn 'GLuint\|GLenum\|SDL_\|Window' include/grace/render/render_backend.hpp 
     not here: GPU-side compressed sampling (the backends can carry
     the formats; the engine's own texture path is the RGBA8 decoder
     feeding the existing fill calls), the stereoscopic 3D output
-    (deferred, as recorded in the target mapping), and the localisation
+    (out of scope, decision 50), and the localisation
     beyond the UTF-8 the UI contract already carries (decision 48).
 
 49. **Audio platform backends: XAudio2 on Windows and OpenSL ES on
@@ -1472,6 +1472,19 @@ grep -rn 'GLuint\|GLenum\|SDL_\|Window' include/grace/render/render_backend.hpp 
     MultiStream backend of the original's PlayStation 3 row (the platform
     is not a target of this project) and the native reverb chains of the
     two new platforms (recorded as future extensions) (decision 49).
+
+50. **Stereoscopic 3D and the editors' scope.** The original's feature
+    list names stereoscopic 3D output (architecture section 3.1) and
+    more than a dozen editors with network-based tools (section 3.11).
+    The stereoscopic 3D output is out of scope: its target hardware
+    (3D Vision-era quad-buffer displays and shutter glasses) no longer
+    exists in any form this project can validate, and an engine feature
+    whose behaviour cannot be measured would contradict the project's
+    validation discipline. The editors and network tools are tooling,
+    not the engine — the runtime loads all data through the OWD
+    resource container — so they are recorded as a possible future
+    milestone rather than an engine milestone, and the engine itself is
+    complete without them (decision 50).
 
 ## Verification commands
 

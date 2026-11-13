@@ -234,8 +234,8 @@ run executed on the Apple A18 Pro.
 | OpenAL / OpenSL / XAudio2 / MultiStream | Plugin contract preserved; OpenAL Soft on Linux, XAudio2 on Windows, OpenSL ES on Android (milestone 22). MultiStream (PlayStation 3) out of scope. |
 | AngelScript + Tetragramaton | Both reimplemented as engine services. |
 | Resource manager | Container of this project's own over DEFLATE payloads; see 4.4. |
-| Editors and network tools | Deferred; out of scope for the first milestones. |
-| Stereoscopic 3D | Deferred. |
+| Editors and network tools | Planned as a possible future milestone. |
+| Stereoscopic 3D | Out of scope (decision 50). |
 
 ### 4.1 Physics decision
 
