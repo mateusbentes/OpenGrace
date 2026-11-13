@@ -325,6 +325,7 @@ add_library(grace_core STATIC
     src/core/curves.cpp
     src/core/tasks.cpp
     src/core/profiler.cpp
+    src/core/tween.cpp
     src/core/compressed_textures.cpp)
 
 target_include_directories(grace_core PUBLIC

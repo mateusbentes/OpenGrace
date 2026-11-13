@@ -324,6 +324,15 @@ shader step. The hardware run has executed on the Apple A18 Pro: the
 31 checks with 0 failures; the validation recorded is the Linux compile,
 the pure mapping tests and the real-device run.
 
+The 2D texture path (milestone 23, decision 51) adds the standalone 2D
+texture resource — create, fill, sample, read back — on the null, OpenGL,
+Vulkan and Metal backends, the Sprite2D shader program (a textured quad in
+NDC space with the tint colour and amount) on the shader libraries of the
+three shader languages, and the procedural tween in the core library (the
+Ease set, the scalar Tween and the two-component Tween2). The 2D texture
+contract runs in the shared contract checks on every backend, and the
+new test_tween suite proves the easing endpoints and the tween lifecycle.
+
 Windows is expected to be a small change rather than a port. The window and the
 context come from SDL2, the render contract is API-neutral, and the OpenGL entry
 points are resolved at runtime through `SDL_GL_GetProcAddress` rather than being

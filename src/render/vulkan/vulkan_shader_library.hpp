@@ -1252,6 +1252,41 @@ void main()
 }
 )";
 
+// kSprite2DVertexShader
+//   offset   0 size 64 mat4 mvp
+constexpr const char* kSprite2DVertexShader = R"(
+#version 450 core
+layout(set = 0, binding = 0, std140) uniform Block
+{
+    mat4 mvp;
+};
+layout(location = 0) in vec3 position;
+layout(location = 2) in vec2 uv;
+layout(location = 0) out vec2 vUv;
+void main()
+{
+    vUv = uv;
+    gl_Position = mvp * vec4(position, 1.0);
+}
+)";
+
+// kSprite2DFragmentShader
+//   offset   0 size 16 vec4 color
+constexpr const char* kSprite2DFragmentShader = R"(
+#version 450 core
+layout(set = 0, binding = 0, std140) uniform Block
+{
+    vec4 color;
+};
+layout(set = 0, binding = 1) uniform sampler2D srcTex;
+layout(location = 0) in vec2 vUv;
+layout(location = 0) out vec4 fragment;
+void main()
+{
+    vec4 texel = texture(srcTex, vUv);
+    fragment = texel * color;
+}
+)";
 // kPostDOFFragmentShader
 //   offset   0 size 64 mat4 invProj
 //   offset  64 size  8 vec2 outSize
@@ -1914,7 +1949,18 @@ constexpr ShaderBlockLayout::Member kPostBlitFragmentShaderMembers[] = {
 constexpr ShaderSampler kPostBlitFragmentShaderSamplers[] = {
     {"srcTex", 1, 1, 0, 1},
 };
-
+constexpr ShaderBlockLayout::Member kSprite2DVertexShaderMembers[] = {
+    {"mvp", "mat4", 0, 64},
+};
+constexpr ShaderSampler kSprite2DVertexShaderSamplers[] = {
+    {nullptr, 0, 0, 0, 0},
+};
+constexpr ShaderBlockLayout::Member kSprite2DFragmentShaderMembers[] = {
+    {"color", "vec4", 0, 16},
+};
+constexpr ShaderSampler kSprite2DFragmentShaderSamplers[] = {
+    {"srcTex", 1, 1, 0, 1},
+};
 constexpr ShaderBlockLayout::Member kPostDOFFragmentShaderMembers[] = {
     {"invProj", "mat4", 0, 64},
     {"outSize", "vec2", 64, 8},
@@ -2150,6 +2196,20 @@ constexpr ShaderLayoutEntry kShaderLayouts[] = {
         kPostBlitFragmentShaderMembers,
         0,
         kPostBlitFragmentShaderSamplers,
+        1,
+    },
+    {
+        "kSprite2DVertexShader",
+        kSprite2DVertexShaderMembers,
+        1,
+        kSprite2DVertexShaderSamplers,
+        0,
+    },
+    {
+        "kSprite2DFragmentShader",
+        kSprite2DFragmentShaderMembers,
+        1,
+        kSprite2DFragmentShaderSamplers,
         1,
     },
     {

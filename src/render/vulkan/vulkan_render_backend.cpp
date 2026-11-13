@@ -158,6 +158,15 @@ vulkan::VkTexture3DView* findVkVolume(
     return nullptr;
 }
 
+vulkan::VkTexture2DView* findVkTexture2D(
+    std::vector<std::unique_ptr<vulkan::VkTexture2DView>>& textures,
+    const TextureView* view)
+{
+    for (auto& candidate : textures)
+        if (candidate.get() == view && !candidate->released)
+            return candidate.get();
+    return nullptr;
+}
 /// Turns a clear-mask into the Vulkan clear value's colour loadOp.
 vulkan::AttachmentLoadOp colorLoadOp(std::uint32_t clear_mask)
 {
@@ -365,6 +374,11 @@ struct VulkanRenderBackend::Impl
         vulkan::VkDeviceMemory memory = nullptr;
     };
     std::map<const TextureView*, VolumeResources> volumeResources;
+    // Per-2D-texture device objects: the same lifetime rule as the
+    // volumes, minus the layer targets (a 2D texture has no borrowers,
+    // so the erase is immediate).
+    std::map<const TextureView*, VolumeResources> texture2dResources;
+    std::vector<std::unique_ptr<vulkan::VkTexture2DView>> textures2d;
     // The texture views bound to sampler units at draw time. The draw's
     // descriptor set write binds them at the sampler binding the shader's
     // layout table declares.
@@ -1052,20 +1066,28 @@ struct VulkanRenderBackend::Impl
         stages[1].pName = "main";
         // The engine's meshes store position at location 0 with a
         // 3-float stride (the layout the FlatUnlit vertex shader reads).
+        // The 2D draw path (Sprite2D) reads a second attribute (uv at
+        // location 2, offset 12), so the vertex stride is 20 bytes.
+        const bool sprite2d = program->isSprite2D();
         vulkan::VkVertexInputBindingDescription vertexBinding{};
         vertexBinding.binding = 0;
-        vertexBinding.stride = 3 * sizeof(float);
+        vertexBinding.stride = sprite2d ? 5 * sizeof(float)
+                                        : 3 * sizeof(float);
         vertexBinding.inputRate = vulkan::VertexInputRate::Vertex;
-        vulkan::VkVertexInputAttributeDescription vertexAttribute{};
-        vertexAttribute.location = 0;
-        vertexAttribute.binding = 0;
-        vertexAttribute.format = vulkan::Format::R32G32B32Sfloat;
-        vertexAttribute.offset = 0;
+        vulkan::VkVertexInputAttributeDescription vertexAttributes[2]{};
+        vertexAttributes[0].location = 0;
+        vertexAttributes[0].binding = 0;
+        vertexAttributes[0].format = vulkan::Format::R32G32B32Sfloat;
+        vertexAttributes[0].offset = 0;
+        vertexAttributes[1].location = 2;
+        vertexAttributes[1].binding = 0;
+        vertexAttributes[1].format = vulkan::Format::Rg32Sfloat;
+        vertexAttributes[1].offset = 12;
         vulkan::VkPipelineVertexInputStateCreateInfo vertexInput{};
         vertexInput.vertexBindingDescriptionCount = 1;
         vertexInput.pVertexBindingDescriptions = &vertexBinding;
-        vertexInput.vertexAttributeDescriptionCount = 1;
-        vertexInput.pVertexAttributeDescriptions = &vertexAttribute;
+        vertexInput.vertexAttributeDescriptionCount = sprite2d ? 2 : 1;
+        vertexInput.pVertexAttributeDescriptions = vertexAttributes;
         vulkan::VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
         inputAssembly.topology = vulkan::PrimitiveTopology::TriangleList;
         vulkan::VkPipelineViewportStateCreateInfo viewportState{};
@@ -1874,6 +1896,163 @@ struct VulkanRenderBackend::Impl
         (void)backend;
     }
 
+    /// Creates the device objects of one 2D texture (milestone 23): a
+    /// VK_IMAGE_TYPE_2D image with the same usage flags as a volume, plus
+    /// the sampler view the drawMesh descriptor write binds.
+    void createTexture2DResources(VulkanRenderBackend& backend,
+                                  vulkan::VkTexture2DView* texture)
+    {
+        VolumeResources& res = texture2dResources[texture];
+        const Texture2DDesc& desc = texture->desc();
+        res.image = createVolumeImage(
+            toVkFormat(desc.format), desc.width, desc.height, 1,
+            static_cast<vulkan::VkFlags>(vulkan::ImageUsage::TransferDst
+                                         | vulkan::ImageUsage::TransferSrc));
+        vulkan::VkMemoryRequirements requirements{};
+        loader.vkGetImageMemoryRequirements(device, res.image, &requirements);
+        res.memory = allocateMemoryFor(
+            requirements.memoryTypeBits,
+            static_cast<std::size_t>(requirements.size),
+            vulkan::MemoryProperty::DeviceLocal);
+        loader.vkBindImageMemory(device, res.image, res.memory, 0);
+        texture->setImage(res.image);
+        vulkan::VkImageViewCreateInfo viewInfo{};
+        viewInfo.image = res.image;
+        viewInfo.viewType = vulkan::ImageType::Type2D;
+        viewInfo.format = toVkFormat(desc.format);
+        viewInfo.components = vulkan::VkComponentMapping{};
+        viewInfo.subresourceRange.aspectMask = vulkan::ImageAspect::Color;
+        viewInfo.subresourceRange.levelCount = 1;
+        viewInfo.subresourceRange.layerCount = 1;
+        if (loader.vkCreateImageView(device, &viewInfo, nullptr, &res.view)
+            != vulkan::Result::Success)
+            throw std::runtime_error(
+                "VulkanRenderBackend: vkCreateImageView (2D) failed");
+        transitionImageLayout(res.image, toVkFormat(desc.format),
+                              vulkan::ImageAspect::Color,
+                              vulkan::ImageLayout::Undefined,
+                              vulkan::ImageLayout::General);
+        (void)backend;
+    }
+    /// Releases the device objects of one 2D texture.
+    void destroyTexture2DResources(VulkanRenderBackend& backend,
+                                   vulkan::VkTexture2DView* texture)
+    {
+        auto it = texture2dResources.find(texture);
+        if (it == texture2dResources.end())
+            return;
+        if (it->second.view != nullptr)
+            loader.vkDestroyImageView(device, it->second.view, nullptr);
+        loader.vkDestroyImage(device, it->second.image, nullptr);
+        for (auto block = memory_blocks.begin();
+             block != memory_blocks.end(); ++block)
+        {
+            if (*block == it->second.memory)
+            {
+                memory_blocks.erase(block);
+                break;
+            }
+        }
+        loader.vkFreeMemory(device, it->second.memory, nullptr);
+        texture2dResources.erase(it);
+        (void)backend;
+    }
+    /// Fills the whole 2D texture from the caller's buffer (the same
+    /// staging-buffer copy the volume's layer fill uses, with the whole
+    /// image as the region).
+    void fillTexture2DImage(VulkanRenderBackend& backend,
+                            vulkan::VkTexture2DView* texture,
+                            const void* data, std::size_t sizeBytes)
+    {
+        vulkan::VkBuffer stagingBuffer = nullptr;
+        vulkan::VkDeviceMemory stagingMemory = nullptr;
+        createHostBuffer(
+            static_cast<vulkan::VkFlags>(
+                vulkan::BufferUsage::TransferSrc),
+            sizeBytes, stagingBuffer, stagingMemory);
+        void* mapped = nullptr;
+        loader.vkMapMemory(device, stagingMemory, 0, sizeBytes, 0, &mapped);
+        std::memcpy(mapped, data, sizeBytes);
+        loader.vkUnmapMemory(device, stagingMemory);
+        vulkan::VkBufferImageCopy region{};
+        region.bufferOffset = 0;
+        region.bufferRowLength = 0;
+        region.bufferImageHeight = 0;
+        region.imageSubresource.aspectMask = vulkan::ImageAspect::Color;
+        region.imageSubresource.mipLevel = 0;
+        region.imageSubresource.baseArrayLayer = 0;
+        region.imageSubresource.layerCount = 1;
+        region.imageOffset = {0, 0, 0};
+        region.imageExtent = {texture->width(), texture->height(), 1};
+        vulkan::VkCommandBuffer oneOff = beginOneOff();
+        transitionImageLayout(texture->image(), toVkFormat(texture->format()),
+                              vulkan::ImageAspect::Color,
+                              vulkan::ImageLayout::Undefined,
+                              vulkan::ImageLayout::TransferDstOptimal);
+        loader.vkCmdCopyBufferToImage(oneOff, stagingBuffer,
+                                      texture->image(),
+                                      vulkan::ImageLayout::TransferDstOptimal,
+                                      1, &region);
+        transitionImageLayout(texture->image(), toVkFormat(texture->format()),
+                              vulkan::ImageAspect::Color,
+                              vulkan::ImageLayout::TransferDstOptimal,
+                              vulkan::ImageLayout::General);
+        loader.vkEndCommandBuffer(oneOff);
+        vulkan::VkSubmitInfo submit{};
+        submit.commandBufferCount = 1;
+        submit.pCommandBuffers = &oneOff;
+        loader.vkQueueSubmit(queue, 1, &submit, nullptr);
+        loader.vkQueueWaitIdle(queue);
+        (void)backend;
+    }
+    /// Reads the whole 2D texture back into the caller's buffer (the same
+    /// staging-buffer copy the volume's layer read uses).
+    bool readTexture2DImage(VulkanRenderBackend& backend,
+                            vulkan::VkTexture2DView* texture,
+                            void* data, std::size_t sizeBytes)
+    {
+        vulkan::VkBuffer readBuffer = nullptr;
+        vulkan::VkDeviceMemory readMemory = nullptr;
+        createHostBuffer(
+            static_cast<vulkan::VkFlags>(
+                vulkan::BufferUsage::TransferDst),
+            sizeBytes, readBuffer, readMemory);
+        vulkan::VkBufferImageCopy region{};
+        region.bufferOffset = 0;
+        region.bufferRowLength = 0;
+        region.bufferImageHeight = 0;
+        region.imageSubresource.aspectMask = vulkan::ImageAspect::Color;
+        region.imageSubresource.mipLevel = 0;
+        region.imageSubresource.baseArrayLayer = 0;
+        region.imageSubresource.layerCount = 1;
+        region.imageOffset = {0, 0, 0};
+        region.imageExtent = {texture->width(), texture->height(), 1};
+        transitionImageLayout(texture->image(), toVkFormat(texture->format()),
+                              vulkan::ImageAspect::Color,
+                              vulkan::ImageLayout::General,
+                              vulkan::ImageLayout::TransferSrcOptimal);
+        vulkan::VkCommandBuffer oneOff = beginOneOff();
+        loader.vkCmdCopyImageToBuffer(oneOff, texture->image(),
+                                      vulkan::ImageLayout::TransferSrcOptimal,
+                                      readBuffer, 1, &region);
+        loader.vkEndCommandBuffer(oneOff);
+        vulkan::VkSubmitInfo submit{};
+        submit.commandBufferCount = 1;
+        submit.pCommandBuffers = &oneOff;
+        loader.vkQueueSubmit(queue, 1, &submit, nullptr);
+        loader.vkQueueWaitIdle(queue);
+        transitionImageLayout(texture->image(), toVkFormat(texture->format()),
+                              vulkan::ImageAspect::Color,
+                              vulkan::ImageLayout::TransferSrcOptimal,
+                              vulkan::ImageLayout::General);
+        void* mapped = nullptr;
+        loader.vkMapMemory(device, readMemory, 0, sizeBytes, 0, &mapped);
+        std::memcpy(data, mapped, sizeBytes);
+        loader.vkUnmapMemory(device, readMemory);
+        loader.vkDestroyBuffer(device, readBuffer, nullptr);
+        (void)backend;
+        return true;
+    }
     /// Copies one depth attachment onto another (vkCmdCopyImage of the
     /// depth aspects; the two targets must be the same size and the same
     /// format, the same rejection the OpenGL backend makes).
@@ -1997,11 +2176,19 @@ struct VulkanRenderBackend::Impl
                             dynamic_cast<const vulkan::VkTextureView*>(view))
                         imageView = vkView->imageView();
                     else if (const auto* volume =
-                                 dynamic_cast<const vulkan::VkTexture3DView*>(
-                                     view))
+                                dynamic_cast<const vulkan::VkTexture3DView*>(
+                                    view))
                     {
                         const auto it = volumeResources.find(volume);
                         if (it != volumeResources.end())
+                            imageView = it->second.view;
+                    }
+                    else if (const auto* texture =
+                                 dynamic_cast<const vulkan::VkTexture2DView*>(
+                                     view))
+                    {
+                        const auto it = texture2dResources.find(texture);
+                        if (it != texture2dResources.end())
                             imageView = it->second.view;
                     }
                 }
@@ -2792,6 +2979,8 @@ void VulkanRenderBackend::shutdownImpl(bool countViolation)
     impl.volumeResources.clear();
     impl.targets.clear();
     impl.volumes.clear();
+    impl.texture2dResources.clear();
+    impl.textures2d.clear();
     for (vulkan::VkFramebuffer framebuffer : impl.swapchainFramebuffers)
         impl.loader.vkDestroyFramebuffer(impl.device, framebuffer, nullptr);
     impl.swapchainFramebuffers.clear();
@@ -3372,6 +3561,126 @@ bool VulkanRenderBackend::readTexture3D(const TextureView* view,
         return false;
     }
     return impl.readVolumeLayer(*this, volume, layer, data, sizeBytes);
+}
+
+TextureView* VulkanRenderBackend::createTexture2D(const Texture2DDesc& desc)
+{
+    Impl& impl = *m_impl;
+    validateTexture2DDesc(desc);
+    if (!impl.ready())
+    {
+        ++impl.violations;
+        throw std::logic_error(
+            "VulkanRenderBackend::createTexture2D: not initialised");
+    }
+    auto texture = std::make_unique<vulkan::VkTexture2DView>(desc);
+    vulkan::VkTexture2DView* raw = texture.get();
+    impl.createTexture2DResources(*this, raw);
+    impl.textures2d.push_back(std::move(texture));
+    return raw;
+}
+
+void VulkanRenderBackend::releaseTexture2D(TextureView* view)
+{
+    Impl& impl = *m_impl;
+    if (!impl.ready())
+    {
+        ++impl.violations;
+        return;
+    }
+    vulkan::VkTexture2DView* known =
+        findVkTexture2D(impl.textures2d, view);
+    if (known == nullptr)
+    {
+        ++impl.violations;
+        return;
+    }
+    // The registry entry is destroyed with the view: a sampler unit still
+    // bound to it would be a dangling pointer at draw time, so the bound
+    // slots are cleared along with the release.
+    for (auto& bound : impl.boundTextures)
+        if (bound == known)
+            bound = nullptr;
+    impl.destroyTexture2DResources(*this, known);
+    for (auto it = impl.textures2d.begin(); it != impl.textures2d.end(); ++it)
+    {
+        if (it->get() == known)
+        {
+            impl.textures2d.erase(it);
+            break;
+        }
+    }
+}
+
+void VulkanRenderBackend::bindTexture2D(const TextureView* view,
+                                        std::uint32_t unit)
+{
+    Impl& impl = *m_impl;
+    if (!impl.ready() || view == nullptr)
+    {
+        ++impl.violations;
+        return;
+    }
+    const auto* vkView =
+        dynamic_cast<const vulkan::VkTexture2DView*>(view);
+    if (vkView == nullptr)
+    {
+        ++impl.violations;  // a volume or an attachment view is not a 2D texture
+        return;
+    }
+    if (unit < impl.boundTextures.size())
+        impl.boundTextures[unit] = vkView;
+    else
+        impl.boundTextures.resize(unit + 1, nullptr);
+    if (impl.boundTextures[unit] == nullptr)
+        impl.boundTextures[unit] = vkView;
+}
+
+void VulkanRenderBackend::fillTexture2D(TextureView* view,
+                                        const void* data,
+                                        std::size_t sizeBytes)
+{
+    Impl& impl = *m_impl;
+    if (!impl.ready())
+    {
+        ++impl.violations;
+        return;
+    }
+    vulkan::VkTexture2DView* texture =
+        findVkTexture2D(impl.textures2d, view);
+    if (texture == nullptr)
+        throw std::invalid_argument(
+            "fillTexture2D: view is not a 2D texture of this backend");
+    if (texture->released)
+    {
+        ++impl.violations;
+        return;
+    }
+    if (sizeBytes != texture->textureBytes())
+        throw std::invalid_argument(
+            "fillTexture2D: byte count does not match the texture");
+    impl.fillTexture2DImage(*this, texture, data, sizeBytes);
+}
+
+bool VulkanRenderBackend::readTexture2D(const TextureView* view,
+                                        void* data,
+                                        std::size_t sizeBytes)
+{
+    Impl& impl = *m_impl;
+    if (!impl.ready())
+    {
+        ++impl.violations;
+        return false;
+    }
+    vulkan::VkTexture2DView* texture =
+        findVkTexture2D(impl.textures2d, view);
+    if (texture == nullptr || texture->released
+        || sizeBytes != texture->textureBytes())
+    {
+        ++impl.violations;
+        return false;
+    }
+    return impl.readTexture2DImage(*this, texture, data, sizeBytes);
 }
 
 RenderTarget* VulkanRenderBackend::createVolumeLayerTarget(

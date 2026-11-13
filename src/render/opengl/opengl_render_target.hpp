@@ -141,4 +141,49 @@ private:
     GLuint m_texture = 0;
 };
 
+/// 2D texture of the OpenGL backend (milestone 23): a standalone GL_TEXTURE_2D
+/// the application fills with CPU bytes and the 2D draw path samples. The
+/// volume's one-layer form; the same nearest/clamp sampling state, the same
+/// byte counting, the same scratch-unit read rule.
+class GlTexture2DView final : public TextureView
+{
+public:
+    GlTexture2DView(GlLoader& gl, const Texture2DDesc& desc);
+    ~GlTexture2DView() override;
+
+    GlTexture2DView(const GlTexture2DView&) = delete;
+    GlTexture2DView& operator=(const GlTexture2DView&) = delete;
+
+    std::uint32_t width() const noexcept override { return m_desc.width; }
+    std::uint32_t height() const noexcept override { return m_desc.height; }
+    PixelFormat format() const noexcept override { return m_desc.format; }
+    bool isDepth() const noexcept override { return false; }
+
+    GLuint textureId() const noexcept { return m_texture; }
+    /// Set by releaseTexture2D: the view is dead but the view object stays
+    /// alive (backend-owned registry, the same lifetime rule the volumes
+    /// follow).
+    bool released = false;
+    std::size_t textureBytes() const noexcept
+    {
+        return static_cast<std::size_t>(m_desc.width) * m_desc.height
+            * bytesPerPixel(m_desc.format);
+    }
+
+    /// Replaces the texture's bytes. Throws std::invalid_argument on a bad
+    /// size, the same rejection the null backend makes, and std::runtime_error
+    /// when the driver reports an error.
+    void upload(const void* data, std::size_t sizeBytes);
+
+    /// Reads the texture's bytes back through glGetTexImage, bound to a
+    /// scratch unit so sampling state is untouched (the same rule the volume's
+    /// readSlice applies).
+    void read(void* data, std::size_t sizeBytes) const;
+
+private:
+    GlLoader& m_gl;
+    Texture2DDesc m_desc;
+    GLuint m_texture = 0;
+};
+
 }  // namespace grace::render::opengl

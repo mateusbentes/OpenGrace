@@ -1315,6 +1315,54 @@ fragment float4 fragmentMain(VertexOut in [[stage_in]],
 }
 )";
 
+// kSprite2DVertexShader
+//   offset   0 size 64 mat4 mvp
+constexpr const char* kSprite2DVertexShader = R"(
+#include <metal_stdlib>
+using namespace metal;
+struct Uniforms
+{
+    float4x4 mvp;
+};
+struct VertexOut
+{
+    float4 position [[position]];
+    float2 uv;
+};
+vertex VertexOut vertexMain(float3 position [[attribute(0)]],
+                            float2 uv [[attribute(2)]],
+                            constant Uniforms& u [[buffer(0)]])
+{
+    VertexOut out;
+    out.position = u.mvp * float4(position, 1.0);
+    out.uv = uv;
+    return out;
+}
+)";
+
+// kSprite2DFragmentShader
+//   offset   0 size 16 vec4 color
+constexpr const char* kSprite2DFragmentShader = R"(
+#include <metal_stdlib>
+using namespace metal;
+struct Uniforms
+{
+    float4 color;
+};
+struct VertexOut
+{
+    float4 position [[position]];
+    float2 uv;
+};
+fragment float4 fragmentMain(VertexOut in [[stage_in]],
+                             constant Uniforms& u [[buffer(0)]],
+                             texture2d<float> srcTex [[texture(1)]],
+                             sampler sharedSampler [[sampler(0)]])
+{
+    return srcTex.sample(sharedSampler, in.uv) * u.color;
+}
+)";
+
 }  // namespace metal
 }  // namespace render
 }  // namespace grace

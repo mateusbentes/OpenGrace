@@ -179,4 +179,36 @@ private:
     VkImage m_image = nullptr;
 };
 
+/// Standalone 2D texture of the Vulkan backend (milestone 23): one
+/// VK_IMAGE_TYPE_2D image plus a sampler view. The backend creates and
+/// fills the image; the lifetime rule is the volume's one without the
+/// layer targets (a 2D texture has no borrowers, so the erase is
+/// immediate).
+class VkTexture2DView final : public TextureView
+{
+public:
+    VkTexture2DView(const Texture2DDesc& desc) : m_desc(desc) {}
+
+    std::uint32_t width() const noexcept override { return m_desc.width; }
+    std::uint32_t height() const noexcept override { return m_desc.height; }
+    std::uint32_t depth() const noexcept override { return 1u; }
+    PixelFormat format() const noexcept override { return m_desc.format; }
+    bool isDepth() const noexcept override { return false; }
+
+    std::size_t textureBytes() const noexcept
+    {
+        return static_cast<std::size_t>(m_desc.width) * m_desc.height
+            * bytesPerPixel(m_desc.format);
+    }
+
+    const Texture2DDesc& desc() const noexcept { return m_desc; }
+    VkImage image() const noexcept { return m_image; }
+    void setImage(VkImage image) { m_image = image; }
+    bool released = false;
+
+private:
+    Texture2DDesc m_desc;
+    VkImage m_image = nullptr;
+};
+
 }  // namespace grace::render::vulkan

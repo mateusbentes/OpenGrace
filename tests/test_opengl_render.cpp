@@ -168,6 +168,19 @@ int main()
         "releaseRenderTarget",
         "createVolumeLayerTarget(layer=3)",  // layer out of range
         "setClearColor(1,2,3,4)",            // restored: the check leaves no trace
+        // 2D textures (milestone 23): create, fill, read, bind, then the
+        // rejections (volume bind, 2D-as-attachment bind, byte count) and the
+        // post-release fill refusal.
+        "createTexture2D(4x4)",
+        "fillTexture2D(bytes=64)",
+        "readTexture2D(bytes=64)",
+        "bindTexture2D(unit=0)",
+        "createTexture3D(4x4x3)",
+        "bindTexture2D(unit=0)",            // a volume is not a 2D texture
+        "bindTexture(unit=0,depth=0)",      // a standalone 2D texture is not an attachment
+        "readTexture2D(bytes=63)",          // byte count does not match
+        "releaseTexture2D",
+        "fillTexture2D(bytes=64)",          // post-release: refused (invalid_argument)
         "beginRenderPass(64x64)", "clear(1,2,3,4)", "draw", "use", "drawIndexed",
         "renderTargetTexture", "endRenderPass", "renderTargetTexture", "releaseRenderTarget",
         "beginRenderPass(unknown)", "renderTargetTexture", "beginRenderPass(unknown)",
@@ -222,7 +235,9 @@ int main()
     // 1 MRT + 5 misuse/over-budget + 2 depth-copy + 2 wrong-view binds + 5 post-shutdown
     // 1 MRT + 5 misuse/over-budget + 2 depth-copy + 2 wrong-view binds
     // + 2 refused volume reads + 5 post-shutdown
-    GRACE_CHECK_EQ(gl_backend->violationCount(), 17u);
+    // + 2D checks (milestone 23): volume-as-2D bind, 2D-as-attachment bind,
+    // refused byte count
+    GRACE_CHECK_EQ(gl_backend->violationCount(), 20u);
     GRACE_CHECK_EQ(gl_backend->glErrorCount(), 0u);
 
     return grace::test::summary("opengl_render");

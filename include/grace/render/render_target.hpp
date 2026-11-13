@@ -120,6 +120,26 @@ struct Texture3DDesc
 /// front with a specific message instead of failing later and less clearly.
 void validateTexture3DDesc(const Texture3DDesc& desc);
 
+/// Description of a standalone 2D texture (milestone 23): a resource the
+/// application creates, fills, samples and reads back. A volume is the
+/// milestone-7 form; this is the 2D form the 2D draw path samples. The depth
+/// is not a field here: a TextureView already reports depth() == 1 for a
+/// single-layer view, and the contract's own rule (that a one-layer view is a
+/// 2D attachment) is what bindsTexture reuses.
+struct Texture2DDesc
+{
+    std::uint32_t width = 0;
+    std::uint32_t height = 0;
+    PixelFormat format = PixelFormat::Rgba8;
+};
+
+/// Throws std::invalid_argument when a dimension is zero, or when the format
+/// is the 2D depth/stencil format (the same rejection validateTexture3DDesc
+/// makes: a depth/stencil resource is not a sampled colour texture on the
+/// backends the driver was measured for, and a specific message up front
+/// beats a GL_INVALID_OPERATION later).
+void validateTexture2DDesc(const Texture2DDesc& desc);
+
 /// One layer of a volume, as a render target the pass path already understands
 /// (milestone 7, second increment). A backend attaches this layer instead of
 /// allocating a 2D texture, so no second pass protocol is needed: the existing

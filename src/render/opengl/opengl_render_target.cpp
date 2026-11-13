@@ -279,4 +279,67 @@ void GlTexture3DView::readSlice(std::uint32_t layer, void* data, std::size_t siz
     std::memcpy(data, whole.data() + offset, sizeBytes);
 }
 
+// --- GlTexture2DView -------------------------------------------------------
+
+GlTexture2DView::GlTexture2DView(GlLoader& gl, const Texture2DDesc& desc)
+    : m_gl(gl), m_desc(desc)
+{
+    m_gl.glGenTextures(1, &m_texture);
+    m_gl.glBindTexture(GL_TEXTURE_2D, m_texture);
+    m_gl.glTexImage2D(GL_TEXTURE_2D, 0, toInternalFormat(m_desc.format),
+                      static_cast<GLsizei>(m_desc.width), static_cast<GLsizei>(m_desc.height), 0,
+                      toPixelFormat(m_desc.format), toPixelType(m_desc.format), nullptr);
+    m_gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    m_gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    m_gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    m_gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+}
+
+GlTexture2DView::~GlTexture2DView()
+{
+    if (m_texture != 0)
+    {
+        GLuint texture = m_texture;
+        m_gl.glDeleteTextures(1, &texture);
+        m_texture = 0;
+    }
+}
+
+void GlTexture2DView::upload(const void* data, std::size_t sizeBytes)
+{
+    if (sizeBytes != textureBytes())
+        throw std::invalid_argument(
+            "GlTexture2DView::upload: byte count does not match the texture");
+    // Row alignment 1 (the same measured rule the volume's uploadSlice
+    // applies): a single-channel texture whose row length is not a multiple
+    // of four bytes reads with the wrong stride under the default.
+    m_gl.glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    m_gl.glBindTexture(GL_TEXTURE_2D, m_texture);
+    m_gl.glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, static_cast<GLsizei>(m_desc.width),
+                         static_cast<GLsizei>(m_desc.height), toPixelFormat(m_desc.format),
+                         toPixelType(m_desc.format), data);
+    m_gl.glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+}
+
+void GlTexture2DView::read(void* data, std::size_t sizeBytes) const
+{
+    if (sizeBytes != textureBytes())
+        throw std::invalid_argument("GlTexture2DView::read: byte count does not match the texture");
+    // The scratch-unit rule the volume's readSlice applies: the active unit
+    // and its previous 2D binding are restored before returning.
+    constexpr GLenum kScratchUnit = GL_TEXTURE0 + 15;
+    GLint previous_unit = GL_TEXTURE0;
+    GLint previous_texture = 0;
+    m_gl.glGetIntegerv(GL_ACTIVE_TEXTURE, &previous_unit);
+    m_gl.glActiveTexture(kScratchUnit);
+    m_gl.glGetIntegerv(GL_TEXTURE_BINDING_2D, &previous_texture);
+    m_gl.glBindTexture(GL_TEXTURE_2D, m_texture);
+    m_gl.glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    m_gl.glGetTexImage(GL_TEXTURE_2D, 0, toPixelFormat(m_desc.format), toPixelType(m_desc.format),
+                       data);
+    m_gl.glPixelStorei(GL_PACK_ALIGNMENT, 4);
+    m_gl.glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(previous_texture));
+    m_gl.glActiveTexture(static_cast<GLenum>(previous_unit));
+}
+
 }  // namespace grace::render::opengl

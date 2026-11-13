@@ -75,6 +75,42 @@ private:
     std::vector<std::vector<std::byte>> m_slices;
 };
 
+/// 2D texture of the null backend: plain data, one byte vector, so a fill
+/// and a read round-trip the same values with no graphics API involved. The
+/// volume's one-layer form (milestone 23).
+class NullTexture2DView final : public TextureView
+{
+public:
+    explicit NullTexture2DView(const Texture2DDesc& desc)
+        : m_desc(desc), m_bytes(textureBytes(desc))
+    {
+    }
+
+    std::uint32_t width() const noexcept override { return m_desc.width; }
+    std::uint32_t height() const noexcept override { return m_desc.height; }
+    PixelFormat format() const noexcept override { return m_desc.format; }
+    bool isDepth() const noexcept override { return false; }
+
+    const Texture2DDesc& desc() const noexcept { return m_desc; }
+    /// The byte count fillTexture2D and readTexture2D require.
+    std::size_t textureBytes() const noexcept { return m_bytes.size(); }
+    std::vector<std::byte>& bytes() { return m_bytes; }
+    const std::vector<std::byte>& bytes() const { return m_bytes; }
+
+    static std::size_t textureBytes(const Texture2DDesc& desc) noexcept
+    {
+        return static_cast<std::size_t>(desc.width) * desc.height * bytesPerPixel(desc.format);
+    }
+
+    /// Set by releaseTexture2D. The view stays in the registry (the lifetime
+    /// rule the targets follow) and any later use is a violation.
+    bool released = false;
+
+private:
+    Texture2DDesc m_desc;
+    std::vector<std::byte> m_bytes;
+};
+
 /// Render target of the null backend: records its desc and release state.
 ///
 /// A second mode exists since milestone 7's second increment: a target that
@@ -221,6 +257,11 @@ public:
                        std::size_t sizeBytes) override;
     RenderTarget* createVolumeLayerTarget(TextureView* volume, std::uint32_t layer) override;
     void copyDepthAttachment(RenderTarget* source, RenderTarget* destination) override;
+    TextureView* createTexture2D(const Texture2DDesc& desc) override;
+    void bindTexture2D(const TextureView* view, std::uint32_t unit) override;
+    void fillTexture2D(TextureView* view, const void* data, std::size_t sizeBytes) override;
+    bool readTexture2D(const TextureView* view, void* data, std::size_t sizeBytes) override;
+    void releaseTexture2D(TextureView* view) override;
 
     void queueReadback(std::uint32_t x, std::uint32_t y) override;
     void readback() override;
@@ -246,9 +287,11 @@ private:
     void countViolation() noexcept { ++m_violations; }
     NullRenderTarget* findTarget(RenderTarget* target) const;
     NullTexture3DView* findVolume(TextureView* view) const;
+    NullTexture2DView* findTexture2D(const TextureView* view) const;
 
     std::vector<std::unique_ptr<NullRenderTarget>> m_targets;
     std::vector<std::unique_ptr<NullTexture3DView>> m_volumes;
+    std::vector<std::unique_ptr<NullTexture2DView>> m_textures2d;
     RenderTarget* m_bound_target = nullptr;
     CameraParams m_camera;
 

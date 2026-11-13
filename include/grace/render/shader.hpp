@@ -39,6 +39,11 @@ enum class ShaderProgramId : std::uint8_t
     VolumePropagate,    ///< volume: one propagation step, six face neighbours (7, fourth increment)
     PostSSAOStf,        ///< post: selective temporal filtering of the occlusion buffer
                         ///< (milestone 6g, decision 31) — camera-reprojection validated history
+    Sprite2D,           ///< 2D draw path: a textured quad in NDC space with a
+                        ///< tint colour and a tint amount (milestone 23). The
+                        ///< vertex stage passes the quad's corners through, the
+                        ///< fragment stage samples the bound texture and mixes
+                        ///< the tint in
 };
 
 /// Caches uniform locations by name so repeated sets do not re-query the

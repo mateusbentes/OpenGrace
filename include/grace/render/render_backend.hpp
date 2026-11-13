@@ -226,6 +226,47 @@ public:
     /// a configuration change could only leak it.
     virtual void releaseTexture3D(TextureView* view) = 0;
 
+    // -- 2D textures (milestone 23) ------------------------------------------
+    //
+    // A standalone 2D texture is the milestone-7 volume's 2D form: a resource
+    // the application creates, fills with CPU bytes, samples in the 2D draw
+    // path and reads back. The contract rules are the volume's, one layer
+    // wide: the same validation, the same byte counting, the same ownership
+    // (release invalidates the view, use after release is a violation).
+
+    /// Creates a standalone 2D texture and returns its view. Throws
+    /// std::invalid_argument on an invalid desc (a zero dimension or the
+    /// depth/stencil format, the same rejection a volume gets) and
+    /// std::logic_error when the backend is not initialised.
+    virtual TextureView* createTexture2D(const Texture2DDesc& desc) = 0;
+
+    /// Binds a standalone 2D texture for sampling on a texture unit. A view
+    /// that is not a 2D texture of this backend is a violation, as is a call
+    /// after shutdown. The distinction a real backend makes (GL_TEXTURE_2D
+    /// instead of GL_TEXTURE_3D) is the one bindTexture3D already records in
+    /// reverse: a one-layer view is a 2D texture, a multi-layer view is a
+    /// volume.
+    virtual void bindTexture2D(const TextureView* view, std::uint32_t unit) = 0;
+
+    /// Writes the texture's one layer: width * height * bytesPerPixel(format)
+    /// bytes in row-major order, rows top to bottom, no row padding (the same
+    /// order and rule a volume slice carries). Throws std::invalid_argument
+    /// when the byte count does not match. Calls after shutdown are protocol
+    /// violations.
+    virtual void fillTexture2D(TextureView* view, const void* data, std::size_t sizeBytes) = 0;
+
+    /// Reads the texture's one layer back into data, in the same order and
+    /// with the same size rule as fillTexture2D. Returns false and counts a
+    /// violation when the byte count does not match. This is the round trip
+    /// the 2D capability is proved with, the volume's round trip one layer
+    /// wide.
+    virtual bool readTexture2D(const TextureView* view, void* data, std::size_t sizeBytes) = 0;
+
+    /// Releases a texture created by createTexture2D. The view is invalid
+    /// after this call and any later use is a violation, the same ownership
+    /// rule releaseTexture3D states for volumes.
+    virtual void releaseTexture2D(TextureView* view) = 0;
+
     // -- Rendering into a volume (milestone 7, second increment) --------------
     //
     // A pass writes one layer of a volume. The result is a RenderTarget, so

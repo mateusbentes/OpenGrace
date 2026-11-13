@@ -89,6 +89,7 @@ bool GlLoader::load(ResolveFn resolve, std::string& missingSymbol)
     GRACE_GL_LOAD(glBindTexture, "glBindTexture");
     GRACE_GL_LOAD(glTexImage2D, "glTexImage2D");
     GRACE_GL_LOAD(glTexImage3D, "glTexImage3D");
+    GRACE_GL_LOAD(glTexSubImage2D, "glTexSubImage2D");
     GRACE_GL_LOAD(glTexSubImage3D, "glTexSubImage3D");
     GRACE_GL_LOAD(glGetTexImage, "glGetTexImage");
     GRACE_GL_LOAD(glPixelStorei, "glPixelStorei");

@@ -95,6 +95,13 @@ public:
     {
         return m_sampler_entries;
     }
+    /// The 2D draw path (Sprite2D): the pipeline's vertex descriptor has
+    /// the uv attribute at location 2, so the pipeline's vertex input has
+    /// two attributes and a 20-byte stride.
+    bool isSprite2D() const noexcept
+    {
+        return m_id == ShaderProgramId::Sprite2D;
+    }
 private:
     /// Writes value at the std140 offset of name (a no-op when the program
     /// has no such member, the same tolerance uniformLocation(-1) has).
@@ -107,6 +114,7 @@ private:
     std::vector<SamplerEntry> m_sampler_entries;
     std::vector<std::byte> m_uniform_bytes;
     bool m_uniform_staged = false;
+    ShaderProgramId m_id;
 };
 }  // namespace metal
 }  // namespace render

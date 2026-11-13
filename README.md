@@ -159,6 +159,15 @@ is validated under Wine against the real xaudio2_8.dll the Wine prefix
 provides; the OpenSL ES backend is build-validated with the NDK (the suite
 runs on Android hardware, not in this environment).
 
+The 2D path milestone (milestone 23, decision 51) adds the standalone 2D
+texture resource (create, fill, sample, read back) on the null, OpenGL,
+Vulkan and Metal backends, the Sprite2D shader program (a textured quad in
+NDC space with the tint colour and amount) on the shader libraries of the
+three shader languages, and the procedural tween in the core library (the
+Ease set, the scalar Tween and the two-component Tween2). The 2D texture
+contract runs in the shared contract checks on every backend, and the new
+test_tween suite proves the easing endpoints and the tween lifecycle.
+
 The scripting backends are not wired yet, so neither platform introduces a
 dependency that is currently unavailable there. The physics backends are
 behind build options and the PhysX adapter is Linux-only: the adapter links

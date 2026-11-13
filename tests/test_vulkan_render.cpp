@@ -174,6 +174,7 @@ int main()
         volume_backend.initialise();
         grace::test::runTexture3DChecks(volume_backend);
         grace::test::runVolumeLayerChecks(volume_backend);
+        grace::test::runTexture2DChecks(volume_backend);
         volume_backend.shutdown();
     }
     catch (const std::exception& error)

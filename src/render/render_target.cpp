@@ -27,6 +27,16 @@ void validateTexture3DDesc(const Texture3DDesc& desc)
             "volume; the driver rejects it with GL_INVALID_OPERATION");
 }
 
+void validateTexture2DDesc(const Texture2DDesc& desc)
+{
+    if (desc.width == 0 || desc.height == 0)
+        throw std::invalid_argument("texture 2D: width and height must be positive");
+    if (desc.format == PixelFormat::Depth24Stencil8)
+        throw std::invalid_argument(
+            "texture 2D: Depth24Stencil8 is an attachment format and cannot describe a sampled "
+            "texture; the driver rejects the sampled form with GL_INVALID_OPERATION");
+}
+
 void validateVolumeLayerDesc(const VolumeLayerDesc& desc)
 {
     validateTexture3DDesc(desc.volume);

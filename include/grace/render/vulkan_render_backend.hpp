@@ -93,6 +93,13 @@ public:
                        const void* data, std::size_t sizeBytes) override;
     bool readTexture3D(const TextureView* view, std::uint32_t layer,
                        void* data, std::size_t sizeBytes) override;
+    TextureView* createTexture2D(const Texture2DDesc& desc) override;
+    void releaseTexture2D(TextureView* view) override;
+    void bindTexture2D(const TextureView* view, std::uint32_t unit) override;
+    void fillTexture2D(TextureView* view, const void* data,
+                       std::size_t sizeBytes) override;
+    bool readTexture2D(const TextureView* view, void* data,
+                       std::size_t sizeBytes) override;
     RenderTarget* createVolumeLayerTarget(TextureView* volume,
                                           std::uint32_t layer) override;
     void copyDepthAttachment(RenderTarget* source,

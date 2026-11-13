@@ -93,6 +93,13 @@ GlShaderProgram::GlShaderProgram(GlLoader& gl, ShaderProgramId id)
         vertexSource = kDeferredLightVertexShader;
         fragmentSource = kVolumePropagateFragmentShader;
         break;
+    case ShaderProgramId::Sprite2D:
+        // 2D draw path (milestone 23): a textured quad in NDC space, the
+        // pipeline's own vertex stage (position + uv, not the fullscreen
+        // pair).
+        vertexSource = kSprite2DVertexShader;
+        fragmentSource = kSprite2DFragmentShader;
+        break;
     }
     if (vertexSource == nullptr || fragmentSource == nullptr)
         throw std::runtime_error("GlShaderProgram: unknown ShaderProgramId");

@@ -1031,6 +1031,35 @@ void main()
 }
 )";
 
+// Sprite 2D (milestone 23): a textured quad in NDC space with a tint colour
+// and a tint amount. The vertex stage positions the quad through the mvp
+// uniform (per-sprite transform, so the same quad geometry serves every
+// sprite); the fragment stage samples the bound texture and mixes the tint
+// in by the tint amount. Attributes follow the mesh convention (position =
+// location 0, texcoord = location 2).
+constexpr const char* kSprite2DVertexShader = R"(#version 330 core
+layout(location = 0) in vec3 position;
+layout(location = 2) in vec2 uv;
+uniform mat4 mvp;
+out vec2 vUv;
+void main()
+{
+    vUv = uv;
+    gl_Position = mvp * vec4(position, 1.0);
+}
+)";
+
+constexpr const char* kSprite2DFragmentShader = R"(#version 330 core
+uniform sampler2D srcTex;
+uniform vec4 color;
+in vec2 vUv;
+out vec4 fragment;
+void main()
+{
+    vec4 texel = texture(srcTex, vUv);
+    fragment = texel * color;
+}
+)";
 // Depth of field with bokeh (milestone 6d, decision 22). Runs in LINEAR HDR
 // before the tonemap (blurring light, not display codes). The circle of
 // confusion is derived from the scene depth: view distance d from the depth

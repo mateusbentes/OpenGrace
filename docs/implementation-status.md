@@ -50,6 +50,7 @@ The `.docx` files in this directory are generated from the `.md` sources with
 | 20 | Metal render backend: macOS and iOS behind `GRACE_ENABLE_METAL` — the same 38-method contract, the self-declared loader resolving the Objective-C runtime and the Metal framework at runtime (dlopen/dlsym, no Apple SDK header in the tree, the module compiles on any platform), MSL 2.0 shader sources compiled at runtime by MTLLibrary (no build-time shader step), presentation through SDL's CAMetalLayer bridge, and the pure mapping tests (pixel formats, compare ops, blend, load/store, sampler states, index types) running on Linux. Hardware run executed on the Apple A18 Pro: 10 frames, violations 0, test_metal_render 31/31 (decision 47) | Done |
 | 21 | Core completion: the documented curve set (spline, B-spline and TCB), the task-based multithreading (a pool of workers running a declared dependency graph, the deterministic-closure rule), the built-in profiler (zone timers and the violation counters) and the compressed-texture support (BC1-BC5 decoded on the CPU into RGBA8, the published block layouts) (decision 48) | Done |
 | 22 | Audio platform backends: the XAudio2 backend (Windows) behind `GRACE_ENABLE_XAUDIO2` and the OpenSL ES backend (Android) behind `GRACE_ENABLE_OPENSL`, both implementing the same audio contract (13a) the null backend and the OpenAL Soft adapter already implement — the same buffer/voice/stream/reverb mapping, the decode layer untouched (decision 49) | Done |
+| 23 | 2D texture path and sprite 2D: the standalone 2D texture resource (create, fill, sample, read back) on the null, OpenGL, Vulkan and Metal backends, the Sprite2D shader program (a textured quad in NDC space with the tint colour and amount) on the shader libraries and the procedural tween (a scalar animated from a start to an end over a duration) (decision 51) | Done |
 ---
 
 ## Module status
@@ -58,7 +59,7 @@ The `.docx` files in this directory are generated from the `.md` sources with
 | --- | --- | --- |
 | core | Partial | Version, fixed-step clock, header-only math (vec/mat4/transform/camera), the curve set (spline, B-spline, TCB), the task scheduler, the profiler (zone timers and violation counters) and the CPU-side BC1-BC5 texture decoder (milestone 21). Dependency-free, enforced by grep in review. |
 | app | Partial | Application lifecycle driver and the CLI entry point. |
-| render | Partial | Contract, null backend, OpenGL backend, Vulkan backend, loaders, API-neutral mesh/shader/material plus their OpenGL and Vulkan implementations; diagnostic triangle rebuilt on the foundation. |
+| render | Partial | Contract, null backend, OpenGL backend, Vulkan backend, Metal backend, loaders, API-neutral mesh/shader/material plus their OpenGL and Vulkan implementations; diagnostic triangle rebuilt on the foundation; the 2D texture path and the Sprite2D draw path (milestone 23). |
 | physics | Partial | Contract (8a), null backend (8b), and the Bullet, Box2D and PhysX 3.4 adapters (8c) behind build options. PhysX is the extra-physics capability (decision 32); the classical layer is backend-neutral. |
 | owd | Partial | The OWD container (11a): the writer, the reader, the filters, the checksums and the overlay loader, plus the `owdtool` command line (11b), on zlib's Deflate. |
 | script | Partial | The contract (9a), the null backend (9b) and the AngelScript adapter behind GRACE_ENABLE_ANGELSCRIPT; the visual block system (10a, 10b) registers through the same surface. |
@@ -151,6 +152,8 @@ All results below are real runs, on the tree at the stated commit.
 | 2026-11-12 | macOS, Apple A18 Pro (iPhone 17), milestone 20 (decision 47) | The first hardware run of the Metal path executes the 10-frame forward path on the Apple A18 Pro: grace --metal --frames 10 -v reports renderer Apple A18 Pro, frame 1280x720, frames=10 steps=20 clamps=0, violations=0, exit 0. test_metal_render passes 31 checks, 0 failures and the Metal build's ctest runs 26/26, 100% tests passed. The milestone's hardware run is no longer pending — the validation scope is now the Linux compile, the pure mapping tests and the real-device run on the A18 Pro (decision 47) |
 | 2026-11-13 | Ubuntu 24.04.5, x86_64, GCC 13.3.0, milestone 21 (decision 48) | The default build's ctest runs 29/29, 100% tests passed (the 25 suites of milestone 20 plus the four new ones: curves 37 checks, tasks 16 checks, profiler 18 checks, compressed_textures 360 checks — all zero failures). The OpenGL build's ctest runs 45/45 and the Metal build's ctest runs 30/30, both 100% passed (the Metal device-dependent block skips with exit 77 on Linux, as recorded). The MinGW-w64 x86_64 and the Android NDK r27c arm64-v8a cross-compiles build the whole tree clean under -Werror, 117 targets each — the new core modules are platform-neutral and the CPU-only BC decoder is the same code everywhere |
 | 2026-11-13 | Ubuntu 24.04.5, x86_64, GCC 13.3.0, milestone 22 (decision 49) | The default build's ctest runs 29/29, 100% tests passed (the default build has no platform audio backend, so the tree is unchanged there). The MinGW-w64 x86_64 cross-compile with `GRACE_ENABLE_XAUDIO2=ON` builds the tree clean under -Werror and the full suite runs under Wine: 27/27 test executables pass, including test_audio_xaudio2 with 37 checks, 0 failures against the real xaudio2_8.dll (XAudio2 9.0) the Wine prefix provides — the Windows platform backend runs for real. The Android NDK r27c arm64-v8a cross-compile with `GRACE_ENABLE_OPENSL=ON` builds the tree clean under -Werror including test_audio_opensl (the OpenSL ES 1.0 sysroot library); the suite runs on Android hardware, not in this environment, and is recorded as build-validated only, the same honest scope the Vulkan and Metal Android rows carry |
+| 2026-11-13 | Ubuntu 24.04.5, x86_64, GCC 13.3.0, milestone 23 (decision 51) | The default build's ctest runs 30/30, 100% tests passed (the new suite test_tween runs 67 checks, 0 failures). The OpenGL build's ctest runs 46/46, 100% tests passed — the OpenGL build's test_opengl_render runs 229 checks, 0 failures, with the 2D texture contract in the shared runContractChecks (round trip, volume-vs-2D bind rejections, byte-count refusal, invalid creations, post-release fill refusal) and the null backend's event log asserting the exact 2D call sequence. The Vulkan build's ctest runs 31/31, 100% tests passed (the Vulkan backend's volume block runs the same 2D checks on the lavapipe device); the Metal build's ctest runs 31/31 (the Metal device-dependent block skips with exit 77 on Linux, as recorded). The MinGW-w64 x86_64 and the Android NDK r27c arm64-v8a cross-compiles build the tree clean under -Werror, build-only validation, the same honest scope the Vulkan and Metal Android rows carry |
+| 2026-11-13 | macOS 26.5.1, Apple A18 Pro (MacBook-Neo-de-Maria), milestone 23 (decision 51) | The Metal build's ctest runs 31/31 on the Apple silicon device — the Metal device-dependent block runs for real: the 2D texture contract checks run on the A18 Pro and the round trip passes. The first hardware run exposed two real defects the Linux mapping tests could not see: the Metal blit copy for the 2D texture used the packed form's row pitch where the GPU writes one row per destination row, and the readback's command buffer was reused after a commit (the same rule the frame's submit follows). Both are fixed, and the layout table's count check is updated to the 29 entries the Sprite2D pair adds. The 10-frame forward path reports violations 0 |
 | 2026-11-11 | same, MinGW-w64 GCC 13.2.0 cross-compile (x86_64-w64-mingw32), Wine 9.0, milestone 19 | The tree with `GRACE_ENABLE_VULKAN=ON` cross-compiles clean under -Werror: 41 test executables link for x86_64 and test_renderer runs 41 checks, 0 failures under Wine. Honest scope: compile-validated only |
 | 2026-11-11 | same, Android NDK r27c cross-compile (arm64-v8a, android-26), milestone 19 | The tree with `GRACE_ENABLE_VULKAN=ON` cross-compiles clean under -Werror with the NDK's clang (r27c): 23 test executables link for aarch64. Not executed on Android hardware: build-only validation, the intended Android path is the primary target of the Vulkan backend (decision 43) |
 
@@ -1485,6 +1488,27 @@ grep -rn 'GLuint\|GLenum\|SDL_\|Window' include/grace/render/render_backend.hpp 
     resource container — so they are recorded as a possible future
     milestone rather than an engine milestone, and the engine itself is
     complete without them (decision 50).
+
+51. **2D textures and the 2D draw path.** The 3D texture path (milestone 7)
+    and the render-target attachment path (milestone 4b) were both
+    texture resources, but neither was the standalone 2D texture the
+    original's 2D layer draws with: a resource the application creates
+    with its own dimensions, fills with CPU bytes, binds to a sampler
+    unit and reads back. The contract adds the four methods (create,
+    fill, read, bind, release), the null backend proves the round trip
+    with no graphics API, and the OpenGL, Vulkan and Metal backends
+    implement the same four methods with their own resource types —
+    GL_TEXTURE_2D, VkImage with a 2D view, and a 2D MTLTexture. The
+    2D draw path is the Sprite2D shader program (a textured quad in NDC
+    space with the tint colour and amount), registered on the shader
+    libraries of the three shader languages. The procedural tween is the
+    application-side animation: the Ease set is the closed set the 2D
+    animation path uses (linear, quad/cubic in/out/in-out), the Tween
+    animates one scalar from a start to an end over a duration, and the
+    Tween2 animates two components together. The deliberate scope: the
+    2D layer's batching, the sprite-sheet packing and the UI-layout
+    tooling are not here — they are the application layer's job once the
+    resource path exists (decision 51).
 
 ## Verification commands
 

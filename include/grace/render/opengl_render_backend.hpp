@@ -84,6 +84,11 @@ public:
                        std::size_t sizeBytes) override;
     RenderTarget* createVolumeLayerTarget(TextureView* volume, std::uint32_t layer) override;
     void copyDepthAttachment(RenderTarget* source, RenderTarget* destination) override;
+    TextureView* createTexture2D(const Texture2DDesc& desc) override;
+    void bindTexture2D(const TextureView* view, std::uint32_t unit) override;
+    void fillTexture2D(TextureView* view, const void* data, std::size_t sizeBytes) override;
+    bool readTexture2D(const TextureView* view, void* data, std::size_t sizeBytes) override;
+    void releaseTexture2D(TextureView* view) override;
 
     /// Queues a pixel to be read back before the next buffer swap. The back
     /// buffer contents are undefined after a swap, so all readback happens

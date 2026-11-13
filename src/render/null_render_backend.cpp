@@ -213,6 +213,7 @@ std::unique_ptr<ShaderProgram> NullRenderBackend::createShaderProgram(ShaderProg
     case ShaderProgramId::PostVolumetric: name = "PostVolumetric"; break;
     case ShaderProgramId::VolumeInject: name = "VolumeInject"; break;
     case ShaderProgramId::VolumePropagate: name = "VolumePropagate"; break;
+    case ShaderProgramId::Sprite2D: name = "Sprite2D"; break;
     }
     record(std::string("createShaderProgram(") + name + ")");
     if (m_shutdown)
@@ -424,10 +425,12 @@ void NullRenderBackend::bindTexture(const TextureView* view, std::uint32_t unit)
     std::snprintf(buffer, sizeof(buffer), "bindTexture(unit=%u,depth=%d)",
                   static_cast<unsigned int>(unit), view != nullptr && view->isDepth() ? 1 : 0);
     record(std::string(buffer));
-    // A volume is not a 2D attachment: the OpenGL backend rejects it by the
-    // dynamic type, so the null backend rejects it by the layer count, and both
-    // count the same violation.
-    if (view == nullptr || view->depth() != 1u || m_shutdown)
+    // Only a render-target attachment view is a 2D attachment: a volume is
+    // refused by the layer count, and a standalone 2D texture (milestone 23)
+    // is refused by the same lookup the real backends' dynamic_cast rejects
+    // by type, so neither bind path accepts the other's view.
+    if (view == nullptr || view->depth() != 1u || m_shutdown ||
+        findTexture2D(view) != nullptr)
         ++m_violations;
 }
 
@@ -436,6 +439,14 @@ NullTexture3DView* NullRenderBackend::findVolume(TextureView* view) const
     for (const auto& volume : m_volumes)
         if (volume.get() == view)
             return volume.get();
+    return nullptr;
+}
+
+NullTexture2DView* NullRenderBackend::findTexture2D(const TextureView* view) const
+{
+    for (const auto& texture : m_textures2d)
+        if (texture.get() == view && !texture->released)
+            return texture.get();
     return nullptr;
 }
 
@@ -538,6 +549,93 @@ bool NullRenderBackend::readTexture3D(const TextureView* view, std::uint32_t lay
     const std::vector<std::byte>& slice = volume->slice(layer);
     std::memcpy(data, slice.data(), sizeBytes);
     return true;
+}
+
+TextureView* NullRenderBackend::createTexture2D(const Texture2DDesc& desc)
+{
+    validateTexture2DDesc(desc);  // throws, the same rejection a real backend makes
+    char buffer[64];
+    std::snprintf(buffer, sizeof(buffer), "createTexture2D(%ux%u)",
+                  static_cast<unsigned int>(desc.width), static_cast<unsigned int>(desc.height));
+    record(std::string(buffer));
+    if (m_shutdown)
+    {
+        ++m_violations;
+        throw std::logic_error("NullRenderBackend::createTexture2D: backend is shut down");
+    }
+    auto texture = std::make_unique<NullTexture2DView>(desc);
+    NullTexture2DView* raw = texture.get();
+    m_textures2d.push_back(std::move(texture));
+    return raw;
+}
+
+void NullRenderBackend::bindTexture2D(const TextureView* view, std::uint32_t unit)
+{
+    char buffer[48];
+    std::snprintf(buffer, sizeof(buffer), "bindTexture2D(unit=%u)", static_cast<unsigned int>(unit));
+    record(std::string(buffer));
+    // Only a standalone 2D texture of this backend is accepted: a render-target
+    // attachment view (a NullTextureView, not a NullTexture2DView) and a
+    // volume are refused by the same lookup fill and read use, which is what
+    // the real backends' dynamic_cast rejects by type.
+    if (view == nullptr || m_shutdown || findTexture2D(view) == nullptr)
+        ++m_violations;
+}
+
+void NullRenderBackend::fillTexture2D(TextureView* view, const void* data, std::size_t sizeBytes)
+{
+    char buffer[56];
+    std::snprintf(buffer, sizeof(buffer), "fillTexture2D(bytes=%zu)", sizeBytes);
+    record(std::string(buffer));
+    if (m_shutdown)
+    {
+        ++m_violations;
+        return;
+    }
+    NullTexture2DView* texture = findTexture2D(view);
+    if (texture == nullptr)
+        throw std::invalid_argument("fillTexture2D: view is not a 2D texture of this backend");
+    if (sizeBytes != texture->textureBytes())
+        throw std::invalid_argument("fillTexture2D: byte count does not match the texture");
+    const auto* bytes = static_cast<const std::byte*>(data);
+    texture->bytes().assign(bytes, bytes + sizeBytes);
+}
+
+bool NullRenderBackend::readTexture2D(const TextureView* view, void* data, std::size_t sizeBytes)
+{
+    char buffer[56];
+    std::snprintf(buffer, sizeof(buffer), "readTexture2D(bytes=%zu)", sizeBytes);
+    record(std::string(buffer));
+    if (m_shutdown)
+    {
+        ++m_violations;
+        return false;
+    }
+    NullTexture2DView* texture = findTexture2D(const_cast<TextureView*>(view));
+    if (texture == nullptr || sizeBytes != texture->textureBytes())
+    {
+        ++m_violations;
+        return false;
+    }
+    std::memcpy(data, texture->bytes().data(), sizeBytes);
+    return true;
+}
+
+void NullRenderBackend::releaseTexture2D(TextureView* view)
+{
+    record("releaseTexture2D");
+    if (m_shutdown)
+    {
+        ++m_violations;
+        return;
+    }
+    NullTexture2DView* known = findTexture2D(view);
+    if (known == nullptr)
+    {
+        ++m_violations;
+        return;
+    }
+    known->released = true;
 }
 
 RenderTarget* NullRenderBackend::createVolumeLayerTarget(TextureView* volume, std::uint32_t layer)

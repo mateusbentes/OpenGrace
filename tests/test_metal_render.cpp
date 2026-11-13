@@ -6,6 +6,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "contract_checks.hpp"
 // The Metal module's own loader and shader library: the mapping tests
 // exercise the pure translation functions and the layout table, both of
 // which need no device (the same header paths the backend itself uses).
@@ -120,9 +121,10 @@ int main()
     GRACE_CHECK_EQ(sizeof(grace::render::metal::MTLClearColor),
                    4 * sizeof(double));
     // The layout table is shared with the Vulkan library: the same
-    // std140 offsets, one table, two shading languages.
+    // std140 offsets, one table, two shading languages. The Sprite2D
+    // program (milestone 23) adds its two stages to the table.
     GRACE_CHECK_EQ(std::size(grace::render::vulkan::kShaderLayouts),
-                   27u);
+                   29u);
     // -- Device-dependent contract checks (skip on Linux) -----------------
     //
     // initialise() needs the Metal framework and a default device; on a
@@ -153,6 +155,9 @@ int main()
     }
     // (Hardware path: the same clear/readback/contract checks the
     // Vulkan backend's test runs, pending until a Mac executes them.)
+    // The 2D texture contract checks run on the hardware path too (the
+    // same function the null, OpenGL and Vulkan backends run).
+    grace::test::runTexture2DChecks(*backend);
     backend->shutdown();
     return grace::test::summary("test_metal_render");
 }

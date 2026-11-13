@@ -142,6 +142,9 @@ struct MetalRenderBackend::Impl
     bool pass_open = false;
     // 3D textures: backend-owned registry.
     std::vector<std::unique_ptr<metal::MtlTexture3DView>> volumes;
+    // 2D textures: backend-owned registry (milestone 23, the same
+    // lifetime rule the volumes follow).
+    std::vector<std::unique_ptr<metal::MtlTexture2DView>> textures2d;
     // Camera used by submit()/draw() (documented diagnostic default).
     CameraParams camera;
     // Per-program device objects. The backend owns the compiled library
@@ -515,6 +518,7 @@ struct MetalRenderBackend::Impl
             metal::sel_registerName("vertexDescriptor"));
         if (vertexDescriptor != nullptr)
         {
+            const bool sprite2d = program->isSprite2D();
             void* attributes = metal::msgSend0(
                 vertexDescriptor,
                 metal::sel_registerName("attributes"));
@@ -536,6 +540,30 @@ struct MetalRenderBackend::Impl
                                      "setBufferIndex:"),
                                  1u);
             }
+            if (sprite2d)
+            {
+                // The 2D draw path (Sprite2D) reads a second attribute
+                // (uv at location 2, offset 12, the same layout the
+                // Vulkan backend's vertex input state records).
+                void* attribute2Desc = metal::msgSendUL(
+                    attributes,
+                    metal::sel_registerName("objectAtIndexedSubscript:"),
+                    2u);
+                if (attribute2Desc != nullptr)
+                {
+                    metal::msgSendUL(attribute2Desc,
+                                     metal::sel_registerName("setFormat:"),
+                                     static_cast<NSUInteger>(
+                                         metal::MTLVertexFormat::Float2));
+                    metal::msgSendUL(attribute2Desc,
+                                     metal::sel_registerName("setOffset:"),
+                                     12u);
+                    metal::msgSendUL(attribute2Desc,
+                                     metal::sel_registerName(
+                                         "setBufferIndex:"),
+                                     1u);
+                }
+            }
             void* layout0 = metal::msgSend0(
                 vertexDescriptor,
                 metal::sel_registerName("layouts"));
@@ -547,7 +575,8 @@ struct MetalRenderBackend::Impl
             {
                 metal::msgSendUL(layout0Desc,
                                  metal::sel_registerName("setStride:"),
-                                 3 * sizeof(float));
+                                 sprite2d ? 5 * sizeof(float)
+                                          : 3 * sizeof(float));
                 metal::msgSendUL(layout0Desc,
                                  metal::sel_registerName(
                                      "setStepFunction:"),
@@ -944,6 +973,10 @@ struct MetalRenderBackend::Impl
                            metal::sel_registerName("commit"));
         metal::msgSendVoid(commandBuffer,
                            metal::sel_registerName("waitUntilCompleted"));
+        // The buffer is committed and complete: the next readback (or
+        // the next texture read) needs a fresh one, the same rule the
+        // frame's submit follows.
+        commandBuffer = nullptr;
         void* base = metal::msgSend0(staging,
                                      metal::sel_registerName("contents"));
         const std::uint8_t* bytes = static_cast<const std::uint8_t*>(base);
@@ -1063,6 +1096,12 @@ struct MetalRenderBackend::Impl
                         const auto it = volumeResources.find(volume);
                         if (it != volumeResources.end())
                             texture = it->second.texture;
+                    }
+                    else if (const auto* texture2d =
+                                 dynamic_cast<const metal::MtlTexture2DView*>(
+                                     view))
+                    {
+                        texture = texture2d->texture();
                     }
                 }
                 if (texture == nullptr)
@@ -1255,8 +1294,13 @@ struct MetalRenderBackend::Impl
         metal::MTLBufferHandle staging =
             createBuffer(sizeBytes, metal::MTLStorageMode::Shared);
         fillBuffer(staging, data, sizeBytes);
-        copyIntoTexture(staging, volume->texture(), sizeBytes,
-                        sizeBytes, volume->width(), volume->height());
+        // The blit's source stride is the texture's own row pitch (the
+        // width times the format's bytes per pixel), not the total size:
+        // one row feeds one copy, the same rule the 2D path follows.
+        const std::size_t rowPitch = static_cast<std::size_t>(
+            volume->width()) * bytesPerPixel(volume->format());
+        copyIntoTexture(staging, volume->texture(), rowPitch, rowPitch,
+                        volume->width(), volume->height());
         (void)backend;
     }
 
@@ -1277,6 +1321,12 @@ struct MetalRenderBackend::Impl
         void* blit = metal::msgSend0(commandBuffer,
                                      metal::sel_registerName(
                                          "blitCommandEncoder"));
+        // The blit's destination stride is the texture's own row pitch
+        // (the width times the format's bytes per pixel), not zero and
+        // not the total size: the GPU writes one row per destination row,
+        // the same rule the 2D path's read follows.
+        const std::size_t rowPitch = static_cast<std::size_t>(
+            volume->width()) * bytesPerPixel(volume->format());
         using Fn = void (*)(void*, void*, metal::MTLTextureHandle,
                             NSUInteger, NSUInteger,
                             metal::MTLOrigin, metal::MTLSize,
@@ -1293,12 +1343,122 @@ struct MetalRenderBackend::Impl
             volume->texture(), static_cast<NSUInteger>(sliceLayer), 0u,
             metal::MTLOrigin{0, 0, 0},
             metal::MTLSize{volume->width(), volume->height(), 1},
-            staging, 0u, 0u, 0u);
+            staging, 0u, static_cast<NSUInteger>(rowPitch),
+            static_cast<NSUInteger>(rowPitch));
         metal::msgSendVoid(blit, metal::sel_registerName("endEncoding"));
         metal::msgSendVoid(commandBuffer,
                            metal::sel_registerName("commit"));
         metal::msgSendVoid(commandBuffer,
                            metal::sel_registerName("waitUntilCompleted"));
+        // The buffer is committed and complete: the next read needs a
+        // fresh one (the same rule the frame's submit follows).
+        commandBuffer = nullptr;
+        void* base = metal::msgSend0(staging,
+                                     metal::sel_registerName("contents"));
+        if (base == nullptr)
+            return false;
+        std::memcpy(data, base, sizeBytes);
+        (void)backend;
+        return true;
+    }
+
+    /// Creates the device object of one 2D texture (milestone 23): the
+    /// same usage pair the volume's one-layer form, the Type2D type, one
+    /// layer deep.
+    void createTexture2DResources(MetalRenderBackend& backend,
+                                  metal::MtlTexture2DView* texture)
+    {
+        texture->setTexture(createTexture(
+            metal::toMtlFormat(texture->format()), texture->width(),
+            texture->height(), 1u,
+            static_cast<NSUInteger>(metal::MTLTextureUsage::RenderTarget)
+                | static_cast<NSUInteger>(
+                    metal::MTLTextureUsage::ShaderRead),
+            static_cast<NSUInteger>(metal::MTLTextureType::Type2D)));
+        (void)backend;
+    }
+
+    /// Releases the device object of one 2D texture.
+    void destroyTexture2DResources(MetalRenderBackend& backend,
+                                   metal::MtlTexture2DView* texture)
+    {
+        if (texture->texture() != nullptr)
+            metal::msgSendVoid(texture->texture(),
+                               metal::sel_registerName("release"));
+        texture->setTexture(nullptr);
+        (void)backend;
+    }
+
+    /// Copies CPU-side data into a 2D texture (the shared-staging blit
+    /// path; the same rule the volume's layer copy applies).
+    void fillTexture2DPixels(MetalRenderBackend& backend,
+                             metal::MtlTexture2DView* texture,
+                             const void* data, std::size_t sizeBytes)
+    {
+        metal::MTLBufferHandle staging =
+            createBuffer(sizeBytes, metal::MTLStorageMode::Shared);
+        fillBuffer(staging, data, sizeBytes);
+        // The blit's source stride is the texture's own row pitch (the
+        // width times the format's bytes per pixel), not the total size:
+        // one row feeds one copy. The volume's layer copy gets away with
+        // the packed form only because its height of one layer at a time
+        // makes pitch and total coincide for the tested sizes.
+        const std::size_t rowPitch = static_cast<std::size_t>(
+            texture->width()) * bytesPerPixel(texture->format());
+        copyIntoTexture(staging, texture->texture(), rowPitch, rowPitch,
+                        texture->width(), texture->height());
+        (void)backend;
+    }
+
+    /// Reads a 2D texture's bytes back to the CPU (the blit path's
+    /// reverse copy; the same rule the volume's layer read applies).
+    bool readTexture2DPixels(MetalRenderBackend& backend,
+                             metal::MtlTexture2DView* texture,
+                             void* data, std::size_t sizeBytes)
+    {
+        if (commandBuffer == nullptr)
+        {
+            commandBuffer = metal::msgSend0(
+                queue, metal::sel_registerName("commandBuffer"));
+        }
+        metal::MTLBufferHandle staging =
+            createBuffer(sizeBytes, metal::MTLStorageMode::Shared);
+        void* blit = metal::msgSend0(commandBuffer,
+                                     metal::sel_registerName(
+                                         "blitCommandEncoder"));
+        // The blit's destination stride is the texture's own row pitch
+        // (the width times the format's bytes per pixel), not zero and
+        // not the total size: the GPU writes one row per destination row
+        // (the readPixelInto's 1x1 copy passes the same value the row
+        // occupies).
+        const std::size_t rowPitch = static_cast<std::size_t>(
+            texture->width()) * bytesPerPixel(texture->format());
+        using Fn = void (*)(void*, void*, metal::MTLTextureHandle,
+                            NSUInteger, NSUInteger,
+                            metal::MTLOrigin, metal::MTLSize,
+                            metal::MTLBufferHandle, NSUInteger,
+                            NSUInteger, NSUInteger);
+        reinterpret_cast<Fn>(metal::objc_msgSend)(
+            blit,
+            metal::sel_registerName("copyFromTexture:sourceSlice:"
+                                    "sourceLevel:sourceOrigin:"
+                                    "sourceSize:toBuffer:"
+                                    "destinationOffset:"
+                                    "destinationBytesPerRow:"
+                                    "destinationBytesPerImage:"),
+            texture->texture(), 0u, 0u,
+            metal::MTLOrigin{0, 0, 0},
+            metal::MTLSize{texture->width(), texture->height(), 1},
+            staging, 0u, static_cast<NSUInteger>(rowPitch),
+            static_cast<NSUInteger>(rowPitch));
+        metal::msgSendVoid(blit, metal::sel_registerName("endEncoding"));
+        metal::msgSendVoid(commandBuffer,
+                           metal::sel_registerName("commit"));
+        metal::msgSendVoid(commandBuffer,
+                           metal::sel_registerName("waitUntilCompleted"));
+        // The buffer is committed and complete: the next read needs a
+        // fresh one (the same rule the frame's submit follows).
+        commandBuffer = nullptr;
         void* base = metal::msgSend0(staging,
                                      metal::sel_registerName("contents"));
         if (base == nullptr)
@@ -1604,6 +1764,7 @@ void MetalRenderBackend::shutdownImpl(bool countViolation)
     impl.volumeResources.clear();
     impl.targets.clear();
     impl.volumes.clear();
+    impl.textures2d.clear();
     if (impl.defaultTexture != nullptr)
     {
         metal::msgSendVoid(impl.defaultTexture,
@@ -1796,6 +1957,15 @@ metal::MtlTexture3DView* findMtlVolume(
     const TextureView* view)
 {
     for (auto& candidate : volumes)
+        if (candidate.get() == view)
+        return candidate.get();
+    return nullptr;
+}
+metal::MtlTexture2DView* findMtlTexture2D(
+    std::vector<std::unique_ptr<metal::MtlTexture2DView>>& textures2d,
+    const TextureView* view)
+{
+    for (auto& candidate : textures2d)
         if (candidate.get() == view)
             return candidate.get();
     return nullptr;
@@ -2073,6 +2243,118 @@ bool MetalRenderBackend::readTexture3D(const TextureView* view,
         return false;
     }
     return impl.readVolumeLayer(*this, volume, layer, data, sizeBytes);
+}
+
+TextureView* MetalRenderBackend::createTexture2D(const Texture2DDesc& desc)
+{
+    Impl& impl = *m_impl;
+    validateTexture2DDesc(desc);
+    if (!impl.ready())
+    {
+        ++impl.violations;
+        throw std::logic_error(
+            "MetalRenderBackend::createTexture2D: not initialised");
+    }
+    auto texture = std::make_unique<metal::MtlTexture2DView>(desc);
+    metal::MtlTexture2DView* raw = texture.get();
+    impl.createTexture2DResources(*this, raw);
+    impl.textures2d.push_back(std::move(texture));
+    return raw;
+}
+
+void MetalRenderBackend::releaseTexture2D(TextureView* view)
+{
+    Impl& impl = *m_impl;
+    if (!impl.ready())
+    {
+        ++impl.violations;
+        return;
+    }
+    metal::MtlTexture2DView* known = findMtlTexture2D(impl.textures2d, view);
+    if (known == nullptr)
+    {
+        ++impl.violations;
+        return;
+    }
+    // The registry entry is destroyed with the view: a sampler unit still
+    // bound to it would be a dangling pointer at draw time, so the bound
+    // slots are cleared along with the release.
+    for (auto& bound : impl.boundTextures)
+        if (bound == known)
+            bound = nullptr;
+    impl.destroyTexture2DResources(*this, known);
+    for (auto it = impl.textures2d.begin(); it != impl.textures2d.end();
+         ++it)
+    {
+        if (it->get() == known)
+        {
+            impl.textures2d.erase(it);
+            break;
+        }
+    }
+}
+
+void MetalRenderBackend::bindTexture2D(const TextureView* view,
+                                       std::uint32_t unit)
+{
+    Impl& impl = *m_impl;
+    if (!impl.ready() || view == nullptr)
+    {
+        ++impl.violations;
+        return;
+    }
+    const auto* mtlView =
+        dynamic_cast<const metal::MtlTexture2DView*>(view);
+    if (mtlView == nullptr)
+    {
+        ++impl.violations;  // a volume or attachment view is not a 2D
+        return;
+    }
+    if (unit < impl.boundTextures.size())
+        impl.boundTextures[unit] = mtlView;
+    else
+        impl.boundTextures.resize(unit + 1, nullptr);
+    impl.boundTextures[unit] = mtlView;
+}
+
+void MetalRenderBackend::fillTexture2D(TextureView* view,
+                                       const void* data,
+                                       std::size_t sizeBytes)
+{
+    Impl& impl = *m_impl;
+    if (!impl.ready())
+    {
+        ++impl.violations;
+        return;
+    }
+    metal::MtlTexture2DView* texture = findMtlTexture2D(impl.textures2d, view);
+    if (texture == nullptr)
+        throw std::invalid_argument(
+            "fillTexture2D: view is not a 2D texture of this backend");
+    if (texture->released || sizeBytes != texture->textureBytes())
+    {
+        ++impl.violations;
+        return;
+    }
+    impl.fillTexture2DPixels(*this, texture, data, sizeBytes);
+}
+
+bool MetalRenderBackend::readTexture2D(const TextureView* view,
+                                       void* data, std::size_t sizeBytes)
+{
+    Impl& impl = *m_impl;
+    if (!impl.ready())
+    {
+        ++impl.violations;
+        return false;
+    }
+    metal::MtlTexture2DView* texture = findMtlTexture2D(impl.textures2d, view);
+    if (texture == nullptr || sizeBytes != texture->textureBytes())
+    {
+        ++impl.violations;
+        return false;
+    }
+    return impl.readTexture2DPixels(*this, texture, data, sizeBytes);
 }
 
 RenderTarget* MetalRenderBackend::createVolumeLayerTarget(

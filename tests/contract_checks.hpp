@@ -264,6 +264,111 @@ void runVolumeLayerChecks(Backend& backend)
     backend.setClearColor(previous_color);
 }
 
+/// 2D texture round trip (milestone 23): create a standalone 2D texture,
+/// write a known pattern into it, read it back and compare, plus the
+/// rejections the contract documents. Split out like runTexture3DChecks so
+/// the null backend proves it with no GL context at all, and so every
+/// backend runs one function.
+template <typename Backend>
+void runTexture2DChecks(Backend& backend)
+{
+    const std::uint64_t textureViolations = backend.violationCount();
+    grace::render::Texture2DDesc texture;
+    texture.width = 4;
+    texture.height = 4;
+    texture.format = grace::render::PixelFormat::Rgba8;
+    grace::render::TextureView* view = backend.createTexture2D(texture);
+    GRACE_CHECK(view != nullptr);
+    GRACE_CHECK_EQ(view->width(), 4u);
+    GRACE_CHECK_EQ(view->height(), 4u);
+    GRACE_CHECK_EQ(view->depth(), 1u);
+    GRACE_CHECK(!view->isDepth());
+    GRACE_CHECK(view->format() == grace::render::PixelFormat::Rgba8);
+
+    const std::size_t textureBytes =
+        static_cast<std::size_t>(texture.width) * texture.height *
+        grace::render::bytesPerPixel(texture.format);
+    std::vector<std::uint8_t> written(textureBytes);
+    for (std::size_t i = 0; i < textureBytes; ++i)
+        written[i] = static_cast<std::uint8_t>((i * 7u + 11u) & 0xFFu);
+    backend.fillTexture2D(view, written.data(), written.size());
+    std::vector<std::uint8_t> read(textureBytes, 0);
+    GRACE_CHECK(backend.readTexture2D(view, read.data(), read.size()));
+    GRACE_CHECK(read == written);
+    backend.bindTexture2D(view, 0);
+    GRACE_CHECK_EQ(backend.violationCount(), textureViolations);
+
+    // A render target's depth attachment is not a 2D texture of this backend,
+    // and a volume is not a 2D texture either: the same distinctions the 3D
+    // path's flat target carries, and the two bind paths accept nothing of
+    // the other's view.
+    grace::render::Texture3DDesc volume;
+    volume.width = 4;
+    volume.height = 4;
+    volume.depth = 3;
+    volume.format = grace::render::PixelFormat::Rgba8;
+    grace::render::TextureView* volumeView = backend.createTexture3D(volume);
+    {
+        const std::uint64_t beforeBind = backend.violationCount();
+        backend.bindTexture2D(volumeView, 0);
+        GRACE_CHECK_EQ(backend.violationCount(), beforeBind + 1u);
+        backend.bindTexture(view, 0);
+        GRACE_CHECK_EQ(backend.violationCount(), beforeBind + 2u);
+    }
+
+    // A mismatched byte count is rejected, and the read reports it rather
+    // than filling the buffer with anything.
+    std::vector<std::uint8_t> scratch(textureBytes - 1u, 0);
+    GRACE_CHECK(!backend.readTexture2D(view, scratch.data(), scratch.size()));
+    GRACE_CHECK_EQ(backend.violationCount(), textureViolations + 3u);
+
+    // A zero dimension and the depth/stencil format are rejected at
+    // creation, like an incomplete render target is.
+    grace::render::Texture2DDesc bad = texture;
+    bad.width = 0;
+    bool threw = false;
+    try
+    {
+        static_cast<void>(backend.createTexture2D(bad));
+    }
+    catch (const std::invalid_argument&)
+    {
+        threw = true;
+    }
+    GRACE_CHECK(threw);
+    bad = texture;
+    bad.format = grace::render::PixelFormat::Depth24Stencil8;
+    threw = false;
+    try
+    {
+        static_cast<void>(backend.createTexture2D(bad));
+    }
+    catch (const std::invalid_argument&)
+    {
+        threw = true;
+    }
+    GRACE_CHECK(threw);
+    GRACE_CHECK_EQ(backend.violationCount(), textureViolations + 3u);
+
+    backend.releaseTexture2D(view);
+    // The view is invalid after release: a later fill is refused like a fill
+    // of a view that is not a texture of this backend is, without counting
+    // as a protocol violation. (A later bind would be undefined behaviour on
+    // the backends whose release destroys the view, so the lifetime rule the
+    // contract states is: a released view is dead and must not be touched.)
+    threw = false;
+    try
+    {
+        backend.fillTexture2D(view, written.data(), written.size());
+    }
+    catch (const std::invalid_argument&)
+    {
+        threw = true;
+    }
+    GRACE_CHECK(threw);
+    GRACE_CHECK_EQ(backend.violationCount(), textureViolations + 3u);
+}
+
 /// Shared RenderBackend contract checks, run unchanged against every backend
 /// implementation (null, OpenGL). Covers the full contract: clear lifecycle,
 /// mesh/shader/draw, readback with its documented per-backend value, and
@@ -460,6 +565,7 @@ void runContractChecks(Backend& backend, grace::render::ClearColor color,
 
     runTexture3DChecks(backend);
     runVolumeLayerChecks(backend);
+    runTexture2DChecks(backend);
 
     // Render-pass composition: begin, clear, draw into the target, end.
     const std::uint64_t baseViolations = backend.violationCount();

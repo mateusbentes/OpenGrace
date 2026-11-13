@@ -67,6 +67,10 @@ constexpr StageEntry kStages[] = {
      kPostMLAAFragmentShaderSpirvWords, nullptr},
     {"kPostBlitFragmentShader", kPostBlitFragmentShaderSpirv,
      kPostBlitFragmentShaderSpirvWords, nullptr},
+    {"kSprite2DVertexShader", kSprite2DVertexShaderSpirv,
+     kSprite2DVertexShaderSpirvWords, nullptr},
+    {"kSprite2DFragmentShader", kSprite2DFragmentShaderSpirv,
+     kSprite2DFragmentShaderSpirvWords, nullptr},
     {"kPostDOFFragmentShader", kPostDOFFragmentShaderSpirv,
      kPostDOFFragmentShaderSpirvWords, nullptr},
     {"kPostVolumetricFragmentShader", kPostVolumetricFragmentShaderSpirv,
@@ -126,6 +130,8 @@ constexpr ProgramEntry kPrograms[] = {
     {ShaderProgramId::PostDOF, nullptr, "kPostDOFFragmentShader"},
     {ShaderProgramId::PostVolumetric, nullptr,
      "kPostVolumetricFragmentShader"},
+    {ShaderProgramId::Sprite2D,
+     "kSprite2DVertexShader", "kSprite2DFragmentShader"},
     {ShaderProgramId::VolumeInject,
      "kFlatVertexShader", "kVolumeInjectFragmentShader"},
     {ShaderProgramId::VolumePropagate,
@@ -148,6 +154,7 @@ const ProgramEntry* programEntry(ShaderProgramId id)
 
 VkShaderProgram::VkShaderProgram(ShaderProgramId id)
 {
+    m_id = id;
     const ProgramEntry* entry = programEntry(id);
     if (entry == nullptr)
     {

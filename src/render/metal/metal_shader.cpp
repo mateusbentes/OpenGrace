@@ -42,6 +42,8 @@ constexpr StageEntry kStages[] = {
     {"kPostVolumetricFragmentShader", kPostVolumetricFragmentShader},
     {"kVolumeInjectFragmentShader", kVolumeInjectFragmentShader},
     {"kVolumePropagateFragmentShader", kVolumePropagateFragmentShader},
+    {"kSprite2DVertexShader", kSprite2DVertexShader},
+    {"kSprite2DFragmentShader", kSprite2DFragmentShader},
 };
 const StageEntry* stageEntry(const char* name)
 {
@@ -93,10 +95,13 @@ constexpr ProgramEntry kPrograms[] = {
     {ShaderProgramId::VolumeInject, nullptr, "kVolumeInjectFragmentShader"},
     {ShaderProgramId::VolumePropagate, nullptr,
      "kVolumePropagateFragmentShader"},
+    {ShaderProgramId::Sprite2D,
+     "kSprite2DVertexShader", "kSprite2DFragmentShader"},
 };
 }  // namespace
 MtlShaderProgram::MtlShaderProgram(ShaderProgramId id)
 {
+    m_id = id;
     const ProgramEntry* entry = nullptr;
     for (const ProgramEntry& candidate : kPrograms)
     {

@@ -85,6 +85,14 @@ opengl::GlTexture3DView* findGlVolume(
             return candidate.get();
     return nullptr;
 }
+opengl::GlTexture2DView* findGlTexture2D(
+    std::vector<std::unique_ptr<opengl::GlTexture2DView>>& textures, const TextureView* view)
+{
+    for (auto& candidate : textures)
+        if (candidate.get() == view && !candidate->released)
+            return candidate.get();
+    return nullptr;
+}
 
 void parseVersion(const std::string& version, int& major, int& minor)
 {
@@ -173,6 +181,9 @@ struct OpenGLRenderBackend::Impl
 
     // 3D textures: backend-owned registry, same lifetime rule as the targets.
     std::vector<std::unique_ptr<opengl::GlTexture3DView>> volumes;
+
+    // 2D textures (milestone 23): the same lifetime rule, one layer wide.
+    std::vector<std::unique_ptr<opengl::GlTexture2DView>> textures2d;
 
     // Camera used by submit()/draw() (documented diagnostic default).
     CameraParams camera;
@@ -419,6 +430,7 @@ void OpenGLRenderBackend::shutdownImpl(bool countViolation)
         target->release();
     impl.targets.clear();
     impl.volumes.clear();  // GL objects deleted while the context is current
+    impl.textures2d.clear();  // the same rule, milestone 23
     impl.drainGlErrors("shutdown");
     if (impl.context != nullptr)
     {
@@ -885,6 +897,110 @@ bool OpenGLRenderBackend::readTexture3D(const TextureView* view, std::uint32_t l
     volume->readSlice(layer, data, sizeBytes);
     impl.drainGlErrors("readTexture3D");
     return true;
+}
+
+TextureView* OpenGLRenderBackend::createTexture2D(const Texture2DDesc& desc)
+{
+    Impl& impl = *m_impl;
+    if (!impl.ready())
+    {
+        ++impl.violations;
+        throw std::logic_error("OpenGLRenderBackend::createTexture2D: not initialised");
+    }
+    validateTexture2DDesc(desc);  // throws, the same rejection the null backend makes
+    impl.makeCurrent();
+    auto texture = std::make_unique<opengl::GlTexture2DView>(impl.gl, desc);
+    opengl::GlTexture2DView* raw = texture.get();
+    impl.textures2d.push_back(std::move(texture));
+    impl.drainGlErrors("createTexture2D");
+    return raw;
+}
+
+void OpenGLRenderBackend::bindTexture2D(const TextureView* view, std::uint32_t unit)
+{
+    Impl& impl = *m_impl;
+    if (!impl.ready())
+    {
+        ++impl.violations;
+        return;
+    }
+    impl.makeCurrent();
+    impl.gl.glActiveTexture(GL_TEXTURE0 + unit);
+    // A multi-layer view is a volume, not a 2D texture: the same distinction
+    // bindTexture3D records in reverse.
+    const auto* texture = dynamic_cast<const opengl::GlTexture2DView*>(view);
+    if (texture != nullptr && findGlTexture2D(impl.textures2d, view) != nullptr)
+        impl.gl.glBindTexture(GL_TEXTURE_2D, texture->textureId());
+    else
+        ++impl.violations;
+    impl.drainGlErrors("bindTexture2D");
+}
+
+void OpenGLRenderBackend::fillTexture2D(TextureView* view, const void* data, std::size_t sizeBytes)
+{
+    Impl& impl = *m_impl;
+    if (!impl.ready())
+    {
+        ++impl.violations;
+        return;
+    }
+    opengl::GlTexture2DView* texture = findGlTexture2D(impl.textures2d, view);
+    if (texture == nullptr)
+        throw std::invalid_argument("fillTexture2D: view is not a 2D texture of this backend");
+    impl.makeCurrent();
+    texture->upload(data, sizeBytes);
+    impl.drainGlErrors("fillTexture2D");
+}
+
+bool OpenGLRenderBackend::readTexture2D(const TextureView* view, void* data, std::size_t sizeBytes)
+{
+    Impl& impl = *m_impl;
+    if (!impl.ready())
+    {
+        ++impl.violations;
+        return false;
+    }
+    opengl::GlTexture2DView* texture = findGlTexture2D(impl.textures2d, view);
+    if (texture == nullptr || sizeBytes != texture->textureBytes())
+    {
+        ++impl.violations;
+        return false;
+    }
+    impl.makeCurrent();
+    texture->read(data, sizeBytes);
+    impl.drainGlErrors("readTexture2D");
+    return true;
+}
+
+void OpenGLRenderBackend::releaseTexture2D(TextureView* view)
+{
+    Impl& impl = *m_impl;
+    if (!impl.ready())
+    {
+        ++impl.violations;
+        return;
+    }
+    opengl::GlTexture2DView* known = findGlTexture2D(impl.textures2d, view);
+    if (known == nullptr)
+    {
+        ++impl.violations;
+        return;
+    }
+    known->released = true;
+    // The GL texture is deleted when the registry entry is erased (the view's
+    // destructor), while the context is still current. The volume path keeps
+    // its entries alive for the layer targets that borrow them, but a 2D
+    // texture has no borrower, so the erase is immediate.
+    impl.makeCurrent();
+    for (auto it = impl.textures2d.begin(); it != impl.textures2d.end(); ++it)
+    {
+        if (it->get() == known)
+        {
+            impl.textures2d.erase(it);
+            break;
+        }
+    }
+    impl.drainGlErrors("releaseTexture2D");
 }
 
 RenderTarget* OpenGLRenderBackend::createVolumeLayerTarget(TextureView* volume,

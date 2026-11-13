@@ -39,6 +39,14 @@ target_link_libraries(test_curves PRIVATE grace_core grace_warnings)
 target_include_directories(test_curves PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME curves COMMAND test_curves)
 
+# Milestone 23: the procedural tween. The easing endpoints are exact, the
+# interpolation matches the closed-form polynomials, and a zero or negative
+# duration is rejected like the other subsystems reject invalid arguments.
+add_executable(test_tween test_tween.cpp)
+target_link_libraries(test_tween PRIVATE grace_core grace_warnings)
+target_include_directories(test_tween PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME tween COMMAND test_tween)
+
 add_executable(test_tasks test_tasks.cpp)
 target_link_libraries(test_tasks PRIVATE grace_core grace_warnings)
 target_include_directories(test_tasks PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

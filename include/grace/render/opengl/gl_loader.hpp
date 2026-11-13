@@ -97,6 +97,9 @@ using FnTexImage2D = void (*)(GLenum target, GLint level, GLint internalformat, 
 using FnTexImage3D = void (*)(GLenum target, GLint level, GLint internalformat, GLsizei width,
                               GLsizei height, GLsizei depth, GLint border, GLenum format,
                               GLenum type, const GLvoid* pixels);
+using FnTexSubImage2D = void (*)(GLenum target, GLint level, GLint xoffset, GLint yoffset,
+                                 GLsizei width, GLsizei height, GLenum format, GLenum type,
+                                 const GLvoid* pixels);
 using FnTexSubImage3D = void (*)(GLenum target, GLint level, GLint xoffset, GLint yoffset,
                                  GLint zoffset, GLsizei width, GLsizei height, GLsizei depth,
                                  GLenum format, GLenum type, const GLvoid* pixels);
@@ -184,6 +187,7 @@ public:
     FnBindTexture glBindTexture = nullptr;
     FnTexImage2D glTexImage2D = nullptr;
     FnTexImage3D glTexImage3D = nullptr;
+    FnTexSubImage2D glTexSubImage2D = nullptr;
     FnTexSubImage3D glTexSubImage3D = nullptr;
     FnGetTexImage glGetTexImage = nullptr;
     FnPixelStorei glPixelStorei = nullptr;

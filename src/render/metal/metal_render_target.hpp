@@ -166,6 +166,36 @@ private:
     Texture3DDesc m_desc;
     MTLTextureHandle m_texture = nullptr;
 };
+
+/// 2D texture of the Metal backend (milestone 23): one MTLTexture with
+/// the Type2D type. The backend creates and fills the texture; the same
+/// backend-owned registry the volume's one-layer form, the same
+/// staging blit path, the same byte counting.
+class MtlTexture2DView final : public TextureView
+{
+public:
+    MtlTexture2DView(const Texture2DDesc& desc) : m_desc(desc) {}
+    std::uint32_t width() const noexcept override { return m_desc.width; }
+    std::uint32_t height() const noexcept override { return m_desc.height; }
+    std::uint32_t depth() const noexcept override { return 1u; }
+    PixelFormat format() const noexcept override { return m_desc.format; }
+    bool isDepth() const noexcept override { return false; }
+    std::size_t textureBytes() const noexcept
+    {
+        return static_cast<std::size_t>(m_desc.width) * m_desc.height
+            * bytesPerPixel(m_desc.format);
+    }
+    const Texture2DDesc& desc() const noexcept { return m_desc; }
+    /// The texture's device-side MTLTexture (the backend owns it; the
+    /// fill and read paths go through this handle). Null until the
+    /// backend created the texture.
+    MTLTextureHandle texture() const noexcept { return m_texture; }
+    void setTexture(MTLTextureHandle texture) { m_texture = texture; }
+    bool released = false;
+private:
+    Texture2DDesc m_desc;
+    MTLTextureHandle m_texture = nullptr;
+};
 }  // namespace metal
 }  // namespace render
 }  // namespace grace
