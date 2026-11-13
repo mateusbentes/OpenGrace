@@ -150,6 +150,15 @@ and the violation counters) and the compressed-texture support (BC1-BC5
 decoded on the CPU into RGBA8). All four are platform-neutral and live in
 the core library; the same code compiles on Linux, Windows and macOS (decision 48).
 
+The audio platform backends (milestone 22, decision 49) close the audio
+module's platform matrix: the XAudio2 backend (Windows) behind
+`GRACE_ENABLE_XAUDIO2` and the OpenSL ES backend (Android) behind
+`GRACE_ENABLE_OPENSL`, both implementing the same audio contract the null
+backend and the OpenAL Soft adapter already implement. The XAudio2 backend
+is validated under Wine against the real xaudio2_8.dll the Wine prefix
+provides; the OpenSL ES backend is build-validated with the NDK (the suite
+runs on Android hardware, not in this environment).
+
 The scripting backends are not wired yet, so neither platform introduces a
 dependency that is currently unavailable there. The physics backends are
 behind build options and the PhysX adapter is Linux-only: the adapter links
@@ -249,6 +258,8 @@ Build options:
 | `GRACE_ENABLE_BOX2D` | `OFF` | Box2D physics backend (the submodule). |
 | `GRACE_ENABLE_ANGELSCRIPT` | `OFF` | AngelScript backend (the submodule). |
 | `GRACE_ENABLE_OPENAL` | `OFF` | OpenAL Soft audio backend + Ogg/Vorbis. |
+| `GRACE_ENABLE_XAUDIO2` | `OFF` | XAudio2 audio backend (Windows only). |
+| `GRACE_ENABLE_OPENSL` | `OFF` | OpenSL ES audio backend (Android only). |
 | `GRACE_ENABLE_FREETYPE` | `OFF` | FreeType GUI font adapter (the submodule). |
 | `GRACE_ENABLE_THEORA` | `OFF` | Theora video decode adapter + Ogg/Vorbis. |
 

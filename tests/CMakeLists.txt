@@ -115,6 +115,26 @@ if(GRACE_ENABLE_OPENAL)
     set_tests_properties(audio_adapters PROPERTIES
         SKIP_RETURN_CODE 77)
 endif()
+if(GRACE_ENABLE_XAUDIO2 AND WIN32)
+    add_executable(test_audio_xaudio2 test_audio_xaudio2.cpp)
+    target_link_libraries(test_audio_xaudio2 PRIVATE
+        grace_audio grace_xaudio2_audio grace_warnings)
+    target_include_directories(test_audio_xaudio2 PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR})
+    add_test(NAME audio_xaudio2 COMMAND test_audio_xaudio2)
+    set_tests_properties(audio_xaudio2 PROPERTIES
+        SKIP_RETURN_CODE 77)
+endif()
+if(GRACE_ENABLE_OPENSL AND ANDROID)
+    add_executable(test_audio_opensl test_audio_opensl.cpp)
+    target_link_libraries(test_audio_opensl PRIVATE
+        grace_audio grace_opensl_audio grace_warnings)
+    target_include_directories(test_audio_opensl PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR})
+    add_test(NAME audio_opensl COMMAND test_audio_opensl)
+    set_tests_properties(audio_opensl PROPERTIES
+        SKIP_RETURN_CODE 77)
+endif()
 if(GRACE_ENABLE_FREETYPE)
     add_executable(test_gui_adapters test_gui_adapters.cpp)
     target_link_libraries(test_gui_adapters PRIVATE
@@ -244,22 +264,23 @@ add_test(NAME scene COMMAND test_scene)
 # through check_exit_code.cmake in script mode (no test framework):
 # 0 = success, 2 = usage error.
 set(GRACE_EXE $<TARGET_FILE:grace>)
-
+set(GRACE_EMULATOR "${CMAKE_CROSSCOMPILING_EMULATOR}")
 add_test(NAME app_headless_run COMMAND ${CMAKE_COMMAND}
     -DEXPECTED_EXIT_CODE=0
     -DEXECUTABLE=${GRACE_EXE}
+    -DEMULATOR=${GRACE_EMULATOR}
     "-DARGS=--headless;--frames;4;--frame-time-ns;20000000;--step-ns;10000000;--width;320;--height;240"
     -P ${CMAKE_CURRENT_SOURCE_DIR}/check_exit_code.cmake)
-
 add_test(NAME app_usage_error_unknown_option COMMAND ${CMAKE_COMMAND}
     -DEXPECTED_EXIT_CODE=2
     -DEXECUTABLE=${GRACE_EXE}
+    -DEMULATOR=${GRACE_EMULATOR}
     "-DARGS=--no-such-option"
     -P ${CMAKE_CURRENT_SOURCE_DIR}/check_exit_code.cmake)
-
 add_test(NAME app_usage_error_missing_value COMMAND ${CMAKE_COMMAND}
     -DEXPECTED_EXIT_CODE=2
     -DEXECUTABLE=${GRACE_EXE}
+    -DEMULATOR=${GRACE_EMULATOR}
     "-DARGS=--headless;--frames"
     -P ${CMAKE_CURRENT_SOURCE_DIR}/check_exit_code.cmake)
 

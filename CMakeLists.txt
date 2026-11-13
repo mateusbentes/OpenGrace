@@ -35,6 +35,8 @@ option(GRACE_ENABLE_BULLET      "Build the Bullet physics backend"          OFF)
 option(GRACE_ENABLE_BOX2D       "Build the Box2D physics backend"          OFF)
 option(GRACE_ENABLE_ANGELSCRIPT "Build the AngelScript script backend"     OFF)
 option(GRACE_ENABLE_OPENAL      "Build the OpenAL Soft audio backend"      OFF)
+option(GRACE_ENABLE_XAUDIO2     "Build the XAudio2 audio backend (Windows)" OFF)
+option(GRACE_ENABLE_OPENSL      "Build the OpenSL ES audio backend (Android)" OFF)
 option(GRACE_ENABLE_FREETYPE    "Build the FreeType GUI font adapter"     OFF)
 option(GRACE_ENABLE_THEORA      "Build the Theora video decode adapter"    OFF)
 
@@ -791,6 +793,24 @@ if(GRACE_ENABLE_OPENAL)
         ${GRACE_THIRD_PARTY}/lib/libvorbisfile.a
         ${GRACE_THIRD_PARTY}/lib/libvorbis.a
         ${GRACE_THIRD_PARTY}/lib/libogg.a)
+endif()
+
+if(GRACE_ENABLE_XAUDIO2 AND WIN32)
+    add_library(grace_xaudio2_audio STATIC
+        src/audio/xaudio2_audio_backend.cpp)
+    target_include_directories(grace_xaudio2_audio PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
+    target_link_libraries(grace_xaudio2_audio PUBLIC grace_audio
+        PRIVATE grace_warnings xaudio2_8)
+endif()
+
+if(GRACE_ENABLE_OPENSL AND ANDROID)
+    add_library(grace_opensl_audio STATIC
+        src/audio/opensl_audio_backend.cpp)
+    target_include_directories(grace_opensl_audio PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
+    target_link_libraries(grace_opensl_audio PUBLIC grace_audio
+        PRIVATE grace_warnings OpenSLES)
 endif()
 
 # ---------------------------------------------------------------------------

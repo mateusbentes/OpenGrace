@@ -231,7 +231,7 @@ run executed on the Apple A18 Pro.
 | macOS, iOS | Metal backend (milestone 20): the platform pair GRACE 2 also targeted, mapped onto the one API Apple still ships; see 4.3. |
 | Mobile platforms | Android goes through Vulkan, not OpenGL ES. The Vulkan backend is implemented (milestone 18) and cross-compiled for Android (NDK r27c, arm64-v8a); executing it on hardware is recorded by the user's validation run. See 4.3. |
 | PhysX / Bullet / Box2D | Plugin contract preserved; backends chosen by licence fit. |
-| OpenAL / OpenSL / XAudio2 / MultiStream | Plugin contract preserved; OpenAL Soft on Linux. |
+| OpenAL / OpenSL / XAudio2 / MultiStream | Plugin contract preserved; OpenAL Soft on Linux, XAudio2 on Windows, OpenSL ES on Android (milestone 22). MultiStream (PlayStation 3) out of scope. |
 | AngelScript + Tetragramaton | Both reimplemented as engine services. |
 | Resource manager | Container of this project's own over DEFLATE payloads; see 4.4. |
 | Editors and network tools | Deferred; out of scope for the first milestones. |
@@ -473,6 +473,40 @@ three render backends can carry — decoding into the row-major RGBA8 the
 existing fill calls already use. The PVR/ETC/ATC entries of the
 original's list are the platform-specific formats of other vendors and
 have no meaning on the API trio this project targets.
+
+### 4.7 Audio platform backends
+
+The original's sound section (3.10) names OpenAL on PC, Android, macOS
+and iOS, OpenSL on Android, XAudio2 on PC and Xbox, and MultiStream on
+PlayStation 3. Milestone 13 delivered the contract (13a), the null
+backend (13b) and the OpenAL Soft adapter (13c) — the Linux reference —
+and milestone 22 adds the platform backends the planned targets need:
+XAudio2 on Windows and OpenSL ES on Android.
+
+The XAudio2 backend implements the contract on XAudio2.8 (xaudio2.h, the
+Windows 8+ system library): buffer ids to submitted source buffers,
+voice ids to source voices, the stream chunks to buffer submissions, the
+loop to the XAUDIO2_LOOP_INFINITE flag, the cursor to the voice's
+SamplesPlayed, and the reverb assignment recorded like the OpenAL
+adapter records it — the plain contract's per-sound reverb is the
+application's assignment, and a native reverb chain (XAPO) is a future
+extension.
+
+The OpenSL ES backend implements the contract on the Android OpenSL ES
+1.0 API (SLES/OpenSLES.h, the NDK's sysroot library): buffer ids to
+realized player objects with the buffer queue, play, volume, pitch and
+3D location interfaces, the stream chunks queued on the player, the loop
+re-enqueued by the contract's mix()-driven state machine, the cursor
+derived from the play position the sample rate converts, and the reverb
+assignment recorded the same way (the EnvironmentalReverb interface is a
+future extension).
+
+Both backends are behind build options and guarded by platform:
+`GRACE_ENABLE_XAUDIO2` builds only on Windows, `GRACE_ENABLE_OPENSL`
+builds only on Android. The decoders (13c) stay in the data layer,
+untouched — the WAV and Ogg Vorbis decoders hand every backend PCM
+samples. The MultiStream backend of the original's PlayStation 3 row is
+out of scope: the platform is not a target of this project.
 
 ## 5. Licensing boundary
 

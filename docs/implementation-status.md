@@ -49,6 +49,7 @@ The `.docx` files in this directory are generated from the `.md` sources with
 | 19 | Vulkan hardware path: the presentation engine (the swap interval maps onto the present mode, the acquire retries on the out-of-date resize, the present result steers the next frame), the depth attachment format picked from the device's format properties (D24S8, D32Sfloat, D16Unorm in that order), and the sampler descriptors written at draw time from the bound texture views (the layout table's unit rule, the default 1x1 white texture for unbound slots) (decision 46) | Done |
 | 20 | Metal render backend: macOS and iOS behind `GRACE_ENABLE_METAL` — the same 38-method contract, the self-declared loader resolving the Objective-C runtime and the Metal framework at runtime (dlopen/dlsym, no Apple SDK header in the tree, the module compiles on any platform), MSL 2.0 shader sources compiled at runtime by MTLLibrary (no build-time shader step), presentation through SDL's CAMetalLayer bridge, and the pure mapping tests (pixel formats, compare ops, blend, load/store, sampler states, index types) running on Linux. Hardware run executed on the Apple A18 Pro: 10 frames, violations 0, test_metal_render 31/31 (decision 47) | Done |
 | 21 | Core completion: the documented curve set (spline, B-spline and TCB), the task-based multithreading (a pool of workers running a declared dependency graph, the deterministic-closure rule), the built-in profiler (zone timers and the violation counters) and the compressed-texture support (BC1-BC5 decoded on the CPU into RGBA8, the published block layouts) (decision 48) | Done |
+| 22 | Audio platform backends: the XAudio2 backend (Windows) behind `GRACE_ENABLE_XAUDIO2` and the OpenSL ES backend (Android) behind `GRACE_ENABLE_OPENSL`, both implementing the same audio contract (13a) the null backend and the OpenAL Soft adapter already implement — the same buffer/voice/stream/reverb mapping, the decode layer untouched (decision 49) | Done |
 ---
 
 ## Module status
@@ -62,7 +63,7 @@ The `.docx` files in this directory are generated from the `.md` sources with
 | owd | Partial | The OWD container (11a): the writer, the reader, the filters, the checksums and the overlay loader, plus the `owdtool` command line (11b), on zlib's Deflate. |
 | script | Partial | The contract (9a), the null backend (9b) and the AngelScript adapter behind GRACE_ENABLE_ANGELSCRIPT; the visual block system (10a, 10b) registers through the same surface. |
 | scene | Partial | Data-driven entities, selectable spatial partitioning (flat, grid, octree, quadtree), scene queries and LOD (12a); the serialisation strategy writes the scene's state into the OWD container (12b) (decision 36). |
-| audio | Partial | The contract (13a), the deterministic null backend (13b) and the OpenAL Soft adapter behind GRACE_ENABLE_OPENAL (13c), with hand-written WAV and libvorbisfile Ogg Vorbis decoders in the data layer. |
+| audio | Partial | The contract (13a), the deterministic null backend (13b) and the OpenAL Soft adapter behind GRACE_ENABLE_OPENAL (13c), with hand-written WAV and libvorbisfile Ogg Vorbis decoders in the data layer. The XAudio2 backend (Windows) behind GRACE_ENABLE_XAUDIO2 and the OpenSL ES backend (Android) behind GRACE_ENABLE_OPENSL implement the same contract (milestone 22, decision 49). |
 | motion | Partial | Skeletal clips, the deterministic sampler with lerp/slerp and FK, the blendshapes, the events, the state-machine layer with the cross-fade and the look-at and foot placement controllers (decision 38). |
 | gui | Partial | The retained control tree, the hit test and focus, the event dispatch with the UTF-8 text path and the font contract (14a); the deterministic null backend (14b) and the FreeType adapter behind GRACE_ENABLE_FREETYPE (14c) (decision 39). |
 | ai, game | Partial | The agent behaviours (idle, patrol, seek, flee) with the deterministic steering and the gameplay-level services: timers, named properties, the event queue and the seeded random source (decision 40). |
@@ -149,6 +150,7 @@ All results below are real runs, on the tree at the stated commit.
 | 2026-11-11 | Ubuntu 24.04.5, x86_64, GCC 13.3.0, CMake 4.4.4, no Apple SDK, milestone 20 (decision 47) | The Metal build compiles clean under -Werror on Linux with `GRACE_ENABLE_METAL=ON` (the loader declares its own types; no Apple SDK exists in this environment, and none is needed). test_metal_render runs on Linux: the pure mapping checks pass (the published MTLPixelFormat, MTLCompareFunction, MTLBlendFactor, MTLLoadAction/MTLStoreAction, MTLSamplerAddressMode and MTLIndexType values, and the shared std140 layout table's 27 entries), and the device-dependent block skips with exit 77 — no Metal framework exists here. Honest scope: the hardware run of the Metal path is pending until someone builds and runs on a Mac; nothing in this record claims otherwise |
 | 2026-11-12 | macOS, Apple A18 Pro (iPhone 17), milestone 20 (decision 47) | The first hardware run of the Metal path executes the 10-frame forward path on the Apple A18 Pro: grace --metal --frames 10 -v reports renderer Apple A18 Pro, frame 1280x720, frames=10 steps=20 clamps=0, violations=0, exit 0. test_metal_render passes 31 checks, 0 failures and the Metal build's ctest runs 26/26, 100% tests passed. The milestone's hardware run is no longer pending — the validation scope is now the Linux compile, the pure mapping tests and the real-device run on the A18 Pro (decision 47) |
 | 2026-11-13 | Ubuntu 24.04.5, x86_64, GCC 13.3.0, milestone 21 (decision 48) | The default build's ctest runs 29/29, 100% tests passed (the 25 suites of milestone 20 plus the four new ones: curves 37 checks, tasks 16 checks, profiler 18 checks, compressed_textures 360 checks — all zero failures). The OpenGL build's ctest runs 45/45 and the Metal build's ctest runs 30/30, both 100% passed (the Metal device-dependent block skips with exit 77 on Linux, as recorded). The MinGW-w64 x86_64 and the Android NDK r27c arm64-v8a cross-compiles build the whole tree clean under -Werror, 117 targets each — the new core modules are platform-neutral and the CPU-only BC decoder is the same code everywhere |
+| 2026-11-13 | Ubuntu 24.04.5, x86_64, GCC 13.3.0, milestone 22 (decision 49) | The default build's ctest runs 29/29, 100% tests passed (the default build has no platform audio backend, so the tree is unchanged there). The MinGW-w64 x86_64 cross-compile with `GRACE_ENABLE_XAUDIO2=ON` builds the tree clean under -Werror and the full suite runs under Wine: 27/27 test executables pass, including test_audio_xaudio2 with 37 checks, 0 failures against the real xaudio2_8.dll (XAudio2 9.0) the Wine prefix provides — the Windows platform backend runs for real. The Android NDK r27c arm64-v8a cross-compile with `GRACE_ENABLE_OPENSL=ON` builds the tree clean under -Werror including test_audio_opensl (the OpenSL ES 1.0 sysroot library); the suite runs on Android hardware, not in this environment, and is recorded as build-validated only, the same honest scope the Vulkan and Metal Android rows carry |
 | 2026-11-11 | same, MinGW-w64 GCC 13.2.0 cross-compile (x86_64-w64-mingw32), Wine 9.0, milestone 19 | The tree with `GRACE_ENABLE_VULKAN=ON` cross-compiles clean under -Werror: 41 test executables link for x86_64 and test_renderer runs 41 checks, 0 failures under Wine. Honest scope: compile-validated only |
 | 2026-11-11 | same, Android NDK r27c cross-compile (arm64-v8a, android-26), milestone 19 | The tree with `GRACE_ENABLE_VULKAN=ON` cross-compiles clean under -Werror with the NDK's clang (r27c): 23 test executables link for aarch64. Not executed on Android hardware: build-only validation, the intended Android path is the primary target of the Vulkan backend (decision 43) |
 
@@ -1438,6 +1440,38 @@ grep -rn 'GLuint\|GLenum\|SDL_\|Window' include/grace/render/render_backend.hpp 
     feeding the existing fill calls), the stereoscopic 3D output
     (deferred, as recorded in the target mapping), and the localisation
     beyond the UTF-8 the UI contract already carries (decision 48).
+
+49. **Audio platform backends: XAudio2 on Windows and OpenSL ES on
+    Android.** The audio contract (13a) was built platform-neutral from
+    the start: the null backend (13b) proves the mapping deterministically
+    and the OpenAL Soft adapter (13c) is the Linux reference. The
+    original's feature list names OpenSL on Android and XAudio2 on PC
+    (architecture section 3.10), and those two platforms are planned
+    targets of this project, so milestone 22 adds the backends the
+    contract always anticipated. The XAudio2 backend implements the
+    contract on XAudio2.8 (xaudio2.h, the Windows 8+ system library):
+    buffer ids to submitted source buffers, voice ids to source voices,
+    the stream chunks to buffer submissions, the loop to the
+    XAUDIO2_LOOP_INFINITE flag, the cursor to the voice's SamplesPlayed,
+    and the reverb assignment recorded like the OpenAL adapter records
+    it — the plain contract's per-sound reverb is the application's
+    assignment, and a native reverb chain (XAPO) is a future extension.
+    The OpenSL ES backend implements the contract on the Android OpenSL
+    ES 1.0 API (SLES/OpenSLES.h, the NDK's sysroot library): buffer ids
+    to realized player objects with the buffer queue, play, volume,
+    pitch and 3D location interfaces, the stream chunks queued on the
+    player, the loop re-enqueued by the contract's mix()-driven state
+    machine, the cursor derived from the play position the sample rate
+    converts, and the reverb assignment recorded the same way (the
+    EnvironmentalReverb interface is a future extension). Both backends
+    are behind build options and guarded by platform:
+    `GRACE_ENABLE_XAUDIO2` builds only on Windows,
+    `GRACE_ENABLE_OPENSL` builds only on Android. The decoders (13c)
+    stay in the data layer, untouched — the WAV and Ogg Vorbis decoders
+    hand every backend PCM samples. What is deliberately not here: the
+    MultiStream backend of the original's PlayStation 3 row (the platform
+    is not a target of this project) and the native reverb chains of the
+    two new platforms (recorded as future extensions) (decision 49).
 
 ## Verification commands
 

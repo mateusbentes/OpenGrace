@@ -19,11 +19,23 @@ if(NOT DEFINED ARGS)
     set(ARGS "")
 endif()
 
-execute_process(
-    COMMAND "${EXECUTABLE}" ${ARGS}
-    RESULT_VARIABLE actual_code
-    OUTPUT_VARIABLE stdout_output
-    ERROR_VARIABLE stderr_output)
+if(NOT DEFINED EMULATOR)
+    set(EMULATOR "")
+endif()
+
+if(EMULATOR)
+    execute_process(
+        COMMAND ${EMULATOR} "${EXECUTABLE}" ${ARGS}
+        RESULT_VARIABLE actual_code
+        OUTPUT_VARIABLE stdout_output
+        ERROR_VARIABLE stderr_output)
+else()
+    execute_process(
+        COMMAND "${EXECUTABLE}" ${ARGS}
+        RESULT_VARIABLE actual_code
+        OUTPUT_VARIABLE stdout_output
+        ERROR_VARIABLE stderr_output)
+endif()
 
 if(NOT "${actual_code}" STREQUAL "${EXPECTED_EXIT_CODE}")
     message(FATAL_ERROR
