@@ -97,7 +97,7 @@ be read back by the overlay loader.
 | Linux x86_64 | Vulkan (extra capability) | Implemented, validated under lavapipe (milestones 18 and 19) |
 | Windows x86_64 | Vulkan (extra capability) | Cross-compiled against the winevulkan loader surface, not executed (milestone 18) |
 | Android (arm64-v8a) | Vulkan (primary target) | Cross-compiled with NDK r27c, not executed on hardware (milestone 18) |
-| macOS, iOS | Metal | Compiles on any platform; mapping tests run on Linux; hardware run pending until a Mac (milestone 20) |
+| macOS, iOS | Metal | Compiles on any platform; mapping tests run on Linux; hardware run executed on the Apple A18 Pro (milestone 20) |
 
 Linux is implemented and validated. Windows is cross-compiled with MinGW-w64
 and validated under Wine (milestone 17): the tree builds clean under -Werror
@@ -137,8 +137,9 @@ the published C layouts) and resolves the Objective-C runtime and the
 Metal framework at runtime, so no Apple SDK is needed to build it and the
 module compiles on any platform. Its MSL 2.0 shaders compile at runtime
 through MTLLibrary, so there is no build-time shader step. The recorded
-validation is the Linux compile and the pure mapping tests; the hardware
-run is pending until a Mac executes it (decision 47).
+validation is the Linux compile, the pure mapping tests and the hardware
+run on the Apple A18 Pro — the 10-frame forward path with violations 0 and
+test_metal_render 31 checks, 0 failures (decision 47).
 
 The scripting backends are not wired yet, so neither platform introduces a
 dependency that is currently unavailable there. The physics backends are

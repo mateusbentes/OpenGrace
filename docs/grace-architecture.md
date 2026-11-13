@@ -220,7 +220,7 @@ Windows and Android validation is build-only (cross-compile clean, not
 executed on either platform). macOS and iOS go through Metal
 (milestone 20, decision 47): the backend is implemented behind
 `GRACE_ENABLE_METAL` and compiles on any platform, with the hardware
-run pending until a Mac.
+run executed on the Apple A18 Pro.
 
 | GRACE 2 area | OpenGrace approach |
 | --- | --- |
@@ -291,7 +291,7 @@ script layer holding behaviour rather than authoritative state.
 | Linux x86_64 | Vulkan (extra capability) | Implemented, validated under lavapipe (milestones 18 and 19) |
 | Windows x86_64 | Vulkan (extra capability) | Cross-compiled against the winevulkan loader surface, not executed (milestone 18) |
 | Android (arm64-v8a) | Vulkan (primary target) | Cross-compiled with NDK r27c, not executed on hardware (milestone 18) |
-| macOS, iOS | Metal | Compiles on any platform (the loader declares its own types); mapping tests run on Linux; hardware run pending until a Mac (milestone 20) |
+| macOS, iOS | Metal | Compiles on any platform (the loader declares its own types); mapping tests run on Linux; hardware run executed on the Apple A18 Pro (milestone 20) |
 
 Linux is implemented and validated. Windows is cross-compiled with MinGW-w64
 and validated under Wine (milestone 17, decision 42): the tree builds clean
@@ -319,9 +319,10 @@ published enum values, the published C layouts) and resolves the
 Objective-C runtime and the Metal framework at runtime, so no Apple SDK
 header joins the tree and the module compiles on any platform. Its MSL 2.0
 sources compile at runtime through MTLLibrary, so there is no build-time
-shader step. The hardware run is pending until someone builds on a Mac;
-the validation recorded so far is the Linux compile and the pure mapping
-tests.
+shader step. The hardware run has executed on the Apple A18 Pro: the
+10-frame forward path reports violations 0 and test_metal_render passes
+31 checks with 0 failures; the validation recorded is the Linux compile,
+the pure mapping tests and the real-device run.
 
 Windows is expected to be a small change rather than a port. The window and the
 context come from SDL2, the render contract is API-neutral, and the OpenGL entry
@@ -403,8 +404,9 @@ only option left (Apple removed OpenGL ES), while on macOS OpenGL is
 deprecated but still present. The loader declares its own types and
 resolves the Objective-C runtime and the Metal framework at runtime, so
 the module compiles on any platform; MSL compiles at runtime through
-MTLLibrary. The hardware run is pending until a Mac executes it — the
-recorded validation is the Linux compile and the pure mapping tests.
+MTLLibrary. The hardware run has executed on the Apple A18 Pro — the
+recorded validation is the Linux compile, the pure mapping tests and the
+real-device run.
 The contract was designed against OpenGL, and the second backend is what will
 test it. The parts expected to survive unchanged are the ones about resources
 and passes: mesh and texture creation, `beginRenderPass` and `endRenderPass`,

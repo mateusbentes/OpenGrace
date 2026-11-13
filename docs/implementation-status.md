@@ -47,7 +47,7 @@ The `.docx` files in this directory are generated from the `.md` sources with
 | 17 | Windows validation: the MinGW-w64 cross-compile builds the tree clean under -Werror (105 targets), the OpenGL backend links opengl32.dll and the Windows system libraries, the GL headers load glcorearb.h, and the SDL teardown releases the video subsystem by reference count with the context unbound before deletion (decision 42) | Done |
 | 18 | Vulkan render backend: the full 38-method contract on one backend for Linux, Windows and Android (decision 43), behind `GRACE_ENABLE_VULKAN` with its own GLSL 450-core shader library compiled to SPIR-V at build time by glslangValidator (decision 44). The loader declares its own types locally (no generated headers shipped); validated on Linux under lavapipe, cross-compiled for Windows (winevulkan) and for Android (NDK r27c, arm64-v8a, build only) | Done |
 | 19 | Vulkan hardware path: the presentation engine (the swap interval maps onto the present mode, the acquire retries on the out-of-date resize, the present result steers the next frame), the depth attachment format picked from the device's format properties (D24S8, D32Sfloat, D16Unorm in that order), and the sampler descriptors written at draw time from the bound texture views (the layout table's unit rule, the default 1x1 white texture for unbound slots) (decision 46) | Done |
-| 20 | Metal render backend: macOS and iOS behind `GRACE_ENABLE_METAL` — the same 38-method contract, the self-declared loader resolving the Objective-C runtime and the Metal framework at runtime (dlopen/dlsym, no Apple SDK header in the tree, the module compiles on any platform), MSL 2.0 shader sources compiled at runtime by MTLLibrary (no build-time shader step), presentation through SDL's CAMetalLayer bridge, and the pure mapping tests (pixel formats, compare ops, blend, load/store, sampler states, index types) running on Linux. Hardware run pending until a Mac executes it (decision 47) | Done |
+| 20 | Metal render backend: macOS and iOS behind `GRACE_ENABLE_METAL` — the same 38-method contract, the self-declared loader resolving the Objective-C runtime and the Metal framework at runtime (dlopen/dlsym, no Apple SDK header in the tree, the module compiles on any platform), MSL 2.0 shader sources compiled at runtime by MTLLibrary (no build-time shader step), presentation through SDL's CAMetalLayer bridge, and the pure mapping tests (pixel formats, compare ops, blend, load/store, sampler states, index types) running on Linux. Hardware run executed on the Apple A18 Pro: 10 frames, violations 0, test_metal_render 31/31 (decision 47) | Done |
 ---
 
 ## Module status
@@ -146,6 +146,7 @@ All results below are real runs, on the tree at the stated commit.
 | 2026-11-11 | same, milestone 19 | Linux regression: the default build 25/25 and the OpenGL build 41/41 stay green; docs_structure 23 checks, 0 failures. Validation is lavapipe only: the engine's Vulkan path has not been executed on dedicated hardware in this environment — the hardware run on the project's Iris Xe host is recorded by the user's own validation |
 | 2026-11-11 | Kubuntu, x86_64, Mesa Intel Iris Xe (ADL GT2), milestone 19 | The first hardware run of the Vulkan path segfaulted inside vkAllocateMemory on the driver (ANV), at the default texture's allocation. The loader's hand-written structures carried two layout defects the software device never punished: VkMemoryAllocateInfo's allocationSize was 32-bit where the spec's VkDeviceSize is 64 (the driver read the memory type index past the structure's end), and VkSamplerCreateInfo lacked the mipmapMode field, shifting every following member by 4 bytes. Both fixed, and every loader structure's size now matches the published layout exactly; grace --vulkan then ran the 10-frame forward path on the Iris Xe with violations 0, exit 0 |
 | 2026-11-11 | Ubuntu 24.04.5, x86_64, GCC 13.3.0, CMake 4.4.4, no Apple SDK, milestone 20 (decision 47) | The Metal build compiles clean under -Werror on Linux with `GRACE_ENABLE_METAL=ON` (the loader declares its own types; no Apple SDK exists in this environment, and none is needed). test_metal_render runs on Linux: the pure mapping checks pass (the published MTLPixelFormat, MTLCompareFunction, MTLBlendFactor, MTLLoadAction/MTLStoreAction, MTLSamplerAddressMode and MTLIndexType values, and the shared std140 layout table's 27 entries), and the device-dependent block skips with exit 77 — no Metal framework exists here. Honest scope: the hardware run of the Metal path is pending until someone builds and runs on a Mac; nothing in this record claims otherwise |
+| 2026-11-12 | macOS, Apple A18 Pro (iPhone 17), milestone 20 (decision 47) | The first hardware run of the Metal path executes the 10-frame forward path on the Apple A18 Pro: grace --metal --frames 10 -v reports renderer Apple A18 Pro, frame 1280x720, frames=10 steps=20 clamps=0, violations=0, exit 0. test_metal_render passes 31 checks, 0 failures and the Metal build's ctest runs 26/26, 100% tests passed. The milestone's hardware run is no longer pending — the validation scope is now the Linux compile, the pure mapping tests and the real-device run on the A18 Pro (decision 47) |
 | 2026-11-11 | same, MinGW-w64 GCC 13.2.0 cross-compile (x86_64-w64-mingw32), Wine 9.0, milestone 19 | The tree with `GRACE_ENABLE_VULKAN=ON` cross-compiles clean under -Werror: 41 test executables link for x86_64 and test_renderer runs 41 checks, 0 failures under Wine. Honest scope: compile-validated only |
 | 2026-11-11 | same, Android NDK r27c cross-compile (arm64-v8a, android-26), milestone 19 | The tree with `GRACE_ENABLE_VULKAN=ON` cross-compiles clean under -Werror with the NDK's clang (r27c): 23 test executables link for aarch64. Not executed on Android hardware: build-only validation, the intended Android path is the primary target of the Vulkan backend (decision 43) |
 
@@ -1399,10 +1400,13 @@ grep -rn 'GLuint\|GLenum\|SDL_\|Window' include/grace/render/render_backend.hpp 
     compiles clean under -Werror on Linux, and (b) the pure mapping
     tests (pixel formats, compare ops, blend factors, load/store
     actions, sampler states, index types, the clear-colour struct's
-    size) run on Linux without a device. The hardware run — the
-    contract checks executing on a real Metal device — stays pending
-    until someone builds and runs on a Mac, exactly as the Vulkan
-    backend's own hardware run was pending before milestone 19.
+    size) run on Linux without a device. The hardware run has since
+    executed on the Apple A18 Pro: the 10-frame forward path reports
+    violations 0 and test_metal_render passes 31 checks, 0 failures.
+    The milestone's verification claim is therefore (a) the clean
+    Linux compile, (b) the pure mapping tests and (c) the hardware
+    run on the A18 Pro — and it is complete on all three (decision
+    47).
 
 ## Verification commands
 
