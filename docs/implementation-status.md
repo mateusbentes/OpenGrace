@@ -231,7 +231,7 @@ GL 3.2, so "3.0 core" is not a valid request.
 | Android | Vulkan (decision 43), cross-compiled with NDK r27c; the engine runs through the APK app shell (decision 52) | See 4.3 of the architecture document |
 | Consoles | Not implemented | Out of scope by decision |
 | "Fast SSE math library" | Scalar math, compiler autovectorisation | Hand-written intrinsics usually lose to the autovectoriser today and complicate the code substantially. Revisit only if profiling shows a need. |
-| Network-based editors and tools | Planned as a possible future milestone | Tooling, not the engine; the runtime loads all data through the resource container |
+| Network-based editors and tools | Out of scope (decision 50) | Tooling, not the engine; the runtime loads all data through the resource container |
 | Stereoscopic 3D | Out of scope (decision 50) | No target hardware path exists; the original targeted 3D Vision-era displays |
 
 ---
@@ -1486,9 +1486,9 @@ grep -rn 'GLuint\|GLenum\|SDL_\|Window' include/grace/render/render_backend.hpp 
     whose behaviour cannot be measured would contradict the project's
     validation discipline. The editors and network tools are tooling,
     not the engine — the runtime loads all data through the OWD
-    resource container — so they are recorded as a possible future
-    milestone rather than an engine milestone, and the engine itself is
-    complete without them (decision 50).
+    resource container — and they are out of scope: this project
+    reimplements the engine, not the content-creation tooling, and
+    the runtime is complete without them (decision 50).
 
 51. **2D textures and the 2D draw path.** The 3D texture path (milestone 7)
     and the render-target attachment path (milestone 4b) were both
