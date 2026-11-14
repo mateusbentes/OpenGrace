@@ -5,18 +5,20 @@ import org.libsdl.app.SDLActivity;
 /**
  * The OpenGrace app shell (decision 52): a bare executable cannot initialise
  * SDL on Android, so the engine runs through SDLActivity. The Java side
- * declares the library order (SDL2 then main) and the fixed command line the
+ * declares the library list (the engine's libmain.so) and the fixed command
+ * line the hardware run passes to the engine's main() through SDL_main.
  * hardware run passes to the engine's main() through SDL_main.
  */
 public class GraceActivity extends SDLActivity
 {
     /**
-     * The library order SDLActivity loads: the static SDL2 built with JNI
-     * entry points, then the engine's libmain.so (the grace CMake target).
+     * The library SDLActivity loads: the engine's libmain.so (the grace
+     * CMake target). The SDL2 with the JNI entry points is linked
+     * statically inside libmain.so, so there is no separate libSDL2.so.
      */
     @Override
     protected String[] getLibraries() {
-        return new String[] { "SDL2", "main" };
+        return new String[] { "main" };
     }
 
     /**

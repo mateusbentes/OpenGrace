@@ -926,8 +926,12 @@ target_link_libraries(owdtool PRIVATE grace_owd grace_warnings)
 
 add_executable(grace
     src/app/main.cpp)
-
 target_link_libraries(grace PRIVATE grace_app grace_null_render grace_warnings)
+if(ANDROID)
+    # The report goes to logcat through liblog on Android (the runtime
+    # discards stdout and stderr).
+    target_link_libraries(grace PRIVATE log)
+endif()
 
 if(GRACE_ENABLE_OPENGL)
     target_link_libraries(grace PRIVATE grace_render_opengl)
@@ -980,6 +984,7 @@ if(GRACE_ENABLE_ANDROID_SHELL)
         ${GRACE_THIRD_PARTY}/include)
     target_link_libraries(grace_main PRIVATE
         grace_app grace_null_render grace_warnings)
+    target_link_libraries(grace_main PRIVATE log)
     if(GRACE_ENABLE_OPENGL)
         target_link_libraries(grace_main PRIVATE grace_render_opengl)
         target_compile_definitions(grace_main PRIVATE GRACE_HAVE_OPENGL=1)

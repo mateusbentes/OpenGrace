@@ -37,6 +37,10 @@ BT=${ANDROID_BUILD_TOOLS:-$SDK/build-tools/34.0.0}
 PLATFORM=${ANDROID_PLATFORM_JAR:-$SDK/platforms/android-34/android.jar}
 ABI=${ANDROID_ABI:-arm64-v8a}
 OUT=${OUT:-$ROOT/build-android-apk}
+# The test keystore lives outside $OUT because the script wipes $OUT on
+# every run: a fresh keystore per run would sign each APK with a new key
+# and the device would refuse the update (INSTALL_FAILED_UPDATE_INCOMPATIBLE).
+KEYSTORE=${OG_KEYSTORE:-$ROOT/.og-android.keystore}
 
 # The engine's shared library. The CMake target is `grace_main`, output
 # `libmain.so`; the script takes the built file from the build tree.
@@ -95,12 +99,12 @@ cp "$OUT/base.apk" "$OUT/og.apk"
 
 # The APK aligns and signs.
 "$BT/zipalign" -f 4 "$OUT/og.apk" "$OUT/og-aligned.apk"
-if [ ! -f "$OUT/og.keystore" ]; then
-    keytool -genkeypair -keystore "$OUT/og.keystore" -alias og \
+if [ ! -f "$KEYSTORE" ]; then
+    keytool -genkeypair -keystore "$KEYSTORE" -alias og \
         -keyalg RSA -keysize 2048 -validity 10000 \
         -storepass opengrace -keypass opengrace -dname "CN=OpenGrace"
 fi
-"$BT/apksigner" sign --ks "$OUT/og.keystore" \
+"$BT/apksigner" sign --ks "$KEYSTORE" \
     --ks-pass pass:opengrace --key-pass pass:opengrace \
     --out "$OUT/og-signed.apk" \
     "$OUT/og-aligned.apk"

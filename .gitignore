@@ -75,3 +75,7 @@ compile_commands.json
 # Operating-system files
 .DS_Store
 Thumbs.db
+
+# Signing keys
+*.keystore
+*.jks

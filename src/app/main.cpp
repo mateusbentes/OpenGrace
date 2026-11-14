@@ -1,4 +1,5 @@
 #include <charconv>
+#include <cstdarg>
 #include <cinttypes>
 #include <cstdint>
 #include <cstdio>
@@ -21,7 +22,46 @@
 #include "grace/render/metal_render_backend.hpp"
 #endif
 
+#ifdef __ANDROID__
+#include <android/log.h>
+#endif
+
 namespace {
+
+// The Android runtime discards stdout and stderr, so the report goes to
+// logcat through liblog (tag "SDL", the same tag SDLActivity uses); the
+// desktop keeps both streams verbatim.
+#ifdef __ANDROID__
+void logLine(const char* fmt, ...)
+{
+    va_list args;
+    va_start(args, fmt);
+    __android_log_vprint(ANDROID_LOG_INFO, "SDL", fmt, args);
+    va_end(args);
+}
+void logErrorLine(const char* fmt, ...)
+{
+    va_list args;
+    va_start(args, fmt);
+    __android_log_vprint(ANDROID_LOG_ERROR, "SDL", fmt, args);
+    va_end(args);
+}
+#else
+void logLine(const char* fmt, ...)
+{
+    va_list args;
+    va_start(args, fmt);
+    std::vprintf(fmt, args);
+    va_end(args);
+}
+void logErrorLine(const char* fmt, ...)
+{
+    va_list args;
+    va_start(args, fmt);
+    std::vfprintf(stderr, fmt, args);
+    va_end(args);
+}
+#endif
 
 struct Options
 {
@@ -92,7 +132,7 @@ bool parseNumber(std::string_view text, T& out)
 
 int usageError(const std::string& message)
 {
-    std::fprintf(stderr, "grace: usage error: %s\n", message.c_str());
+    logErrorLine("grace: usage error: %s", message.c_str());
     printUsage(stderr);
     return 2;
 }
@@ -334,20 +374,20 @@ int main(int argc, char** argv)
         grace::app::Application app(config, renderer);
         const std::uint64_t total_steps = app.run(options.frames);
 
-        std::printf("grace: path=%s backend=%s frame=%" PRIu32 "x%" PRIu32 "\n",
+        logLine("grace: path=%s backend=%s frame=%" PRIu32 "x%" PRIu32 "\n",
                     options.path.c_str(),
                     backend->describe().c_str(), backend->width(), backend->height());
-        std::printf("grace: frames=%" PRIu64 " steps=%" PRIu64 " clamps=%" PRIu64 "\n",
+        logLine("grace: frames=%" PRIu64 " steps=%" PRIu64 " clamps=%" PRIu64 "\n",
                     options.frames, total_steps, app.clock().clampCount());
 #ifdef GRACE_HAVE_OPENGL
         if (gl_backend != nullptr)
         {
-            std::printf("grace: violations=%" PRIu64 " gl_errors=%" PRIu64 "\n",
+            logLine("grace: violations=%" PRIu64 " gl_errors=%" PRIu64 "\n",
                         gl_backend->violationCount(), gl_backend->glErrorCount());
             if (options.verbose)
             {
-                std::printf("grace: detail: %s\n", gl_backend->describe().c_str());
-                std::printf("grace: hidden=%d swap_interval=%d readback=%d\n",
+                logLine("grace: detail: %s\n", gl_backend->describe().c_str());
+                logLine("grace: hidden=%d swap_interval=%d readback=%d\n",
                             static_cast<int>(options.hidden),
                             static_cast<int>(options.swap_interval),
                             static_cast<int>(options.readback));
@@ -355,7 +395,7 @@ int main(int argc, char** argv)
             if (options.readback && gl_backend->hasCenterPixel())
             {
                 const grace::render::ClearColor pixel = gl_backend->centerPixel();
-                std::printf("grace: center_pixel=%d,%d,%d,%d depth=%.6f stencil=%d\n",
+                logLine("grace: center_pixel=%d,%d,%d,%d depth=%.6f stencil=%d\n",
                             static_cast<int>(pixel.r), static_cast<int>(pixel.g),
                             static_cast<int>(pixel.b), static_cast<int>(pixel.a),
                             static_cast<double>(gl_backend->centerDepth()),
@@ -367,12 +407,12 @@ int main(int argc, char** argv)
 #ifdef GRACE_HAVE_VULKAN
         if (vulkan_backend != nullptr)
         {
-            std::printf("grace: violations=%" PRIu64 "\n",
+            logLine("grace: violations=%" PRIu64 "\n",
                         vulkan_backend->violationCount());
             if (options.verbose)
             {
-                std::printf("grace: detail: %s\n", vulkan_backend->describe().c_str());
-                std::printf("grace: hidden=%d swap_interval=%d readback=%d\n",
+                logLine("grace: detail: %s\n", vulkan_backend->describe().c_str());
+                logLine("grace: hidden=%d swap_interval=%d readback=%d\n",
                             static_cast<int>(options.hidden),
                             static_cast<int>(options.swap_interval),
                             static_cast<int>(options.readback));
@@ -380,7 +420,7 @@ int main(int argc, char** argv)
             if (options.readback && vulkan_backend->hasCenterPixel())
             {
                 const grace::render::ClearColor pixel = vulkan_backend->centerPixel();
-                std::printf("grace: center_pixel=%d,%d,%d,%d depth=%.6f stencil=%d\n",
+                logLine("grace: center_pixel=%d,%d,%d,%d depth=%.6f stencil=%d\n",
                             static_cast<int>(pixel.r), static_cast<int>(pixel.g),
                             static_cast<int>(pixel.b), static_cast<int>(pixel.a),
                             static_cast<double>(vulkan_backend->centerDepth()),
@@ -393,13 +433,13 @@ int main(int argc, char** argv)
 #ifdef GRACE_HAVE_METAL
             if (metal_backend != nullptr)
             {
-                std::printf("grace: violations=%" PRIu64 "\n",
+                logLine("grace: violations=%" PRIu64 "\n",
                             metal_backend->violationCount());
                 if (options.verbose)
                 {
-                    std::printf("grace: detail: %s\n",
+                    logLine("grace: detail: %s\n",
                                 metal_backend->describe().c_str());
-                    std::printf("grace: hidden=%d swap_interval=%d readback=%d\n",
+                    logLine("grace: hidden=%d swap_interval=%d readback=%d\n",
                                 static_cast<int>(options.hidden),
                                 static_cast<int>(options.swap_interval),
                                 static_cast<int>(options.readback));
@@ -408,7 +448,7 @@ int main(int argc, char** argv)
                 {
                     const grace::render::ClearColor pixel =
                         metal_backend->centerPixel();
-                    std::printf("grace: center_pixel=%d,%d,%d,%d depth=%.6f stencil=%d\n",
+                    logLine("grace: center_pixel=%d,%d,%d,%d depth=%.6f stencil=%d\n",
                                 static_cast<int>(pixel.r),
                                 static_cast<int>(pixel.g),
                                 static_cast<int>(pixel.b),
@@ -420,7 +460,7 @@ int main(int argc, char** argv)
             else
 #endif
             {
-                std::printf("grace: violations=%" PRIu64 "\n",
+                logLine("grace: violations=%" PRIu64 "\n",
                             null_backend->violationCount());
             }
         }
@@ -428,7 +468,7 @@ int main(int argc, char** argv)
     }
     catch (const std::exception& error)
     {
-        std::fprintf(stderr, "grace: runtime failure: %s\n", error.what());
+        logErrorLine("grace: runtime failure: %s\n", error.what());
         return 1;
     }
 
