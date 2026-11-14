@@ -96,7 +96,7 @@ be read back by the overlay loader.
 | Windows x86_64 | OpenGL | Cross-compiled, validated under Wine (milestone 17) |
 | Linux x86_64 | Vulkan (extra capability) | Implemented, validated under lavapipe (milestones 18 and 19) |
 | Windows x86_64 | Vulkan (extra capability) | Cross-compiled against the winevulkan loader surface, not executed (milestone 18) |
-| Android (arm64-v8a) | Vulkan (primary target) | Cross-compiled with NDK r27c, not executed on hardware (milestone 18) |
+| Android (arm64-v8a) | Vulkan (primary target) | Cross-compiled with NDK r27c; the engine runs through the APK app shell (milestone 23, decision 52) |
 | macOS, iOS | Metal | Compiles on any platform; mapping tests run on Linux; hardware run executed on the Apple A18 Pro (milestone 20) |
 
 Linux is implemented and validated. Windows is cross-compiled with MinGW-w64
@@ -107,6 +107,19 @@ Android is recorded here so the intended scope is explicit rather than
 implied: the Vulkan backend (milestone 18) is the Android path, the tree
 cross-compiles clean for Android with NDK r27c, and the Vulkan backend has
 not been executed on Android hardware in the delivered increments.
+
+Mobile platforms (Android and iOS) cannot run a bare executable: Android's
+`SDL_Init` needs an `Activity` with a JNI environment and an `ANativeWindow`,
+and iOS has no shell at all. The engine's application layer is a library
+(`grace_app`), not a process, so the mobile build links the same `main.cpp`
+behind a shared library (`libmain.so`) that carries the whole engine
+statically plus the static SDL2 with its JNI entry points (`JNI_OnLoad`), and
+the SDL2 `android-project` template loads it through `SDLActivity` (decision
+52). The engine code is unchanged: the same sources build the Linux
+executable, the Windows executable, the macOS executable and the Android
+shared library. iOS is the same shape — an application shell that calls the
+engine's `main` with Metal behind it — with the shell itself not a delivered
+increment for iOS.
 
 Windows is expected to be a small change rather than a port. The window and the
 context come from SDL2, the render contract is API-neutral, and the OpenGL entry
@@ -245,6 +258,35 @@ cmake -S . -B build-android -G Ninja -DCMAKE_BUILD_TYPE=Debug \
 The Android build is validated as build-only (the binaries are not
 executed on hardware in the delivered increments).
 
+The OpenSL ES audio backend adds one option on the same configure:
+`-DGRACE_ENABLE_OPENSL=ON`. The backend links the `OpenSLES` system
+library the NDK sysroot provides — no download and no submodule; see the
+Dependencies section.
+
+The app shell (decision 52) builds the same engine as a shared library
+behind SDLActivity: the tree's `android/` directory carries the SDL2
+`android-project` template's overlay (the manifest, the `GraceActivity`
+subclass and the strings) and `tools/build-android-apk.sh` assembles the
+APK. The engine's application layer is a library, not a process, so the
+engine code is unchanged — the same `main.cpp` builds the Linux, Windows
+and macOS executables and this shared library:
+```
+cmake -S . -B build-android-apk -G Ninja -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_TOOLCHAIN_FILE=$NDK/build/cmake/android.toolchain.cmake \
+  -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-26 \
+  -DGRACE_ENABLE_VULKAN=ON -DGRACE_ENABLE_ANDROID_SHELL=ON \
+  -DGRACE_BUILD_TESTS=OFF
+cmake --build build-android-apk --parallel
+ANDROID_SDK=$SDK GRACE_MAIN_SO=build-android-apk/lib/libmain.so \
+  sh tools/build-android-apk.sh
+```
+The script writes `build-android-apk/og-signed.apk` (com.opengrace.app);
+the APK carries the whole engine statically plus the static SDL2 with its
+JNI entry points (`JNI_OnLoad`), and the `GraceActivity` subclass passes
+the fixed command line (`--vulkan --frames 10 -v`) through `getArguments()`.
+The script needs the Android build-tools (aapt2, d8, zipalign, apksigner)
+on the build machine; it is the shell's own packaging step, not a new
+engine dependency.
 ### Default build
 ```
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
@@ -269,6 +311,7 @@ Build options:
 | `GRACE_ENABLE_OPENAL` | `OFF` | OpenAL Soft audio backend + Ogg/Vorbis. |
 | `GRACE_ENABLE_XAUDIO2` | `OFF` | XAudio2 audio backend (Windows only). |
 | `GRACE_ENABLE_OPENSL` | `OFF` | OpenSL ES audio backend (Android only). |
+| `GRACE_ENABLE_ANDROID_SHELL` | `OFF` | Android app shell: the shared library (`libmain.so`) SDLActivity loads from the APK. |
 | `GRACE_ENABLE_FREETYPE` | `OFF` | FreeType GUI font adapter (the submodule). |
 | `GRACE_ENABLE_THEORA` | `OFF` | Theora video decode adapter + Ogg/Vorbis. |
 
@@ -295,6 +338,15 @@ static libraries it produces).
 | [libogg](https://github.com/xiph/ogg) / [libvorbis](https://github.com/xiph/vorbis) | BSD-style | Ogg Vorbis decode in the audio module's data layer | linked when `GRACE_ENABLE_OPENAL=ON` |
 | [FreeType](https://freetype.org) | FTL (BSD-style) or GPL-2.0 | Font rasterisation in the GUI module | linked when `GRACE_ENABLE_FREETYPE=ON` |
 | [libtheora](https://theora.org) | BSD-style (3-Clause) | Ogg Theora decode in the video module's data layer | linked when `GRACE_ENABLE_THEORA=ON` |
+| OpenSL ES | Android system library | Audio backend on Android | linked when `GRACE_ENABLE_OPENSL=ON` (Android only) |
+| XAudio2 | Windows system library | Audio backend on Windows | linked when `GRACE_ENABLE_XAUDIO2=ON` (Windows only) |
+
+The last two rows are platform APIs, not fetchable dependencies, and are
+deliberately absent from the submodule list. OpenSL ES comes from the NDK's
+sysroot for the target API level (the build links the `OpenSLES` system
+library directly) and XAudio2 comes from the Windows SDK on the target
+platform; neither has a source repository to pin, so neither gets a
+submodule entry, and their licence terms ride on the platform itself.
 
 The submodules are fetched once with:
 

@@ -50,7 +50,7 @@ The `.docx` files in this directory are generated from the `.md` sources with
 | 20 | Metal render backend: macOS and iOS behind `GRACE_ENABLE_METAL` — the same 38-method contract, the self-declared loader resolving the Objective-C runtime and the Metal framework at runtime (dlopen/dlsym, no Apple SDK header in the tree, the module compiles on any platform), MSL 2.0 shader sources compiled at runtime by MTLLibrary (no build-time shader step), presentation through SDL's CAMetalLayer bridge, and the pure mapping tests (pixel formats, compare ops, blend, load/store, sampler states, index types) running on Linux. Hardware run executed on the Apple A18 Pro: 10 frames, violations 0, test_metal_render 31/31 (decision 47) | Done |
 | 21 | Core completion: the documented curve set (spline, B-spline and TCB), the task-based multithreading (a pool of workers running a declared dependency graph, the deterministic-closure rule), the built-in profiler (zone timers and the violation counters) and the compressed-texture support (BC1-BC5 decoded on the CPU into RGBA8, the published block layouts) (decision 48) | Done |
 | 22 | Audio platform backends: the XAudio2 backend (Windows) behind `GRACE_ENABLE_XAUDIO2` and the OpenSL ES backend (Android) behind `GRACE_ENABLE_OPENSL`, both implementing the same audio contract (13a) the null backend and the OpenAL Soft adapter already implement — the same buffer/voice/stream/reverb mapping, the decode layer untouched (decision 49) | Done |
-| 23 | 2D texture path and sprite 2D: the standalone 2D texture resource (create, fill, sample, read back) on the null, OpenGL, Vulkan and Metal backends, the Sprite2D shader program (a textured quad in NDC space with the tint colour and amount) on the shader libraries and the procedural tween (a scalar animated from a start to an end over a duration) (decision 51) | Done |
+| 23 | 2D texture path and sprite 2D: the standalone 2D texture resource (create, fill, sample, read back) on the null, OpenGL, Vulkan and Metal backends, the Sprite2D shader program (a textured quad in NDC space with the tint colour and amount) on the shader libraries and the procedural tween (a scalar animated from a start to an end over a duration) (decision 51), plus the Android app shell behind the APK (decision 52) | Done |
 ---
 
 ## Module status
@@ -154,6 +154,7 @@ All results below are real runs, on the tree at the stated commit.
 | 2026-11-13 | Ubuntu 24.04.5, x86_64, GCC 13.3.0, milestone 22 (decision 49) | The default build's ctest runs 29/29, 100% tests passed (the default build has no platform audio backend, so the tree is unchanged there). The MinGW-w64 x86_64 cross-compile with `GRACE_ENABLE_XAUDIO2=ON` builds the tree clean under -Werror and the full suite runs under Wine: 27/27 test executables pass, including test_audio_xaudio2 with 37 checks, 0 failures against the real xaudio2_8.dll (XAudio2 9.0) the Wine prefix provides — the Windows platform backend runs for real. The Android NDK r27c arm64-v8a cross-compile with `GRACE_ENABLE_OPENSL=ON` builds the tree clean under -Werror including test_audio_opensl (the OpenSL ES 1.0 sysroot library); the suite runs on Android hardware, not in this environment, and is recorded as build-validated only, the same honest scope the Vulkan and Metal Android rows carry |
 | 2026-11-13 | Ubuntu 24.04.5, x86_64, GCC 13.3.0, milestone 23 (decision 51) | The default build's ctest runs 30/30, 100% tests passed (the new suite test_tween runs 67 checks, 0 failures). The OpenGL build's ctest runs 46/46, 100% tests passed — the OpenGL build's test_opengl_render runs 229 checks, 0 failures, with the 2D texture contract in the shared runContractChecks (round trip, volume-vs-2D bind rejections, byte-count refusal, invalid creations, post-release fill refusal) and the null backend's event log asserting the exact 2D call sequence. The Vulkan build's ctest runs 31/31, 100% tests passed (the Vulkan backend's volume block runs the same 2D checks on the lavapipe device); the Metal build's ctest runs 31/31 (the Metal device-dependent block skips with exit 77 on Linux, as recorded). The MinGW-w64 x86_64 and the Android NDK r27c arm64-v8a cross-compiles build the tree clean under -Werror, build-only validation, the same honest scope the Vulkan and Metal Android rows carry |
 | 2026-11-13 | macOS 26.5.1, Apple A18 Pro (MacBook-Neo-de-Maria), milestone 23 (decision 51) | The Metal build's ctest runs 31/31 on the Apple silicon device — the Metal device-dependent block runs for real: the 2D texture contract checks run on the A18 Pro and the round trip passes. The first hardware run exposed two real defects the Linux mapping tests could not see: the Metal blit copy for the 2D texture used the packed form's row pitch where the GPU writes one row per destination row, and the readback's command buffer was reused after a commit (the same rule the frame's submit follows). Both are fixed, and the layout table's count check is updated to the 29 entries the Sprite2D pair adds. The 10-frame forward path reports violations 0 |
+| 2026-11-13 | Ubuntu 24.04.5, x86_64, GCC 13.3.0, milestone 23 (decision 52) | The Android app shell is built: the bare executable cannot initialise SDL on Android (`SDL_Init` needs an `Activity` with a JNI environment and an `ANativeWindow`), and iOS has no shell at all — the app shell is the only path for mobile. The delivered increment builds an APK (com.opengrace.app, arm64-v8a, 3.0 MB) whose `libmain.so` carries the whole engine statically plus the static SDL2 with its JNI entry points (`JNI_OnLoad`), and whose `GraceActivity` subclass passes the fixed command line (`--vulkan --frames 10 -v`) through `getArguments()`. The engine code is unchanged — the same sources build the Linux executable, the Windows executable, the macOS executable and the Android shared library. iOS is the same shape, with the shell itself not a delivered increment for iOS |
 | 2026-11-11 | same, MinGW-w64 GCC 13.2.0 cross-compile (x86_64-w64-mingw32), Wine 9.0, milestone 19 | The tree with `GRACE_ENABLE_VULKAN=ON` cross-compiles clean under -Werror: 41 test executables link for x86_64 and test_renderer runs 41 checks, 0 failures under Wine. Honest scope: compile-validated only |
 | 2026-11-11 | same, Android NDK r27c cross-compile (arm64-v8a, android-26), milestone 19 | The tree with `GRACE_ENABLE_VULKAN=ON` cross-compiles clean under -Werror with the NDK's clang (r27c): 23 test executables link for aarch64. Not executed on Android hardware: build-only validation, the intended Android path is the primary target of the Vulkan backend (decision 43) |
 
@@ -227,7 +228,7 @@ GL 3.2, so "3.0 core" is not a valid request.
 | Original | This project | Reason |
 | --- | --- | --- |
 | Direct3D 9/10/11 | Not implemented | Out of scope by decision; OpenGL is the Windows path too (milestone 17) |
-| Android | Vulkan (decision 43), cross-compiled with NDK r27c; not executed on hardware | See 4.3 of the architecture document |
+| Android | Vulkan (decision 43), cross-compiled with NDK r27c; the engine runs through the APK app shell (decision 52) | See 4.3 of the architecture document |
 | Consoles | Not implemented | Out of scope by decision |
 | "Fast SSE math library" | Scalar math, compiler autovectorisation | Hand-written intrinsics usually lose to the autovectoriser today and complicate the code substantially. Revisit only if profiling shows a need. |
 | Network-based editors and tools | Planned as a possible future milestone | Tooling, not the engine; the runtime loads all data through the resource container |
@@ -1509,6 +1510,26 @@ grep -rn 'GLuint\|GLenum\|SDL_\|Window' include/grace/render/render_backend.hpp 
     2D layer's batching, the sprite-sheet packing and the UI-layout
     tooling are not here — they are the application layer's job once the
     resource path exists (decision 51).
+
+52. **How does the engine run on Android and iOS, given that a bare
+    executable cannot?** **Resolved 2026-11-13: the app shell is the
+    only path for mobile.** A bare executable pushed to
+    `/data/local/tmp` cannot initialise SDL on Android (`SDL_Init`
+    needs an `Activity` with a JNI environment and an `ANativeWindow`),
+    and iOS has no shell at all. The engine's application layer is a
+    library (`grace_app`), not a process, so the mobile build links the
+    same `main.cpp` behind a shared library (`libmain.so`) that carries
+    the whole engine statically plus the static SDL2 with its JNI entry
+    points (`JNI_OnLoad`), and the SDL2 `android-project` template loads
+    it through `SDLActivity`. The delivered increment builds an APK
+    (com.opengrace.app, arm64-v8a) whose `GraceActivity` subclass passes
+    the fixed command line (`--vulkan --frames 10 -v`) through
+    `getArguments()`; the engine code is unchanged — the same sources
+    build the Linux executable, the Windows executable, the macOS
+    executable and the Android shared library. iOS is the same shape
+    (an application shell that calls the engine's `main`), with Metal
+    behind the shell; the shell itself is not a delivered increment for
+    iOS, which is recorded as an honest scope note.
 
 ## Verification commands
 

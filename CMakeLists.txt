@@ -37,6 +37,8 @@ option(GRACE_ENABLE_ANGELSCRIPT "Build the AngelScript script backend"     OFF)
 option(GRACE_ENABLE_OPENAL      "Build the OpenAL Soft audio backend"      OFF)
 option(GRACE_ENABLE_XAUDIO2     "Build the XAudio2 audio backend (Windows)" OFF)
 option(GRACE_ENABLE_OPENSL      "Build the OpenSL ES audio backend (Android)" OFF)
+option(GRACE_ENABLE_ANDROID_SHELL
+    "Build the Android app shell (shared library behind SDLActivity)" OFF)
 option(GRACE_ENABLE_FREETYPE    "Build the FreeType GUI font adapter"     OFF)
 option(GRACE_ENABLE_THEORA      "Build the Theora video decode adapter"    OFF)
 
@@ -940,6 +942,56 @@ endif()
 if(GRACE_ENABLE_METAL)
     target_link_libraries(grace PRIVATE grace_render_metal)
     target_compile_definitions(grace PRIVATE GRACE_HAVE_METAL=1)
+endif()
+
+# ---------------------------------------------------------------------------
+# The Android app shell
+#
+# A bare executable cannot initialise SDL on Android: SDL_Init needs an
+# Activity with a JNI environment and an ANativeWindow (decision 52). The
+# shell is the same main.cpp compiled as a shared library with SDL_main.h
+# forced into the translation unit, so the entry point becomes SDL_main and
+# SDLActivity loads libmain.so from the APK; the static SDL2 carries the
+# JNI_OnLoad that registers the native methods. The same sources build the
+# Linux, Windows and macOS executables and this shared library.
+# ---------------------------------------------------------------------------
+if(GRACE_ENABLE_ANDROID_SHELL)
+    if(NOT ANDROID)
+        message(FATAL_ERROR
+            "GRACE_ENABLE_ANDROID_SHELL=ON is supported on Android only "
+            "(the shared library is what SDLActivity loads from the APK)")
+    endif()
+    if(NOT (GRACE_ENABLE_OPENGL OR GRACE_ENABLE_VULKAN
+            OR GRACE_ENABLE_METAL))
+        message(FATAL_ERROR
+            "GRACE_ENABLE_ANDROID_SHELL=ON needs a render backend: the "
+            "shell exists to put a window and a graphics API behind the "
+            "engine on the device")
+    endif()
+    add_library(grace_main SHARED
+        src/app/main.cpp)
+    set_target_properties(grace_main PROPERTIES OUTPUT_NAME main)
+    # SDL_main.h redefines main as SDL_main on Android; forcing the header
+    # into the translation unit renames the entry point without touching the
+    # source, and the header's SDLMAIN_DECLSPEC exports the symbol.
+    target_compile_options(grace_main PRIVATE
+        -include SDL2/SDL_main.h)
+    target_include_directories(grace_main PRIVATE
+        ${GRACE_THIRD_PARTY}/include)
+    target_link_libraries(grace_main PRIVATE
+        grace_app grace_null_render grace_warnings)
+    if(GRACE_ENABLE_OPENGL)
+        target_link_libraries(grace_main PRIVATE grace_render_opengl)
+        target_compile_definitions(grace_main PRIVATE GRACE_HAVE_OPENGL=1)
+    endif()
+    if(GRACE_ENABLE_VULKAN)
+        target_link_libraries(grace_main PRIVATE grace_render_vulkan)
+        target_compile_definitions(grace_main PRIVATE GRACE_HAVE_VULKAN=1)
+    endif()
+    if(GRACE_ENABLE_METAL)
+        target_link_libraries(grace_main PRIVATE grace_render_metal)
+        target_compile_definitions(grace_main PRIVATE GRACE_HAVE_METAL=1)
+    endif()
 endif()
 
 # ---------------------------------------------------------------------------

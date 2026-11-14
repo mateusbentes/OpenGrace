@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The OpenGrace app shell (decision 52): the template's strings.xml with
+     the app name. -->
+<resources>
+    <string name="app_name">OpenGrace</string>
+</resources>

@@ -290,7 +290,7 @@ script layer holding behaviour rather than authoritative state.
 | Windows x86_64 | OpenGL | Cross-compiled, validated under Wine (milestone 17) |
 | Linux x86_64 | Vulkan (extra capability) | Implemented, validated under lavapipe (milestones 18 and 19) |
 | Windows x86_64 | Vulkan (extra capability) | Cross-compiled against the winevulkan loader surface, not executed (milestone 18) |
-| Android (arm64-v8a) | Vulkan (primary target) | Cross-compiled with NDK r27c, not executed on hardware (milestone 18) |
+| Android (arm64-v8a) | Vulkan (primary target) | Cross-compiled with NDK r27c; the engine runs through the APK app shell (milestone 23, decision 52) |
 | macOS, iOS | Metal | Compiles on any platform (the loader declares its own types); mapping tests run on Linux; hardware run executed on the Apple A18 Pro (milestone 20) |
 
 Linux is implemented and validated. Windows is cross-compiled with MinGW-w64
@@ -312,6 +312,18 @@ resize, the depth attachment format picked from the device's format
 properties, and the sampler descriptors written at draw time from the bound
 texture views. The Vulkan backend is closed — the next milestone has no
 Vulkan work.
+Mobile platforms (Android and iOS) cannot run a bare executable: Android's
+`SDL_Init` needs an `Activity` with a JNI environment and an `ANativeWindow`,
+and iOS has no shell at all. The engine's application layer is a library
+(`grace_app`), not a process, so the mobile build links the same `main.cpp`
+behind a shared library (`libmain.so`) that carries the whole engine
+statically plus the static SDL2 with its JNI entry points (`JNI_OnLoad`), and
+the SDL2 `android-project` template loads it through `SDLActivity` (decision
+52). The engine code is unchanged: the same sources build the Linux
+executable, the Windows executable, the macOS executable and the Android
+shared library. iOS is the same shape — an application shell that calls the
+engine's `main` with Metal behind it — with the shell itself not a delivered
+increment for iOS.
 
 The Metal backend (milestone 20, decision 47) covers macOS and iOS with one
 backend behind `GRACE_ENABLE_METAL`: the loader declares its own types (the
