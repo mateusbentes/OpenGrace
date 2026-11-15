@@ -155,6 +155,7 @@ All results below are real runs, on the tree at the stated commit.
 | 2026-11-13 | Ubuntu 24.04.5, x86_64, GCC 13.3.0, milestone 23 (decision 51) | The default build's ctest runs 30/30, 100% tests passed (the new suite test_tween runs 67 checks, 0 failures). The OpenGL build's ctest runs 46/46, 100% tests passed — the OpenGL build's test_opengl_render runs 229 checks, 0 failures, with the 2D texture contract in the shared runContractChecks (round trip, volume-vs-2D bind rejections, byte-count refusal, invalid creations, post-release fill refusal) and the null backend's event log asserting the exact 2D call sequence. The Vulkan build's ctest runs 31/31, 100% tests passed (the Vulkan backend's volume block runs the same 2D checks on the lavapipe device); the Metal build's ctest runs 31/31 (the Metal device-dependent block skips with exit 77 on Linux, as recorded). The MinGW-w64 x86_64 and the Android NDK r27c arm64-v8a cross-compiles build the tree clean under -Werror, build-only validation, the same honest scope the Vulkan and Metal Android rows carry |
 | 2026-11-13 | macOS 26.5.1, Apple A18 Pro (MacBook-Neo-de-Maria), milestone 23 (decision 51) | The Metal build's ctest runs 31/31 on the Apple silicon device — the Metal device-dependent block runs for real: the 2D texture contract checks run on the A18 Pro and the round trip passes. The first hardware run exposed two real defects the Linux mapping tests could not see: the Metal blit copy for the 2D texture used the packed form's row pitch where the GPU writes one row per destination row, and the readback's command buffer was reused after a commit (the same rule the frame's submit follows). Both are fixed, and the layout table's count check is updated to the 29 entries the Sprite2D pair adds. The 10-frame forward path reports violations 0 |
 | 2026-11-13 | Ubuntu 24.04.5, x86_64, GCC 13.3.0, milestone 23 (decision 52) | The Android app shell is built: the bare executable cannot initialise SDL on Android (`SDL_Init` needs an `Activity` with a JNI environment and an `ANativeWindow`), and iOS has no shell at all — the app shell is the only path for mobile. The delivered increment builds an APK (com.opengrace.app, arm64-v8a, 3.0 MB) whose `libmain.so` carries the whole engine statically plus the static SDL2 with its JNI entry points (`JNI_OnLoad`), and whose `GraceActivity` subclass passes the fixed command line (`--vulkan --frames 10 -v`) through `getArguments()`. The engine code is unchanged — the same sources build the Linux executable, the Windows executable, the macOS executable and the Android shared library. iOS is the same shape, with the shell itself not a delivered increment for iOS |
+| 2026-11-14 | Android 17 (CP2A.260605.016), Samsung Galaxy A56 (SM-A566E, a56x), arm64-v8a, Samsung Xclipse 540, APK com.opengrace.app, milestone 23 (decision 52) | The Android hardware run executes: the APK installs and the 10-frame validation run completes on the device, reporting `grace: path=forward backend=vulkan 1.3; vendor=5197; renderer=Samsung Xclipse 540`, `frames=10 steps=20 clamps=0 violations=0` and `Finished main function` — the hardware closure the build-only rows recorded as pending. The first hardware run exposed ten real defects the desktop stacks never punished (the loader's entry point signature, a double-ended command buffer, the undefined swapchain extent, unmasked swapchain usages and a fixed pre-transform, the portrait birth and mid-initialise rotation, the retry's stale extent, a wrong colour space, a depth image missing the transfer-destination usage, wrong pipeline stage and depth format values, and a frame command buffer never ended plus a command pool without the reset flag); all ten are fixed and the desktop platforms stay green (default 30/30, OpenGL 46/46, Vulkan 31/31, Metal 31/31, Release 30/30, MinGW+Wine 30/31 with the pre-existing XAudio2 Wine timeout, docs_structure 23 checks 0 failures) |
 | 2026-11-11 | same, MinGW-w64 GCC 13.2.0 cross-compile (x86_64-w64-mingw32), Wine 9.0, milestone 19 | The tree with `GRACE_ENABLE_VULKAN=ON` cross-compiles clean under -Werror: 41 test executables link for x86_64 and test_renderer runs 41 checks, 0 failures under Wine. Honest scope: compile-validated only |
 | 2026-11-11 | same, Android NDK r27c cross-compile (arm64-v8a, android-26), milestone 19 | The tree with `GRACE_ENABLE_VULKAN=ON` cross-compiles clean under -Werror with the NDK's clang (r27c): 23 test executables link for aarch64. Not executed on Android hardware: build-only validation, the intended Android path is the primary target of the Vulkan backend (decision 43) |
 
@@ -168,11 +169,64 @@ All results below are real runs, on the tree at the stated commit.
 | `describe()` reported "not running" after shutdown | Runtime state reported instead of historical fact | Version, vendor and renderer reported whenever a context was obtained |
 | Mesh/shader tests drew with a uniform set before the program was active (`GL_INVALID_OPERATION`) | `glUniform*` requires a current program | Documented precondition in `shader.hpp` (setUniform requires `use()`); tests activate the program first |
 | Published tree did not build with `GRACE_ENABLE_OPENGL=ON` | The lighting commit left the shader header unstaged and published half of a `const` change, so `drawIndexed() const` in the null backend had no matching override | Complete the change set and verify by building a fresh clone |
+| Vulkan loader crashed inside `vkGetInstanceProcAddr` on Android (SIGSEGV at the ASCII of the function name) | The loader's `ResolveFn` was `void*(*)(const char*)` but the real `vkGetInstanceProcAddr` takes `(VkInstance, const char*)`; the name string was passed as the instance pointer | Corrected the signature to `void*(*)(VkInstance, const char*)` and the helper resolves with a null instance; the desktop stacks passed by register luck |
+| The device driver rejected the one-off command buffer's submit | The one-off buffer was ended twice: once by the recorder and once inside `submitOneOff` | Removed the redundant `vkEndCommandBuffer` calls; the recorder owns the end |
+| The device driver rejected the swapchain creation with `VK_ERROR_INITIALIZATION_FAILED` during rotation | The capabilities' `currentExtent` can be `0xFFFFFFFF` (undefined) on Android during a rotation; the code trusted it | Clamp the undefined extent to the window size bounded by `minImageExtent`/`maxImageExtent` |
+| The device driver rejected the swapchain creation with `VK_ERROR_INITIALIZATION_FAILED` | The image usage unconditionally requested `TransferSrc` (the readback copies from the swapchain) and the pre-transform was fixed to identity; the driver supports only `ColorAttachment` on the swapchain and may report a non-identity transform | Mask the usage against `supportedUsageFlags` and take `currentTransform`; the failure message carries the numeric `VkResult` |
+| The app was born portrait and the surface change arrived after `initialise()` failed | The manifest's activity declared no orientation, so SDL requested a rotation mid-initialise | Declare `sensorLandscape` on the activity; the app is born in the engine's orientation |
+| All 20 swapchain retries failed with `VK_ERROR_INITIALIZATION_FAILED` even after focus | The retry reused the same swap info built once, with the extent captured mid-resize, while the window's real extent had changed | Re-query the surface capabilities and rebuild the swap info inside every retry attempt |
+| The device driver rejected the swapchain creation | The colour space field carried the wrong enum value (the loader's `SrgbNonlinear` did not match the spec's value 0) | Corrected the loader's `ColorSpace` enum to the published values |
+| The device driver rejected the clear-once submit for the depth image | The depth image was created without `TransferDst`, but the clear-once pass copies into it | Add `TransferDst` to the depth image's usage mask |
+| The device driver hung on the first frame submit | The loader's `PipelineStage.BottomOfPipe`/`Transfer` and `Format.D16Unorm` carried wrong enum values, so barriers and format queries drove the driver off-spec | Corrected the loader's enum values to the published ones (audited against the NDK's `vulkan_core.h`) |
+| The device driver hung on the first frame submit (the validation layers flagged `vkQueueSubmit` 240 times: "You must call vkEndCommandBuffer() before this call") | The frame's command buffer was submitted without ever being ended, and the command pool was created without `VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT` while `vkResetCommandBuffer` runs every frame | End the frame command buffer in `submitFrame()` and create the command pool with the reset flag; the Khronos validation layers now report zero spec violations on the 10-frame path |
 
 The first defect is worth noting as a design signal: the contract uses its own
 enumeration rather than GL constants, which is what keeps the null backend
 implementable. The cost is an explicit mapping, and the `glGetError` counter
 added in milestone 1 is what caught it.
+
+## Lessons learned
+
+Recorded at the close of the first full campaign (milestone 23, decision 52),
+so the next project starts from these instead of paying for them again.
+
+- **Fewer middlewares, preferably none.** Every pinned submodule is a build
+  system, a version pin, a licence and a patch queue to maintain for the life
+  of the project. OpenGrace reached its full platform matrix with one
+  middleware family (SDL2) as a submodule and every other adapter optional
+  behind a build option. The next project should treat each middleware as a
+  cost first and ask whether a small platform-neutral layer plus the platform
+  API does the same job.
+- **No proprietary middleware.** A proprietary component can disappear from
+  distribution, change its licence, or simply stop building on the toolchain
+  the project needs, and the project cannot fix any of that. Every adapter
+  here resolves an open runtime (OpenAL Soft, FreeType, libtheora, zlib) or
+  the platform's own API (XAudio2, OpenSL ES, Metal, Vulkan). The same rule
+  the GRACE 2 SDK public beta follows: the sources in this tree are all
+  original or open.
+- **Avoid error-prone languages at the boundary.** The campaign's ten
+  hardware defects were all memory- and enum-layout mistakes the compiler
+  cannot see: a wrong function pointer signature, a wrong enum value, a
+  structure field in the wrong place. In a memory-unsafe language those are
+  silent corruption on one driver and "passes everywhere" on the desktop; in
+  a language with stronger typing and no raw reinterpret casts, several of
+  them would have been caught at compile time. This is not a call to rewrite
+  the engine — it is the recorded reason a future rewrite would choose a
+  memory-safe systems language, and why the loader's hand-declared
+  structures are audited against the published layouts by a script instead of
+  trusted.
+- **Hardware runs are the only honest validation.** The Android stack passed
+  every desktop ctest for weeks and hung on the first real submit; the
+  software device (lavapipe) never punished what the mobile driver does, and
+  the Khronos validation layers only became available late in the campaign —
+  they caught the last two defects in one run. Run on the target hardware
+  before declaring a platform done, and enable the vendor validation layers
+  from the first hardware run, not the last.
+- **Pin the environment, not the machine.** The toolchain matrix (NDK r27c,
+  build-tools 36.0.0, android-37 platform jar, the pinned SDL2 submodule)
+  exists so any machine reproduces the validation. The keystore stays out of
+  the repository and the patches stay reproducible against a stated base
+  commit.
 
 ---
 

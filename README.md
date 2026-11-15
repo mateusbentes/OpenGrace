@@ -38,10 +38,10 @@ or TopWare Interactive.
   the resource container specification.
 - Keep every subsystem behind a platform-neutral contract.
 - Target Linux x86_64 with OpenGL as the implemented platform. Windows is
-  cross-compiled and validated under Wine (milestone 17) and Android remains
-  build-only (milestone 17); Android goes through Vulkan (milestone 18,
-  cross-compiled with NDK r27c, not executed on hardware), with Windows and
-  Linux Vulkan being the extra capability; see the Platforms section.
+  cross-compiled and validated under Wine (milestone 17); Android goes
+  through Vulkan (milestone 18, validated on Samsung A56 hardware, milestone
+  23), with Windows and Linux Vulkan being the extra capability; see the
+  Platforms section.
 - Validate each subsystem with deterministic tests and observable behaviour.
 - Document design decisions, limitations, and validation results clearly.
 
@@ -96,17 +96,25 @@ be read back by the overlay loader.
 | Windows x86_64 | OpenGL | Cross-compiled, validated under Wine (milestone 17) |
 | Linux x86_64 | Vulkan (extra capability) | Implemented, validated under lavapipe (milestones 18 and 19) |
 | Windows x86_64 | Vulkan (extra capability) | Cross-compiled against the winevulkan loader surface, not executed (milestone 18) |
-| Android (arm64-v8a) | Vulkan (primary target) | Cross-compiled with NDK r27c; the engine runs through the APK app shell (milestone 23, decision 52) |
+| Android (arm64-v8a) | Vulkan (primary target) | Implemented, validated on Samsung A56 hardware (Samsung Xclipse 540) through the APK app shell (milestone 23, decision 52) |
 | macOS, iOS | Metal | Compiles on any platform; mapping tests run on Linux; hardware run executed on the Apple A18 Pro (milestone 20) |
 
 Linux is implemented and validated. Windows is cross-compiled with MinGW-w64
 and validated under Wine (milestone 17): the tree builds clean under -Werror
 and the full render pipeline (context, mesh, shader, lighting, shadows, post
 chain, readback) executes under Wine. This is Wine, not a native Windows run.
-Android is recorded here so the intended scope is explicit rather than
-implied: the Vulkan backend (milestone 18) is the Android path, the tree
-cross-compiles clean for Android with NDK r27c, and the Vulkan backend has
-not been executed on Android hardware in the delivered increments.
+Android is validated on hardware: the Vulkan backend (milestone 18) is the
+Android path, the tree cross-compiles clean for Android with NDK r27c, and
+the 10-frame validation run executes on a Samsung Galaxy A56 (SM-A566E,
+Samsung Xclipse 540 driver) through the APK app shell, reporting
+`violations 0` and `Finished main function` (milestone 23, decision 52).
+The first hardware run exposed ten real defects the desktop stacks never
+punished — a wrong loader entry point signature, a double-ended command
+buffer, the undefined swapchain extent, unmasked swapchain usages, the
+portrait birth and mid-initialise rotation, the retry's stale extent, a
+wrong colour space, a depth image missing the transfer-destination usage,
+wrong pipeline stage values, and a frame command buffer never ended plus a
+command pool without the reset flag — all fixed (see implementation-status).
 
 Mobile platforms (Android and iOS) cannot run a bare executable: Android's
 `SDL_Init` needs an `Activity` with a JNI environment and an `ANativeWindow`,
@@ -134,8 +142,9 @@ by build option.
 Vulkan (milestone 18, behind `GRACE_ENABLE_VULKAN`) is the one backend for
 Android, Windows and Linux, with Android as its primary target and the other
 two as the extra capability on top of the implemented OpenGL backend. The
-Android and Windows Vulkan rows are build-only validations: the engine has
-not executed Vulkan on either.
+Android hardware run is validated (Samsung Galaxy A56, Samsung Xclipse 540,
+10 frames, violations 0, milestone 23); the Windows Vulkan row remains a
+build-only validation against the winevulkan loader surface.
 
 Milestone 19 (decision 46) closes what the presentation engine on hardware
 needs: the swap interval maps onto the present mode, the acquire retries on
@@ -255,8 +264,9 @@ cmake -S . -B build-android -G Ninja -DCMAKE_BUILD_TYPE=Debug \
   -DGRACE_ENABLE_VULKAN=ON
 ```
 
-The Android build is validated as build-only (the binaries are not
-executed on hardware in the delivered increments).
+The Android build is validated on hardware: the APK's 10-frame run executes
+on a Samsung Galaxy A56 (Samsung Xclipse 540 driver) and reports
+`violations 0` with `Finished main function` (milestone 23, decision 52).
 
 The OpenSL ES audio backend adds one option on the same configure:
 `-DGRACE_ENABLE_OPENSL=ON`. The backend links the `OpenSLES` system

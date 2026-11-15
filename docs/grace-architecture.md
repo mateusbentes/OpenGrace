@@ -209,18 +209,19 @@ as a decision rather than folded in as if it were fidelity.
 
 ## 4. Target mapping for OpenGrace
 
-OpenGrace implements Linux x86_64 with OpenGL, and records Windows and Android
-as planned targets. This is a subset of the original platform matrix, and the
-implemented part is well supported: OpenGL 3.0+ was a documented GRACE 2
-target. Android goes through Vulkan, not OpenGL ES (decision 43): Vulkan is
-the single backend that covers Android, Windows and Linux, with Windows and
-Linux Vulkan being the extra capability (see 4.5). The Vulkan backend is
-implemented in milestone 18 and validated on Linux under lavapipe; the
-Windows and Android validation is build-only (cross-compile clean, not
-executed on either platform). macOS and iOS go through Metal
-(milestone 20, decision 47): the backend is implemented behind
-`GRACE_ENABLE_METAL` and compiles on any platform, with the hardware
-run executed on the Apple A18 Pro.
+OpenGrace implements Linux x86_64 with OpenGL, and records Windows and
+Android as planned targets. This is a subset of the original platform
+matrix, and the implemented part is well supported: OpenGL 3.0+ was a
+documented GRACE 2 target. Android goes through Vulkan, not OpenGL ES
+(decision 43): Vulkan is the single backend that covers Android, Windows
+and Linux, with Windows and Linux Vulkan being the extra capability
+(see 4.5). The Vulkan backend is implemented in milestone 18 and validated
+on Linux under lavapipe; the Windows Vulkan validation is build-only
+(cross-compile clean, not executed), and the Android hardware run executes
+on a Samsung Galaxy A56 (Samsung Xclipse 540, milestone 23, decision 52).
+macOS and iOS go through Metal (milestone 20, decision 47): the backend is
+implemented behind `GRACE_ENABLE_METAL` and compiles on any platform, with
+the hardware run executed on the Apple A18 Pro.
 
 | GRACE 2 area | OpenGrace approach |
 | --- | --- |
@@ -290,7 +291,7 @@ script layer holding behaviour rather than authoritative state.
 | Windows x86_64 | OpenGL | Cross-compiled, validated under Wine (milestone 17) |
 | Linux x86_64 | Vulkan (extra capability) | Implemented, validated under lavapipe (milestones 18 and 19) |
 | Windows x86_64 | Vulkan (extra capability) | Cross-compiled against the winevulkan loader surface, not executed (milestone 18) |
-| Android (arm64-v8a) | Vulkan (primary target) | Cross-compiled with NDK r27c; the engine runs through the APK app shell (milestone 23, decision 52) |
+| Android (arm64-v8a) | Vulkan (primary target) | Implemented, validated on Samsung A56 hardware (Samsung Xclipse 540) through the APK app shell (milestone 23, decision 52) |
 | macOS, iOS | Metal | Compiles on any platform (the loader declares its own types); mapping tests run on Linux; hardware run executed on the Apple A18 Pro (milestone 20) |
 
 Linux is implemented and validated. Windows is cross-compiled with MinGW-w64
@@ -304,9 +305,11 @@ Vulkan backend (milestone 18, decisions 43 and 44) implements the same
 38-method contract for all three platforms: validated on Linux under
 lavapipe, cross-compiled clean under -Werror for Windows (the local loader
 resolves through SDL's Vulkan bridge, so winevulkan's surface needs no
-generated headers) and for Android with NDK r27c (arm64-v8a) — the Android
-and Windows validation is build-only, and the engine has not executed Vulkan
-on either. Milestone 19 (decision 46) closes what a real presentation engine
+generated headers) and for Android with NDK r27c (arm64-v8a). The Android
+hardware run executes on a Samsung Galaxy A56 (Samsung Xclipse 540): the
+10-frame validation path reports `violations 0` through the APK app shell
+(milestone 23, decision 52); the Windows Vulkan path remains build-only
+validation. Milestone 19 (decision 46) closes what a real presentation engine
 needs: the swap interval's present mode, the acquire retry on the out-of-date
 resize, the depth attachment format picked from the device's format
 properties, and the sampler descriptors written at draw time from the bound
