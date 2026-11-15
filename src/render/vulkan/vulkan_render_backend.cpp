@@ -116,7 +116,7 @@ vulkan::Format pickDepthFormat(vulkan::VkLoader& loader,
 }
 
 /// The SDL_Vulkan bridge's vkGetInstanceProcAddr, matching the loader's
-/// ResolveFn signature (void* (*)(const char*)).
+/// ResolveFn signature (the real vkGetInstanceProcAddr signature).
 vulkan::VkLoader::ResolveFn sdlResolve()
 {
     return reinterpret_cast<vulkan::VkLoader::ResolveFn>(
@@ -1358,6 +1358,30 @@ struct VulkanRenderBackend::Impl
             }
         }
         swapchainExtent = caps.currentExtent;
+        if (swapchainExtent.width == 0xFFFFFFFFu
+            || swapchainExtent.height == 0xFFFFFFFFu)
+        {
+            // The surface's extent is undefined (an Android surface
+            // mid-rotation reports it): the swapchain's extent chooses the
+            // window size, clamped to the surface's limits.
+            int w = 0;
+            int h = 0;
+            SDL_GetWindowSize(window, &w, &h);
+            swapchainExtent.width = static_cast<std::uint32_t>(w);
+            swapchainExtent.height = static_cast<std::uint32_t>(h);
+            if (caps.minImageExtent.width != 0)
+                swapchainExtent.width = std::max(swapchainExtent.width,
+                                                  caps.minImageExtent.width);
+            if (caps.maxImageExtent.width != 0)
+                swapchainExtent.width = std::min(swapchainExtent.width,
+                                                  caps.maxImageExtent.width);
+            if (caps.minImageExtent.height != 0)
+                swapchainExtent.height = std::max(swapchainExtent.height,
+                                                   caps.minImageExtent.height);
+            if (caps.maxImageExtent.height != 0)
+                swapchainExtent.height = std::min(swapchainExtent.height,
+                                                   caps.maxImageExtent.height);
+        }
         vulkan::VkSwapchainCreateInfoKHR swapInfo{};
         swapInfo.surface = surface;
         swapInfo.minImageCount = caps.minImageCount + 1;
@@ -1367,10 +1391,21 @@ struct VulkanRenderBackend::Impl
         swapInfo.imageFormat = swapchainFormat;
         swapInfo.imageColorSpace = vulkan::ColorSpace::SrgbNonlinear;
         swapInfo.imageExtent = swapchainExtent;
-        swapInfo.imageUsage = static_cast<vulkan::VkFlags>(
-            vulkan::ImageUsage::ColorAttachment
-            | vulkan::ImageUsage::TransferSrc);
-        swapInfo.preTransform = vulkan::SurfaceTransform::Identity;
+        // Mobile drivers frequently restrict the swapchain's images to the
+        // colour attachment use: ask for the transfer source only when the
+        // surface advertises it, and follow the surface's current transform
+        // (an Android surface mid-rotation reports a rotation).
+        vulkan::VkFlags usage = static_cast<vulkan::VkFlags>(
+            vulkan::ImageUsage::ColorAttachment);
+        if (caps.supportedUsageFlags
+            & static_cast<vulkan::VkFlags>(
+                vulkan::ImageUsage::TransferSrc))
+        {
+            usage |= static_cast<vulkan::VkFlags>(
+                vulkan::ImageUsage::TransferSrc);
+        }
+        swapInfo.imageUsage = usage;
+        swapInfo.preTransform = caps.currentTransform;
         swapInfo.compositeAlpha = vulkan::CompositeAlpha::Opaque;
         // The swap interval maps onto the present mode: 0 is the
         // immediate mode, which a device may not carry — the query
@@ -1394,11 +1429,69 @@ struct VulkanRenderBackend::Impl
             }
         }
         swapInfo.clipped = 1;
-        if (loader.vkCreateSwapchainKHR(device, &swapInfo, nullptr,
-                                        &swapchain)
-            != vulkan::Result::Success)
+        // An Android surface's extent is reported mid-resize: the first
+        // attempt can carry a stale extent (the Mali driver requires the
+        // swapchain's extent to match the current window size exactly), so
+        // each retry re-queries the surface's capabilities and refreshes
+        // the caps-dependent fields before creating again. The desktop's
+        // first attempt always succeeds, so this changes nothing there.
+        vulkan::Result swapchain_result = vulkan::Result::ErrorInitializationFailed;
+        for (int attempt = 0; attempt < 20; ++attempt)
+        {
+            if (attempt > 0)
+            {
+                vulkan::VkSurfaceCapabilitiesKHR retry_caps{};
+                if (loader.vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
+                        physicalDevice, surface, &retry_caps)
+                    == vulkan::Result::Success)
+                {
+                    vulkan::VkExtent2D retry_extent = retry_caps.currentExtent;
+                    if (retry_extent.width == 0xFFFFFFFFu
+                        || retry_extent.height == 0xFFFFFFFFu)
+                    {
+                        int w = 0;
+                        int h = 0;
+                        SDL_GetWindowSize(window, &w, &h);
+                        retry_extent.width = static_cast<std::uint32_t>(w);
+                        retry_extent.height = static_cast<std::uint32_t>(h);
+                    }
+                    if (retry_caps.minImageExtent.width != 0)
+                        retry_extent.width = std::max(
+                            retry_extent.width,
+                            retry_caps.minImageExtent.width);
+                    if (retry_caps.maxImageExtent.width != 0)
+                        retry_extent.width = std::min(
+                            retry_extent.width,
+                            retry_caps.maxImageExtent.width);
+                    if (retry_caps.minImageExtent.height != 0)
+                        retry_extent.height = std::max(
+                            retry_extent.height,
+                            retry_caps.minImageExtent.height);
+                    if (retry_caps.maxImageExtent.height != 0)
+                        retry_extent.height = std::min(
+                            retry_extent.height,
+                            retry_caps.maxImageExtent.height);
+                    swapchainExtent = retry_extent;
+                    swapInfo.imageExtent = swapchainExtent;
+                    swapInfo.preTransform = retry_caps.currentTransform;
+                    swapInfo.minImageCount = retry_caps.minImageCount + 1;
+                    if (retry_caps.maxImageCount != 0
+                        && swapInfo.minImageCount > retry_caps.maxImageCount)
+                        swapInfo.minImageCount = retry_caps.maxImageCount;
+                }
+            }
+            swapchain_result = loader.vkCreateSwapchainKHR(
+                device, &swapInfo, nullptr, &swapchain);
+            if (swapchain_result == vulkan::Result::Success)
+                break;
+            SDL_Delay(50);
+        }
+        if (swapchain_result != vulkan::Result::Success)
             throw std::runtime_error(
-                "VulkanRenderBackend: vkCreateSwapchainKHR failed");
+                "VulkanRenderBackend: vkCreateSwapchainKHR failed ("
+                + std::to_string(static_cast<std::int32_t>(
+                    swapchain_result))
+                + ")");
         std::uint32_t image_count = 0;
         loader.vkGetSwapchainImagesKHR(device, swapchain, &image_count,
                                        nullptr);
@@ -1418,7 +1511,13 @@ struct VulkanRenderBackend::Impl
             depthFormat, swapchainExtent.width, swapchainExtent.height,
             static_cast<vulkan::VkFlags>(
                 vulkan::ImageUsage::DepthStencilAttachment
-                | vulkan::ImageUsage::TransferSrc),
+                | vulkan::ImageUsage::TransferSrc
+                // The startup's clear-once pass runs
+                // vkCmdClearDepthStencilImage against this image, which
+                // requires the transfer-destination usage (lavapipe
+                // tolerates its absence, a strict driver such as Mali's
+                // does not).
+                | vulkan::ImageUsage::TransferDst),
             static_cast<vulkan::VkFlags>(vulkan::SampleCount::One));
         vulkan::VkMemoryRequirements depthRequirements{};
         loader.vkGetImageMemoryRequirements(device, swapchainDepthImage,
@@ -1471,7 +1570,6 @@ struct VulkanRenderBackend::Impl
                         vulkan::ImageAspect::Stencil)),
                 vulkan::ImageLayout::TransferDstOptimal,
                 vulkan::ImageLayout::DepthStencilAttachmentOptimal);
-            loader.vkEndCommandBuffer(oneOff);
             submitOneOff(oneOff);
         }
     }
@@ -2424,6 +2522,13 @@ struct VulkanRenderBackend::Impl
             pass_open = false;
         }
         frame_open = false;
+        // The frame's command buffer ends here: the spec requires
+        // vkEndCommandBuffer before vkQueueSubmit (lavapipe tolerates
+        // the missing end, a strict driver such as Mali's does not).
+        if (loader.vkEndCommandBuffer(commandBuffer)
+            != vulkan::Result::Success)
+            throw std::runtime_error(
+                "VulkanRenderBackend: vkEndCommandBuffer failed");
         loader.vkResetFences(device, 1, &frameDone);
         vulkan::VkSubmitInfo submit{};
         submit.commandBufferCount = 1;
@@ -2757,6 +2862,8 @@ void VulkanRenderBackend::initialise()
 
     vulkan::VkCommandPoolCreateInfo poolInfo{};
     poolInfo.queueFamilyIndex = impl.queueFamily;
+    poolInfo.flags = static_cast<vulkan::VkFlags>(
+        vulkan::CommandPoolCreate::ResetCommandBuffer);
     if (impl.loader.vkCreateCommandPool(impl.device, &poolInfo, nullptr,
                                         &impl.commandPool)
         != vulkan::Result::Success)
@@ -2819,7 +2926,6 @@ void VulkanRenderBackend::initialise()
             oneOff, impl.defaultImage, vulkan::ImageAspect::Color,
             vulkan::ImageLayout::TransferDstOptimal,
             vulkan::ImageLayout::ShaderReadOnlyOptimal);
-        impl.loader.vkEndCommandBuffer(oneOff);
         impl.submitOneOff(oneOff);
         impl.loader.vkDestroyBuffer(impl.device, stagingBuffer, nullptr);
         // The staging memory stays in memory_blocks: the shutdown's free

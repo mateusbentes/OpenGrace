@@ -42,6 +42,7 @@
             android:label="@string/app_name"
             android:alwaysRetainTaskState="true"
             android:launchMode="singleInstance"
+            android:screenOrientation="sensorLandscape"
             android:configChanges="layoutDirection|locale|orientation|screenLayout|smallestScreenSize|screenSize|uiMode|keyboard|keyboardHidden|navigation"
             android:preferMinimalPostProcessing="true"
             android:exported="true"

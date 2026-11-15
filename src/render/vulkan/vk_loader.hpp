@@ -66,7 +66,7 @@ enum class Format : std::uint32_t
     R16G16B16A16Sfloat = 97,
     D24UnormS8Uint = 129,
     D32Sfloat = 126,
-    D16Unorm = 125,
+    D16Unorm = 124,
     R32Uint = 98,
     R32Sint = 99,
     Rg32Sint = 102,
@@ -121,13 +121,13 @@ enum class MemoryProperty : std::uint32_t
 enum class PipelineStage : std::uint32_t
 {
     TopOfPipe = 0x1u,
-    BottomOfPipe = 0x2u,
-    VertexInput = 0x10u,
+    VertexInput = 0x4u,
     FragmentShader = 0x80u,
     EarlyFragmentTests = 0x100u,
     LateFragmentTests = 0x200u,
     ColorAttachmentOutput = 0x400u,
-    Transfer = 0x2000u,
+    Transfer = 0x1000u,
+    BottomOfPipe = 0x2000u,
     AllCommands = 0x10000u,
 };
 
@@ -278,6 +278,11 @@ enum class CommandBufferUsage : std::uint32_t
     OneTimeSubmit = 0x1u,
 };
 
+enum class CommandPoolCreate : std::uint32_t
+{
+    ResetCommandBuffer = 0x2u,
+};
+
 enum class FenceCreate : std::uint32_t
 {
     Signaled = 0x1u,
@@ -344,7 +349,13 @@ enum class SharingMode : std::uint32_t
 
 enum class ColorSpace : std::uint32_t
 {
-    SrgbNonlinear = 2,
+    SrgbNonlinear = 0,
+};
+
+enum class BorderColor : std::uint32_t
+{
+    FloatTransparentBlack = 0,
+    FloatOpaqueBlack = 2,
 };
 
 enum class CompositeAlpha : std::uint32_t
@@ -993,7 +1004,7 @@ struct VkSamplerCreateInfo
     CompareOp compareOp = CompareOp::Always;
     float minLod = 0.0f;
     float maxLod = 0.0f;
-    ColorSpace borderColor = ColorSpace::SrgbNonlinear;
+    BorderColor borderColor = BorderColor::FloatOpaqueBlack;
     VkBool32 unnormalizedCoordinates = 0;
 };
 
@@ -1607,10 +1618,11 @@ using FnAllocateCommandBuffer = Result (*)(VkDevice,
 class VkLoader
 {
 public:
-    /// Matches SDL_Vulkan_GetInstanceProcAddress on Linux x86_64: the
-    /// loader-global entry points are resolved through it, and the device
-    /// ones through vkGetDeviceProcAddr, which is itself resolved here.
-    using ResolveFn = void* (*)(const char*);
+    /// Matches the real vkGetInstanceProcAddr signature: the instance
+    /// handle is null while resolving the loader-global entry points, and
+    /// the device ones are resolved through vkGetDeviceProcAddr, which is
+    /// itself resolved here.
+    using ResolveFn = void* (*)(VkInstance, const char*);
 
     /// Resolves the loader-global entry points (the ones callable before an
     /// instance exists) from the given callback. Returns false and sets

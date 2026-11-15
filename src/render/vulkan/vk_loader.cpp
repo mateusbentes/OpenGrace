@@ -4,14 +4,13 @@ namespace grace::render {
 namespace vulkan {
 namespace {
 
-// The resolver for the loader-global entry points. The callback is whatever
-// the backend was given: on Linux x86_64 the SDL_Vulkan_GetProcAddress
-// family dispatches the call, on Windows and Android the loader-global
-// entry points are callable without an instance handle.
-bool resolve(void* (*resolveFn)(const char*), const char* name,
+// The resolver for the loader-global entry points. The callback is the real
+// vkGetInstanceProcAddr signature; the loader-global entry points are
+// resolved against a null instance handle.
+bool resolve(VkLoader::ResolveFn resolveFn, const char* name,
              void** target, std::string& missingSymbol)
 {
-    *target = resolveFn(name);
+    *target = resolveFn(nullptr, name);
     if (*target == nullptr)
     {
         missingSymbol = name;
@@ -59,7 +58,7 @@ bool VkLoader::load(ResolveFn resolveFn, std::string& missingSymbol)
         missingSymbol = "resolve callback";
         return false;
     }
-    if (!resolve(reinterpret_cast<void* (*)(const char*)>(resolveFn),
+    if (!resolve(resolveFn,
                  "vkGetInstanceProcAddr",
                  reinterpret_cast<void**>(&vkGetInstanceProcAddr),
                  missingSymbol))
