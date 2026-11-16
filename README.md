@@ -1,5 +1,9 @@
 # OpenGrace
 
+> **Status: discontinued.** Development of this project has stopped and the
+> repository is archived on GitHub. It is kept as a historical record of the
+> C++ implementation.
+
 Independent, source-only reimplementation of the GRACE 2 engine architecture,
 targeting native Linux x86_64 with OpenGL. Apache-2.0 licensed.
 
